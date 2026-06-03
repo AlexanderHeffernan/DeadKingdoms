@@ -12,6 +12,10 @@ const MIME = {
   ".json": "application/json; charset=utf-8",
 };
 
+// If a client's outgoing buffer exceeds this many bytes we skip sending it
+// the next snapshot to avoid runaway memory and "seconds-behind" lag.
+const BACKPRESSURE_BYTES = 256 * 1024;
+
 export function createHandler(world, clients) {
   return async function handler(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -26,7 +30,14 @@ export function createHandler(world, clients) {
 
 export function broadcast(world, clients) {
   for (const client of clients) {
-    client.res.write(`data: ${JSON.stringify(makeSnapshot(world, client.playerId))}\n\n`);
+    if (client.res.writableEnded || client.res.destroyed) continue;
+    if (client.res.writableLength > BACKPRESSURE_BYTES) {
+      // Drop this snapshot for this client; they'll catch up on a later tick
+      // once their kernel buffer drains.
+      continue;
+    }
+    const payload = JSON.stringify(makeSnapshot(world, client.playerId, client.sentExplored));
+    client.res.write(`data: ${payload}\n\n`);
   }
 }
 
@@ -57,9 +68,13 @@ function streamEvents(req, res, world, clients, url) {
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
-  const client = { playerId, res };
+  // sentExplored is null for the first snapshot (server then sends the full
+  // explored set). After that we populate the Set so subsequent snapshots
+  // only carry the new tiles in `exploredDelta`.
+  const client = { playerId, res, sentExplored: null };
   clients.add(client);
-  res.write(`data: ${JSON.stringify(makeSnapshot(world, playerId))}\n\n`);
+  res.write(`data: ${JSON.stringify(makeSnapshot(world, playerId, null))}\n\n`);
+  client.sentExplored = new Set(world.players[playerId]?.explored || []);
   req.on("close", () => clients.delete(client));
 }
 

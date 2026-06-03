@@ -66,13 +66,15 @@ export class Renderer {
   }
 
   drawTiles(size, camera, visibility) {
+    const exploredSet = visibility?.exploredSet;
+    const visibleSet = visibility?.visibleSet;
     for (let y = 0; y < size; y += 1) {
       for (let x = 0; x < size; x += 1) {
-        const key = `${x},${y}`;
-        if (visibility && !visibility.explored.includes(key)) continue;
+        const key = y * size + x;
+        if (visibility && !exploredSet.has(key)) continue;
         const screen = isoToScreen(x, y, camera);
         if (screen.x < -80 || screen.x > window.innerWidth + 80 || screen.y < -50 || screen.y > window.innerHeight + 80) continue;
-        const visible = !visibility || visibility.visible.includes(key);
+        const visible = !visibility || visibleSet.has(key);
         const color = visible ? tileColors[(x + y) % tileColors.length] : "#1e3025";
         this.drawTile(screen.x, screen.y, color, visible);
       }
@@ -250,11 +252,12 @@ export class Renderer {
       ...Object.keys(state.snapshot.resources),
       ...Object.keys(state.snapshot.ruins),
     ]);
+    const mapSize = state.snapshot.map.size;
     const remembered = [
       ...Object.values(state.lastSeen.buildings),
       ...Object.values(state.lastSeen.resources),
       ...Object.values(state.lastSeen.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
-    ].filter((entity) => !visibleIds.has(entity.id) && isExplored(state.snapshot.visibility, entity.x, entity.y, entity.size || 1));
+    ].filter((entity) => !visibleIds.has(entity.id) && isExplored(state.snapshot.visibility, entity.x, entity.y, entity.size || 1, mapSize));
     this.ctx.globalAlpha = 0.35;
     for (const entity of remembered.sort((a, b) => (a.x + a.y) - (b.x + b.y))) this.drawEntity(entity, state, view);
     this.ctx.globalAlpha = 1;
@@ -279,13 +282,17 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
 
-    const explored = new Set(state.snapshot.visibility?.explored || []);
-    const visible = new Set(state.snapshot.visibility?.visible || []);
-    for (const key of explored) {
-      const [x, y] = key.split(",").map(Number);
-      const p = project(x + 0.5, y + 0.5);
-      ctx.fillStyle = visible.has(key) ? "#356743" : "#223629";
-      ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
+    const visibility = state.snapshot.visibility;
+    const exploredSet = visibility?.exploredSet;
+    const visibleSet = visibility?.visibleSet;
+    if (exploredSet) {
+      for (const key of exploredSet) {
+        const x = key % size;
+        const y = Math.floor(key / size);
+        const p = project(x + 0.5, y + 0.5);
+        ctx.fillStyle = visibleSet?.has(key) ? "#356743" : "#223629";
+        ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
+      }
     }
     for (const building of Object.values(state.snapshot.buildings)) {
       const player = state.snapshot.players[building.ownerId];
@@ -347,11 +354,12 @@ function shade(hex, factor) {
   return `rgb(${r} ${g} ${b})`;
 }
 
-function isExplored(visibility, x, y, size) {
-  const explored = new Set(visibility.explored || []);
+function isExplored(visibility, x, y, size, mapSize) {
+  const explored = visibility?.exploredSet;
+  if (!explored) return false;
   for (let yy = Math.floor(y); yy < Math.ceil(y + size); yy += 1) {
     for (let xx = Math.floor(x); xx < Math.ceil(x + size); xx += 1) {
-      if (explored.has(`${xx},${yy}`)) return true;
+      if (explored.has(yy * mapSize + xx)) return true;
     }
   }
   return false;

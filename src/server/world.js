@@ -1,6 +1,6 @@
 import { BUILDING_DEFS, COLORS, FARM_FOOD, FARM_REPLENISH_COST, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, UNIT_DEFS } from "../shared/config.js";
 import { id } from "./id.js";
-import { clamp, distance, moveToward, rectsOverlap } from "./math.js";
+import { clamp, distance, moveToward } from "./math.js";
 
 const SPAWNS = [
   { x: 8, y: 8 },
@@ -31,6 +31,7 @@ export function createWorld() {
     tick: 0,
   };
   seedResources(world);
+  rebuildOccupancy(world);
   return world;
 }
 
@@ -92,6 +93,9 @@ export function removePlayer(world, playerId) {
 export function command(world, playerId, body) {
   const player = world.players[playerId];
   if (!player || player.defeated) return { ok: false, error: "Player unavailable." };
+  // Keep the occupancy grid fresh for canPlace / pathfinding when multiple
+  // commands arrive between simulation ticks.
+  rebuildOccupancy(world);
   if (body.type === "move") return commandMove(world, playerId, body);
   if (body.type === "build") return commandBuild(world, playerId, body);
   if (body.type === "train") return commandTrain(world, playerId, body);
@@ -104,11 +108,42 @@ export function command(world, playerId, body) {
 
 export function stepWorld(world, dt) {
   world.tick += 1;
+  rebuildOccupancy(world);
   stepResourceDecay(world, dt);
   for (const unit of Object.values(world.units)) stepUnit(world, unit, dt);
   for (const building of Object.values(world.buildings)) stepBuilding(world, building, dt);
   for (const playerId of Object.keys(world.players)) recalcPlayer(world, playerId);
   updateLeaderboard(world);
+}
+
+function rebuildOccupancy(world) {
+  const size = MAP_SIZE;
+  if (!world._occupancy || world._occupancy.length !== size * size) {
+    world._occupancy = new Uint8Array(size * size);
+  } else {
+    world._occupancy.fill(0);
+  }
+  const grid = world._occupancy;
+  for (const resource of Object.values(world.resources)) {
+    const x = Math.floor(resource.x);
+    const y = Math.floor(resource.y);
+    if (x >= 0 && y >= 0 && x < size && y < size) grid[y * size + x] = 1;
+  }
+  for (const building of Object.values(world.buildings)) {
+    for (let dy = 0; dy < building.size; dy += 1) {
+      for (let dx = 0; dx < building.size; dx += 1) {
+        const x = building.x + dx;
+        const y = building.y + dy;
+        if (x >= 0 && y >= 0 && x < size && y < size) grid[y * size + x] = 1;
+      }
+    }
+  }
+}
+
+function occupied(world, x, y) {
+  if (!world._occupancy) return false;
+  if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) return true;
+  return world._occupancy[y * MAP_SIZE + x] === 1;
 }
 
 function seedResources(world) {
@@ -277,7 +312,17 @@ function commandGather(world, playerId, body) {
   if (!resource) return { ok: false, error: "Invalid resource." };
   if (resource.type === "farm" && resource.ownerId !== playerId) return { ok: false, error: "You can only work your own farms." };
   forOwnUnits(world, playerId, body.unitIds, (unit) => {
-    if (UNIT_DEFS[unit.type].canGather) unit.command = { type: "gather", targetId: resource.id, progress: 0, path: null };
+    if (UNIT_DEFS[unit.type].canGather) {
+      unit.command = {
+        type: "gather",
+        targetId: resource.id,
+        // Remember what this villager was after so we can auto-find another
+        // tree / ore vein / farm when the current target is gone.
+        resourceKind: resource.resource,
+        progress: 0,
+        path: null,
+      };
+    }
   });
   return { ok: true };
 }
@@ -414,7 +459,20 @@ function stepGather(world, unit, command, dt) {
     return;
   }
   if (!resource || resource.amount <= 0 || !UNIT_DEFS[unit.type].canGather) {
-    if (resource?.kind === "building" && resource.type === "farm") maybeAutoReplenishFarm(world, resource);
+    if (resource?.kind === "building" && resource.type === "farm") {
+      maybeAutoReplenishFarm(world, resource);
+      // If auto-replenish refilled the farm, keep working it.
+      if (resource.amount > 0) return;
+    }
+    // Try to find another source of the same resource type so the villager
+    // keeps working without manual re-targeting.
+    const next = findNextResource(world, unit, command.resourceKind);
+    if (next) {
+      command.targetId = next.id;
+      command.path = null;
+      command.progress = 0;
+      return;
+    }
     unit.command = { type: "idle" };
     return;
   }
@@ -475,6 +533,32 @@ function autoAcquire(world, unit) {
   if (unit.type !== "soldier") return;
   const target = nearestEnemy(world, unit, 5.5);
   if (target) unit.command = { type: "attack", targetId: target.id };
+}
+
+function findNextResource(world, unit, resourceKind) {
+  if (!resourceKind) return null;
+  const RANGE = 30;
+  let best = null;
+  let bestDist = RANGE;
+  for (const r of Object.values(world.resources)) {
+    if (r.amount <= 0 || r.resource !== resourceKind) continue;
+    const d = distance(unit, r);
+    if (d < bestDist) {
+      best = r;
+      bestDist = d;
+    }
+  }
+  if (resourceKind === "food") {
+    for (const b of Object.values(world.buildings)) {
+      if (b.ownerId !== unit.ownerId || b.type !== "farm" || (b.amount || 0) <= 0) continue;
+      const d = distance(unit, b);
+      if (d < bestDist) {
+        best = b;
+        bestDist = d;
+      }
+    }
+  }
+  return best;
 }
 
 function nearestDepot(world, ownerId, resource, source) {
@@ -546,13 +630,11 @@ function defeatPlayer(world, playerId, attackerId) {
 }
 
 function canPlace(world, x, y, size) {
-  const rect = { x, y, size };
   if (x < 0 || y < 0 || x + size >= MAP_SIZE || y + size >= MAP_SIZE) return false;
-  for (const building of Object.values(world.buildings)) {
-    if (rectsOverlap(rect, building)) return false;
-  }
-  for (const resource of Object.values(world.resources)) {
-    if (resource.x >= x && resource.x < x + size && resource.y >= y && resource.y < y + size) return false;
+  for (let dy = 0; dy < size; dy += 1) {
+    for (let dx = 0; dx < size; dx += 1) {
+      if (occupied(world, x + dx, y + dy)) return false;
+    }
   }
   return true;
 }
@@ -594,16 +676,16 @@ function moveNearTarget(world, unit, command, target, range, maxStep) {
 function isUnitBlocked(world, unit, target) {
   const tileX = Math.floor(unit.x);
   const tileY = Math.floor(unit.y);
-  for (const resource of Object.values(world.resources)) {
-    if (Math.floor(resource.x) === tileX && Math.floor(resource.y) === tileY && distance(unit, target) > 1.6) return true;
-  }
+  if (!occupied(world, tileX, tileY)) return false;
+  // Check if the occupant is a building the unit is standing on (e.g. just spawned)
   for (const building of Object.values(world.buildings)) {
     if (unit.x >= building.x && unit.x < building.x + building.size && unit.y >= building.y && unit.y < building.y + building.size) {
       if (distance(unit, target) <= building.size + 0.8) return false;
       return true;
     }
   }
-  return false;
+  // Otherwise it's a resource tile: blocked unless we're close to our target.
+  return distance(unit, target) > 1.6;
 }
 
 function findPath(world, unit, target) {
@@ -634,8 +716,8 @@ function findPath(world, unit, target) {
     for (const dir of dirs) {
       const next = { x: current.x + dir.x, y: current.y + dir.y };
       if (!isInMap(next.x, next.y) || closed.has(key(next))) continue;
-      if (!isWalkable(world, next.x, next.y, unit) && !(next.x === goal.x && next.y === goal.y)) continue;
-      if (dir.x !== 0 && dir.y !== 0 && (!isWalkable(world, current.x + dir.x, current.y, unit) || !isWalkable(world, current.x, current.y + dir.y, unit))) continue;
+      if (!isWalkable(world, next.x, next.y) && !(next.x === goal.x && next.y === goal.y)) continue;
+      if (dir.x !== 0 && dir.y !== 0 && (!isWalkable(world, current.x + dir.x, current.y) || !isWalkable(world, current.x, current.y + dir.y))) continue;
       const cost = current.g + (dir.x !== 0 && dir.y !== 0 ? 1.4 : 1);
       const existing = best.get(key(next));
       if (existing && existing.g <= cost) continue;
@@ -669,15 +751,9 @@ function nearestWalkableAround(world, target) {
   return best;
 }
 
-function isWalkable(world, x, y, unit = null) {
+function isWalkable(world, x, y) {
   if (!isInMap(x, y)) return false;
-  for (const resource of Object.values(world.resources)) {
-    if (Math.floor(resource.x) === x && Math.floor(resource.y) === y) return false;
-  }
-  for (const building of Object.values(world.buildings)) {
-    if (x >= building.x && x < building.x + building.size && y >= building.y && y < building.y + building.size) return false;
-  }
-  return true;
+  return !occupied(world, x, y);
 }
 
 function isInMap(x, y) {

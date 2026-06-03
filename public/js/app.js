@@ -11,6 +11,9 @@ const state = {
   snapshot: null,
   selectedIds: new Set(),
   lastSeen: { buildings: {}, resources: {}, ruins: {} },
+  // Persistent fog-of-war memory. Server sends only newly-discovered tile keys
+  // each tick as `visibility.exploredDelta`; the client accumulates them.
+  exploredSet: new Set(),
 };
 
 const view = {
@@ -101,13 +104,27 @@ function enterGame() {
 function connectEvents() {
   const events = new EventSource(`/events?playerId=${encodeURIComponent(state.playerId)}`);
   events.onmessage = (event) => {
-    state.snapshot = JSON.parse(event.data);
+    const snap = JSON.parse(event.data);
+    applyVisibility(snap);
+    state.snapshot = snap;
     rememberStaticObjects();
     cullSelection();
     ui.render();
     centerOnTownOnce();
   };
   events.onerror = () => ui.showToast("Connection interrupted.");
+}
+
+function applyVisibility(snap) {
+  if (!snap.visibility) return;
+  if (Array.isArray(snap.visibility.explored)) {
+    // Initial / full set
+    state.exploredSet = new Set(snap.visibility.explored);
+  } else if (Array.isArray(snap.visibility.exploredDelta)) {
+    for (const key of snap.visibility.exploredDelta) state.exploredSet.add(key);
+  }
+  snap.visibility.visibleSet = new Set(snap.visibility.visible);
+  snap.visibility.exploredSet = state.exploredSet;
 }
 
 let centered = false;
