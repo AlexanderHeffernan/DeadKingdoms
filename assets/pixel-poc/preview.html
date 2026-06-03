@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RTS Pixel POC</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #171717;
+        color: #f4efe6;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+
+      main {
+        width: min(900px, calc(100vw - 16px));
+        display: grid;
+        gap: 24px;
+      }
+
+      .field {
+        min-height: 500px;
+        position: relative;
+        overflow: hidden;
+        border: 1px solid #4b4a42;
+        background: #315f3c;
+      }
+
+      .grid {
+        position: absolute;
+        inset: 0;
+      }
+
+      .tile {
+        position: absolute;
+        width: 64px;
+        height: 32px;
+        background: #345f3e;
+        clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+        box-shadow: inset 0 0 0 1px #274a32;
+      }
+
+      .tile:nth-child(2n) {
+        background: #386846;
+      }
+
+      .tile:nth-child(3n) {
+        background: #2f5739;
+      }
+
+      .asset {
+        position: absolute;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        transform-origin: bottom center;
+      }
+
+      .town,
+      .soldier {
+        filter: drop-shadow(0 6px 0 rgb(0 0 0 / 0.16));
+      }
+
+      .town {
+        width: 256px;
+        left: 328px;
+        top: 140px;
+      }
+
+      .soldier {
+        width: 80px;
+        left: 278px;
+        top: 310px;
+      }
+
+      .soldier.alt {
+        left: 570px;
+        top: 300px;
+        transform: scaleX(-1);
+      }
+
+      .swatches {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        color: #cfc7b7;
+        font-size: 14px;
+      }
+
+      .chip {
+        width: 24px;
+        height: 24px;
+        border: 1px solid rgb(255 255 255 / 0.25);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="field" aria-label="Pixel art proof of concept">
+        <div class="grid" aria-hidden="true">
+          <span class="tile" style="left: 386px; top: 120px"></span>
+          <span class="tile" style="left: 322px; top: 152px"></span>
+          <span class="tile" style="left: 386px; top: 152px"></span>
+          <span class="tile" style="left: 450px; top: 152px"></span>
+          <span class="tile" style="left: 258px; top: 184px"></span>
+          <span class="tile" style="left: 322px; top: 184px"></span>
+          <span class="tile" style="left: 386px; top: 184px"></span>
+          <span class="tile" style="left: 450px; top: 184px"></span>
+          <span class="tile" style="left: 514px; top: 184px"></span>
+          <span class="tile" style="left: 194px; top: 216px"></span>
+          <span class="tile" style="left: 258px; top: 216px"></span>
+          <span class="tile" style="left: 322px; top: 216px"></span>
+          <span class="tile" style="left: 386px; top: 216px"></span>
+          <span class="tile" style="left: 450px; top: 216px"></span>
+          <span class="tile" style="left: 514px; top: 216px"></span>
+          <span class="tile" style="left: 578px; top: 216px"></span>
+          <span class="tile" style="left: 130px; top: 248px"></span>
+          <span class="tile" style="left: 194px; top: 248px"></span>
+          <span class="tile" style="left: 258px; top: 248px"></span>
+          <span class="tile" style="left: 322px; top: 248px"></span>
+          <span class="tile" style="left: 386px; top: 248px"></span>
+          <span class="tile" style="left: 450px; top: 248px"></span>
+          <span class="tile" style="left: 514px; top: 248px"></span>
+          <span class="tile" style="left: 578px; top: 248px"></span>
+          <span class="tile" style="left: 642px; top: 248px"></span>
+          <span class="tile" style="left: 194px; top: 280px"></span>
+          <span class="tile" style="left: 258px; top: 280px"></span>
+          <span class="tile" style="left: 322px; top: 280px"></span>
+          <span class="tile" style="left: 386px; top: 280px"></span>
+          <span class="tile" style="left: 450px; top: 280px"></span>
+          <span class="tile" style="left: 514px; top: 280px"></span>
+          <span class="tile" style="left: 578px; top: 280px"></span>
+          <span class="tile" style="left: 258px; top: 312px"></span>
+          <span class="tile" style="left: 322px; top: 312px"></span>
+          <span class="tile" style="left: 386px; top: 312px"></span>
+          <span class="tile" style="left: 450px; top: 312px"></span>
+          <span class="tile" style="left: 514px; top: 312px"></span>
+          <span class="tile" style="left: 322px; top: 344px"></span>
+          <span class="tile" style="left: 386px; top: 344px"></span>
+          <span class="tile" style="left: 450px; top: 344px"></span>
+        </div>
+        <img class="asset town" src="./iso-town-center.svg" alt="Hand-authored isometric pixel art town center">
+        <img class="asset soldier" src="./iso-soldier.svg" alt="Hand-authored isometric pixel art soldier">
+        <img class="asset soldier alt" src="./iso-soldier.svg" alt="Mirrored hand-authored isometric pixel art soldier">
+      </section>
+      <section class="swatches" aria-label="Palette">
+        <span>Palette check</span>
+        <span class="chip" style="background:#315f3c"></span>
+        <span class="chip" style="background:#d06f42"></span>
+        <span class="chip" style="background:#bb8f5d"></span>
+        <span class="chip" style="background:#4f78ad"></span>
+        <span class="chip" style="background:#c45e39"></span>
+      </section>
+    </main>
+  </body>
+</html>

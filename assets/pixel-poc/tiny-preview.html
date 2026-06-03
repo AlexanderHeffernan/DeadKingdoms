@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RTS Tiny Pixel POC</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #171717;
+        color: #f4efe6;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+
+      main {
+        width: min(960px, calc(100vw - 16px));
+        display: grid;
+        gap: 16px;
+      }
+
+      canvas {
+        width: 960px;
+        max-width: 100%;
+        aspect-ratio: 16 / 9;
+        border: 1px solid #4b4a42;
+        background: #315f3c;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+
+      .note {
+        color: #cfc7b7;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <canvas id="scene" width="960" height="540" aria-label="Tiny pixel art proof of concept"></canvas>
+      <div class="note">Source sprites: soldier 16x16, tree 12x12, watch tower 24x24. Rendered at 5x on a 64x32 isometric grid.</div>
+    </main>
+    <script type="module">
+      const canvas = document.getElementById("scene");
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = false;
+
+      const palette = {
+        ".": null,
+        "S": "#111813",
+        "s": "#1d241e",
+        "o": "#263b2c",
+        "g": "#315f3c",
+        "G": "#3b704a",
+        "h": "#2b5236",
+        "w": "#4b3728",
+        "W": "#6a4a32",
+        "b": "#8b623e",
+        "B": "#b2824f",
+        "r": "#7e332c",
+        "R": "#b84d32",
+        "O": "#d86b3b",
+        "y": "#e9bd59",
+        "n": "#3f484b",
+        "m": "#687276",
+        "M": "#b1bab4",
+        "k": "#252321",
+        "p": "#2f5d9a",
+        "P": "#5f8fd0",
+        "f": "#c18a5a",
+        "F": "#e0a46a",
+        "l": "#5a7f38",
+        "L": "#6fa04a",
+        "d": "#2f4e2f",
+        "D": "#416b38",
+      };
+
+      const sprites = {
+        soldier: [
+          "................",
+          "..........y.....",
+          "..........w.....",
+          ".........w......",
+          ".....nMMMMn.....",
+          "....nMMffmn.....",
+          ".....mFffn......",
+          "....rrpppW......",
+          "...rRRppPW......",
+          "...rRRPpW.......",
+          "....rrkkW.......",
+          ".....k..W.......",
+          "....k....k......",
+          "...SS....SS.....",
+          "..SSSSSSSSSS....",
+          "................",
+        ],
+        tree: [
+          "............",
+          "....dDD.....",
+          "...dDLDd....",
+          "..dDLLLDd...",
+          "..DLLLLDd...",
+          "...dLDDd....",
+          "....dDd.....",
+          ".....W......",
+          ".....W......",
+          "....bW......",
+          "...sssss....",
+          "..sssssss...",
+        ],
+        watchTower: [
+          "........................",
+          "...........y............",
+          "...........w............",
+          "..........w.............",
+          "........rrRRRRr.........",
+          "......rrRROOOORrr.......",
+          "....rrRRRRRRRRRRrr......",
+          "...rrRRRRRRRRRRRRrr.....",
+          "......SSbbbbbbbbSS......",
+          ".......bBBBBBBBBb.......",
+          ".......BBBBBBBBBB.......",
+          "......B.B......B.B......",
+          "......B..B....B..B......",
+          ".....B...B....B...B.....",
+          ".....B....B..B....B.....",
+          "....B.....B..B.....B....",
+          "....B......BB......B....",
+          "...B.......BB.......B...",
+          "...B.......BB.......B...",
+          "..B........BB........B..",
+          "..B........BB........B..",
+          ".SSS......SSSS......SSS.",
+          "SSSSSSSSSSSSSSSSSSSSSSSS",
+          "........................",
+        ],
+      };
+
+      const origin = { x: 480, y: 118 };
+      const tile = { w: 64, h: 32 };
+      const scale = 5;
+
+      function isoToScreen(tx, ty) {
+        return {
+          x: origin.x + (tx - ty) * tile.w / 2,
+          y: origin.y + (tx + ty) * tile.h / 2,
+        };
+      }
+
+      function drawIsoTile(cx, cy, shade) {
+        ctx.fillStyle = shade;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - 16);
+        ctx.lineTo(cx + 32, cy);
+        ctx.lineTo(cx, cy + 16);
+        ctx.lineTo(cx - 32, cy);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#274a32";
+        ctx.stroke();
+      }
+
+      function drawGrid() {
+        const colors = ["#345f3e", "#386846", "#2f5739"];
+        for (let y = 0; y <= 8; y += 1) {
+          for (let x = 0; x <= 8; x += 1) {
+            const { x: sx, y: sy } = isoToScreen(x, y);
+            drawIsoTile(sx, sy, colors[(x + y) % colors.length]);
+          }
+        }
+      }
+
+      function drawSprite(name, x, y, scale = 5) {
+        const rows = sprites[name];
+        for (let py = 0; py < rows.length; py += 1) {
+          for (let px = 0; px < rows[py].length; px += 1) {
+            const color = palette[rows[py][px]];
+            if (!color) continue;
+            ctx.fillStyle = color;
+            ctx.fillRect(x + px * scale, y + py * scale, scale, scale);
+          }
+        }
+      }
+
+      function drawSpriteAtTile(name, tx, ty, offsetY = 0) {
+        const rows = sprites[name];
+        const width = rows[0].length * scale;
+        const height = rows.length * scale;
+        const { x, y } = isoToScreen(tx, ty);
+        drawSprite(name, Math.round(x - width / 2), Math.round(y - height + offsetY), scale);
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#315f3c";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawGrid();
+
+        drawSpriteAtTile("tree", 2, 5);
+        drawSpriteAtTile("tree", 7, 3);
+        drawSpriteAtTile("watchTower", 4, 4);
+        drawSpriteAtTile("soldier", 3, 6);
+        drawSpriteAtTile("soldier", 6, 5);
+      }
+
+      draw();
+    </script>
+  </body>
+</html>

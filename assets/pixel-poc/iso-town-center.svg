@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 56" shape-rendering="crispEdges">
+  <rect width="64" height="56" fill="none"/>
+
+  <!-- ground contact shadow -->
+  <rect x="28" y="44" width="8" height="1" fill="#1d241e"/>
+  <rect x="22" y="45" width="20" height="1" fill="#1d241e"/>
+  <rect x="16" y="46" width="32" height="1" fill="#1d241e"/>
+  <rect x="12" y="47" width="40" height="1" fill="#1d241e"/>
+  <rect x="16" y="48" width="32" height="1" fill="#1d241e"/>
+  <rect x="22" y="49" width="20" height="1" fill="#1d241e"/>
+
+  <!-- stone plinth, continuous iso footprint -->
+  <rect x="30" y="36" width="4" height="1" fill="#b8aa82"/>
+  <rect x="26" y="37" width="12" height="1" fill="#a99a75"/>
+  <rect x="22" y="38" width="20" height="1" fill="#958767"/>
+  <rect x="18" y="39" width="28" height="1" fill="#81745c"/>
+  <rect x="14" y="40" width="36" height="1" fill="#6c6250"/>
+  <rect x="18" y="41" width="28" height="1" fill="#5a5145"/>
+  <rect x="22" y="42" width="20" height="1" fill="#484139"/>
+
+  <!-- main wooden body: left and right faces meet at center seam -->
+  <rect x="20" y="25" width="12" height="1" fill="#c18d5a"/>
+  <rect x="32" y="25" width="12" height="1" fill="#d9aa6e"/>
+  <rect x="17" y="26" width="15" height="1" fill="#b27e53"/>
+  <rect x="32" y="26" width="17" height="1" fill="#c89663"/>
+  <rect x="15" y="27" width="17" height="1" fill="#9f724d"/>
+  <rect x="32" y="27" width="19" height="1" fill="#b9855a"/>
+  <rect x="14" y="28" width="18" height="1" fill="#8b6548"/>
+  <rect x="32" y="28" width="20" height="1" fill="#a77953"/>
+  <rect x="14" y="29" width="18" height="1" fill="#a87950"/>
+  <rect x="32" y="29" width="20" height="1" fill="#c09060"/>
+  <rect x="14" y="30" width="18" height="1" fill="#916a4a"/>
+  <rect x="32" y="30" width="20" height="1" fill="#aa7b56"/>
+  <rect x="14" y="31" width="18" height="1" fill="#7c5b42"/>
+  <rect x="32" y="31" width="20" height="1" fill="#956d4e"/>
+  <rect x="14" y="32" width="18" height="1" fill="#6d503d"/>
+  <rect x="32" y="32" width="20" height="1" fill="#826047"/>
+  <rect x="14" y="33" width="18" height="1" fill="#5e4738"/>
+  <rect x="32" y="33" width="20" height="1" fill="#705640"/>
+  <rect x="16" y="34" width="16" height="1" fill="#514033"/>
+  <rect x="32" y="34" width="18" height="1" fill="#614b3b"/>
+  <rect x="20" y="35" width="12" height="1" fill="#45372f"/>
+  <rect x="32" y="35" width="14" height="1" fill="#524237"/>
+
+  <!-- central seam and doorway -->
+  <rect x="31" y="25" width="2" height="11" fill="#58402f"/>
+  <rect x="27" y="31" width="10" height="1" fill="#4c3128"/>
+  <rect x="26" y="32" width="12" height="1" fill="#3d2924"/>
+  <rect x="26" y="33" width="12" height="1" fill="#302321"/>
+  <rect x="26" y="34" width="12" height="1" fill="#251d1d"/>
+  <rect x="26" y="35" width="12" height="1" fill="#1f1919"/>
+
+  <!-- windows -->
+  <rect x="19" y="28" width="3" height="2" fill="#f3ca7b"/>
+  <rect x="45" y="28" width="3" height="2" fill="#ffe08d"/>
+
+  <!-- main roof, attached directly to walls -->
+  <rect x="31" y="15" width="2" height="1" fill="#f1a052"/>
+  <rect x="27" y="16" width="10" height="1" fill="#e78545"/>
+  <rect x="23" y="17" width="18" height="1" fill="#d56b3a"/>
+  <rect x="19" y="18" width="26" height="1" fill="#c45534"/>
+  <rect x="15" y="19" width="34" height="1" fill="#ad4530"/>
+  <rect x="11" y="20" width="42" height="1" fill="#8e372d"/>
+  <rect x="9" y="21" width="46" height="1" fill="#5a2b28"/>
+  <rect x="13" y="22" width="38" height="1" fill="#6d322a"/>
+  <rect x="15" y="23" width="34" height="1" fill="#7e3a2c"/>
+  <rect x="17" y="24" width="30" height="1" fill="#5c302b"/>
+  <rect x="20" y="25" width="24" height="1" fill="#3f2926"/>
+
+  <!-- small upper storey, sitting on roof rather than floating -->
+  <rect x="26" y="9" width="6" height="1" fill="#b98256"/>
+  <rect x="32" y="9" width="7" height="1" fill="#d2a06a"/>
+  <rect x="24" y="10" width="8" height="1" fill="#9d704d"/>
+  <rect x="32" y="10" width="9" height="1" fill="#bd895c"/>
+  <rect x="24" y="11" width="8" height="1" fill="#805f45"/>
+  <rect x="32" y="11" width="9" height="1" fill="#9e7652"/>
+  <rect x="25" y="12" width="7" height="1" fill="#674f3d"/>
+  <rect x="32" y="12" width="8" height="1" fill="#806147"/>
+  <rect x="27" y="13" width="10" height="1" fill="#584438"/>
+  <rect x="29" y="14" width="6" height="1" fill="#4a3a32"/>
+
+  <!-- upper roof, compact and connected -->
+  <rect x="31" y="4" width="2" height="1" fill="#e99c4d"/>
+  <rect x="28" y="5" width="8" height="1" fill="#d66f3b"/>
+  <rect x="25" y="6" width="14" height="1" fill="#bc4d32"/>
+  <rect x="22" y="7" width="20" height="1" fill="#8e392d"/>
+  <rect x="20" y="8" width="24" height="1" fill="#5a2d28"/>
+  <rect x="24" y="9" width="16" height="1" fill="#452824"/>
+
+  <!-- roof highlights -->
+  <rect x="23" y="18" width="9" height="1" fill="#ec8f4e"/>
+  <rect x="33" y="17" width="6" height="1" fill="#f0a15b"/>
+  <rect x="28" y="5" width="5" height="1" fill="#ef914d"/>
+
+  <!-- flag -->
+  <rect x="32" y="0" width="1" height="4" fill="#3c2e27"/>
+  <rect x="33" y="0" width="5" height="1" fill="#f2c95c"/>
+  <rect x="33" y="1" width="4" height="1" fill="#c99735"/>
+</svg>

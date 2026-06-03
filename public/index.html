@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Persistent RTS Arena</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div id="join" class="join">
+      <form id="joinForm" class="join-panel">
+        <h1>Persistent RTS Arena</h1>
+        <label>
+          Username
+          <input id="nameInput" maxlength="18" autocomplete="off" placeholder="Town founder">
+        </label>
+        <button type="submit">Join Server</button>
+      </form>
+    </div>
+
+    <main id="game" class="game hidden">
+      <canvas id="world" width="1280" height="720" draggable="false"></canvas>
+      <section class="hud top-left">
+        <div id="resources" class="resources"></div>
+        <div id="status" class="status"></div>
+      </section>
+      <section class="hud top-right">
+        <h2>Leaderboard</h2>
+        <ol id="leaderboard"></ol>
+        <canvas id="minimap" width="180" height="180" aria-label="Minimap"></canvas>
+      </section>
+      <section class="hud bottom">
+        <div id="selection" class="selection"></div>
+        <div id="actions" class="actions"></div>
+      </section>
+      <section id="toast" class="toast"></section>
+    </main>
+
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>

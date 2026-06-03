@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <rect width="16" height="16" fill="none"/>
+  <!-- shadow -->
+  <rect x="4" y="14" width="8" height="1" fill="#27231f"/>
+  <rect x="5" y="15" width="6" height="1" fill="#27231f"/>
+  <!-- spear -->
+  <rect x="11" y="1" width="1" height="9" fill="#5f412f"/>
+  <rect x="11" y="0" width="1" height="1" fill="#d6caa0"/>
+  <rect x="12" y="1" width="1" height="1" fill="#9d8f6f"/>
+  <!-- helmet -->
+  <rect x="5" y="2" width="5" height="1" fill="#5e6265"/>
+  <rect x="4" y="3" width="7" height="1" fill="#8a9090"/>
+  <rect x="4" y="4" width="2" height="1" fill="#55595c"/>
+  <rect x="6" y="4" width="4" height="1" fill="#aeb3ad"/>
+  <rect x="10" y="4" width="1" height="1" fill="#55595c"/>
+  <!-- face -->
+  <rect x="5" y="5" width="5" height="1" fill="#b98556"/>
+  <rect x="5" y="6" width="1" height="1" fill="#7b5138"/>
+  <rect x="6" y="6" width="3" height="1" fill="#d19a68"/>
+  <rect x="9" y="6" width="1" height="1" fill="#7b5138"/>
+  <!-- torso -->
+  <rect x="4" y="7" width="7" height="1" fill="#334f7b"/>
+  <rect x="3" y="8" width="2" height="1" fill="#23385d"/>
+  <rect x="5" y="8" width="5" height="1" fill="#4f78ad"/>
+  <rect x="10" y="8" width="2" height="1" fill="#23385d"/>
+  <rect x="4" y="9" width="7" height="1" fill="#2b466f"/>
+  <rect x="5" y="10" width="5" height="1" fill="#20355a"/>
+  <!-- shield -->
+  <rect x="2" y="8" width="2" height="1" fill="#6b2f2a"/>
+  <rect x="1" y="9" width="4" height="1" fill="#a24632"/>
+  <rect x="1" y="10" width="4" height="1" fill="#c45e39"/>
+  <rect x="2" y="11" width="3" height="1" fill="#8a392e"/>
+  <rect x="2" y="12" width="2" height="1" fill="#5c2a27"/>
+  <!-- legs -->
+  <rect x="5" y="11" width="2" height="1" fill="#5a4535"/>
+  <rect x="8" y="11" width="2" height="1" fill="#5a4535"/>
+  <rect x="5" y="12" width="2" height="1" fill="#6d543d"/>
+  <rect x="8" y="12" width="2" height="1" fill="#6d543d"/>
+  <rect x="4" y="13" width="3" height="1" fill="#2e2824"/>
+  <rect x="8" y="13" width="3" height="1" fill="#2e2824"/>
+</svg>
