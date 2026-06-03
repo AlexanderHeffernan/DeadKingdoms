@@ -14,6 +14,11 @@
           Username
           <input id="nameInput" maxlength="18" autocomplete="off" placeholder="Town founder">
         </label>
+        <label>
+          Player colour
+          <input id="colorInput" type="color" value="#4f8fd8" aria-label="Player colour">
+        </label>
+        <div id="joinNotice" class="join-notice" aria-live="polite"></div>
         <button type="submit">Join Server</button>
       </form>
     </div>
@@ -23,10 +28,13 @@
       <section class="hud top-left">
         <div id="resources" class="resources"></div>
         <div id="status" class="status"></div>
+        <button id="leaveButton" class="leave-button" type="button">Leave game</button>
       </section>
       <section class="hud top-right">
         <h2>Leaderboard</h2>
+        <div id="ping" class="ping">Ping --ms</div>
         <ol id="leaderboard"></ol>
+        <button id="muteButton" class="mute-button" type="button" aria-label="Mute music" title="Mute music"></button>
         <canvas id="minimap" width="180" height="180" aria-label="Minimap"></canvas>
       </section>
       <section class="hud bottom">

@@ -8,6 +8,7 @@ export const BUILDINGS = {
   barracks: { label: "Barracks", cost: { wood: 120, ore: 30 } },
   watchTower: { label: "Watch Tower", cost: { wood: 80, ore: 45 } },
   lumberCamp: { label: "Lumber Camp", cost: { wood: 70 } },
+  foodDepot: { label: "Food Depot", cost: { wood: 70 } },
   miningCamp: { label: "Mining Camp", cost: { wood: 70 } },
 };
 

@@ -1,5 +1,7 @@
 import barracks from "./barracks.js";
+import berry from "./berry.js";
 import farm from "./farm.js";
+import foodDepot from "./foodDepot.js";
 import house from "./house.js";
 import lumberCamp from "./lumberCamp.js";
 import miningCamp from "./miningCamp.js";
@@ -14,7 +16,9 @@ import watchTower from "./watchTower.js";
 
 export const sprites = {
   barracks,
+  berry,
   farm,
+  foodDepot,
   house,
   lumberCamp,
   miningCamp,

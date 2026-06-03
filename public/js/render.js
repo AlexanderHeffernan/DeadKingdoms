@@ -60,6 +60,7 @@ export class Renderer {
     ].sort((a, b) => (a.x + a.y) - (b.x + b.y));
 
     for (const entity of entities) this.drawEntity(entity, state, view);
+    this.drawEffects(state, view);
     this.drawPlacement(view, state);
     this.drawSelectionBox(view);
     this.drawMinimap(state, view);
@@ -82,6 +83,17 @@ export class Renderer {
   }
 
   drawTile(cx, cy, color, visible) {
+    const zoom = this.currentZoom || 1;
+    const halfW = (TILE_W * zoom) / 2 + 1.5;
+    const halfH = (TILE_H * zoom) / 2 + 1.5;
+    this.ctx.fillStyle = visible ? color : "#1e3025";
+    this.ctx.beginPath();
+    this.ctx.moveTo(cx, cy - halfH);
+    this.ctx.lineTo(cx + halfW, cy);
+    this.ctx.lineTo(cx, cy + halfH);
+    this.ctx.lineTo(cx - halfW, cy);
+    this.ctx.closePath();
+    this.ctx.fill();
     const px = worldPixel(this.currentZoom || 1);
     const startX = Math.round(cx - 8 * px);
     const startY = Math.round(cy - 4 * px);
@@ -100,25 +112,25 @@ export class Renderer {
     const spriteName = type === "tree" || type === "ore" || type === "stump" ? type : spriteNameFor(entity);
     const rows = sprites[spriteName];
     if (!rows) return;
-    const center = isoToScreen(entity.x + (entity.size || 0) / 2, entity.y + (entity.size || 0) / 2, view.camera);
+    const center = entityCenter(entity, view.camera);
     const scale = entityScale(entity, view.camera.zoom || 1);
     const bounds = spriteBounds(rows);
     const visualWidth = bounds.width * scale;
-    const visualHeight = bounds.height * scale;
     const x = Math.round(center.x - visualWidth / 2 - bounds.minX * scale);
-    const y = Math.round(isFlatFootprint(entity) ? center.y - visualHeight / 2 - bounds.minY * scale : center.y - (bounds.maxY + 1) * scale);
-    if (view.selectedIds.has(entity.id)) this.drawSelectionMarker(center.x, center.y, entity.size || 0.8, state.snapshot.players[entity.ownerId]?.color || "#f4efe6");
-    this.drawSprite(rows, x, y, state.snapshot.players[entity.ownerId]?.color, entity.facing === "left", scale);
+    const y = Math.round(spriteTopY(entity, center.y, bounds, scale, view.camera.zoom || 1));
+    if (view.selectedIds.has(entity.id)) this.drawSelectionMarker(entity, view.camera, center.x, center.y, state.snapshot.players[entity.ownerId]?.color || "#f4efe6");
+    const flash = targetFlashFor(state, entity.id);
+    this.drawSprite(rows, x, y, state.snapshot.players[entity.ownerId]?.color, entity.facing === "left", scale, flash.amount, flash.color);
     this.drawTeamAccent(entity, center.x, y, visualWidth, state.snapshot.players[entity.ownerId]?.color);
     if (entity.attackFlash > 0) this.drawAttackFlash(center.x, center.y, state.snapshot.players[entity.ownerId]?.color || "#f4efe6");
-    if (entity.workFlash > 0) this.drawWorkFlash(center.x, center.y, entity.facing);
+    if (entity.workFlash > 0) this.drawWorkFlash(center.x, center.y, entity.facing, entity.command?.resourceKind || entity.carried?.resource);
     if (entity.carried?.amount) this.drawCarryBadge(center.x, y - 2, entity.carried.resource);
     if (entity.hp && entity.maxHp && entity.hp < entity.maxHp) this.drawHealth(center.x, y - 8, entity.hp / entity.maxHp);
     if (entity.type === "farm" && entity.maxAmount && entity.amount < entity.maxAmount) this.drawHealth(center.x, y - 8, (entity.amount || 0) / entity.maxAmount);
     if (entity.kind === "resource" && entity.maxAmount && entity.amount < entity.maxAmount) this.drawHealth(center.x, y - 5, entity.amount / entity.maxAmount);
   }
 
-  drawSprite(rows, x, y, playerColor, flip = false, scale = SCALE) {
+  drawSprite(rows, x, y, playerColor, flip = false, scale = SCALE, flash = 0, flashColor = "white") {
     const { ctx } = this;
     if (flip) {
       ctx.save();
@@ -130,8 +142,9 @@ export class Renderer {
     for (let py = 0; py < rows.length; py += 1) {
       for (let px = 0; px < rows[py].length; px += 1) {
         const key = rows[py][px];
-        const color = key === "p" || key === "P" ? (key === "P" ? lighten(playerColor) : playerColor) : palette[key];
+        let color = key === "p" || key === "P" ? (key === "P" ? lighten(playerColor) : playerColor) : palette[key];
         if (!color) continue;
+        if (flash > 0) color = flashColor === "red" ? redFlash(color, flash) : brighten(color, 1 + flash * 1.35);
         ctx.fillStyle = color;
         ctx.fillRect(x + px * scale, y + py * scale, scale, scale);
       }
@@ -157,13 +170,36 @@ export class Renderer {
     ctx.stroke();
   }
 
-  drawWorkFlash(x, y, facing = "right") {
+  drawWorkFlash(x, y, facing = "right", resource = "wood") {
     const { ctx } = this;
     const dir = facing === "left" ? -1 : 1;
-    ctx.fillStyle = "#e9bd59";
-    ctx.fillRect(Math.round(x + dir * 8), Math.round(y - 34), 14 * dir, 4);
-    ctx.fillStyle = "#4b3728";
-    ctx.fillRect(Math.round(x + dir * 18), Math.round(y - 30), 8 * dir, 4);
+    const t = Math.floor(performance.now() / 120) % 2;
+    const swingY = t ? -38 : -30;
+    ctx.fillStyle = resource === "ore" ? "#c1b77b" : resource === "food" ? "#6fa04a" : "#e9bd59";
+    ctx.fillRect(Math.round(x + dir * 8), Math.round(y + swingY), 14 * dir, 4);
+    ctx.fillStyle = resource === "ore" ? "#687276" : "#4b3728";
+    ctx.fillRect(Math.round(x + dir * 18), Math.round(y + swingY + 4), 8 * dir, 4);
+  }
+
+  drawEffects(state, view) {
+    const { ctx } = this;
+    const now = performance.now();
+    for (const effect of state.effects || []) {
+      const life = Math.max(0, Math.min(1, (now - effect.createdAt) / effect.duration));
+      if (effect.type !== "moveCross") continue;
+      const p = isoToScreen(effect.x, effect.y, view.camera);
+      const alpha = 1 - life;
+      const px = worldPixel(view.camera.zoom || 1);
+      ctx.save();
+      ctx.globalAlpha *= alpha;
+      ctx.fillStyle = "#d83f34";
+      const s = px * 2;
+      ctx.fillRect(Math.round(p.x - s / 2), Math.round(p.y - px * 5), s, px * 10);
+      ctx.fillRect(Math.round(p.x - px * 5), Math.round(p.y - s / 2), px * 10, s);
+      ctx.fillStyle = "#ffd2c9";
+      ctx.fillRect(Math.round(p.x - px / 2), Math.round(p.y - px / 2), px, px);
+      ctx.restore();
+    }
   }
 
   drawHealth(x, y, pct) {
@@ -174,9 +210,14 @@ export class Renderer {
     ctx.fillRect(x - 17, y + 1, Math.max(1, 34 * pct), 3);
   }
 
-  drawSelectionMarker(x, y, size, color) {
+  drawSelectionMarker(entity, camera, x, y, color) {
+    if (entity.kind === "building" || entity.kind === "ruin") {
+      this.drawFootprint(entity.x, entity.y, entity.size || 1, camera, color, "rgb(17 24 19 / 0.82)", 3);
+      return;
+    }
     const zoom = this.currentZoom || 1;
     const px = worldPixel(zoom);
+    const size = entity.size || 0.8;
     const rx = Math.max(5, Math.round(size * 8));
     const ry = Math.max(3, Math.round(size * 4));
     for (let row = -ry; row <= ry; row += 1) {
@@ -222,27 +263,45 @@ export class Renderer {
     const { ctx } = this;
     const tile = view.hoverTile;
     if (!tile) return;
-    const size = view.buildMode === "house" || view.buildMode === "farm" || view.buildMode === "watchTower" || view.buildMode === "lumberCamp" || view.buildMode === "miningCamp" ? 1 : 2;
-    for (let yy = 0; yy < size; yy += 1) {
-      for (let xx = 0; xx < size; xx += 1) {
-        const p = isoToScreen(tile.x + xx, tile.y + yy, view.camera);
-        ctx.globalAlpha = 0.55;
-        this.drawTile(p.x, p.y, "#e9bd59", true);
-        ctx.globalAlpha = 1;
-      }
-    }
+    const size = buildingSize(view.buildMode);
+    const valid = canPlacePreview(state, view.buildMode, tile.x, tile.y);
+    const stroke = valid ? "#e9bd59" : "#d84b3e";
+    const fill = valid ? "rgb(233 189 89 / 0.28)" : "rgb(216 75 62 / 0.28)";
+    this.drawFootprint(tile.x, tile.y, size, view.camera, stroke, fill, 2);
     const rows = sprites[view.buildMode];
     if (rows) {
-      const center = isoToScreen(tile.x + size / 2, tile.y + size / 2, view.camera);
+      const center = footprintCenter(tile.x, tile.y, size, view.camera);
       const scale = entityScale({ kind: "building", type: view.buildMode, size }, view.camera.zoom || 1);
       const bounds = spriteBounds(rows);
       const visualWidth = bounds.width * scale;
-      const visualHeight = bounds.height * scale;
       ctx.globalAlpha = 0.72;
-      const y = view.buildMode === "farm" ? center.y - visualHeight / 2 - bounds.minY * scale : center.y - (bounds.maxY + 1) * scale;
-      this.drawSprite(rows, Math.round(center.x - visualWidth / 2 - bounds.minX * scale), Math.round(y), state.snapshot?.players[state.playerId]?.color, false, scale);
+      const y = spriteTopY({ kind: "building", type: view.buildMode, size }, center.y, bounds, scale, view.camera.zoom || 1);
+      this.drawSprite(rows, Math.round(center.x - visualWidth / 2 - bounds.minX * scale), Math.round(y), state.snapshot?.players[state.playerId]?.color, false, scale, valid ? 0 : 0.75, valid ? "white" : "red");
       ctx.globalAlpha = 1;
     }
+  }
+
+  drawFootprint(x, y, size, camera, stroke, fill, lineWidth = 2) {
+    const { ctx } = this;
+    const points = [
+      isoToScreen(x - 0.5, y - 0.5, camera),
+      isoToScreen(x + size - 0.5, y - 0.5, camera),
+      isoToScreen(x + size - 0.5, y + size - 0.5, camera),
+      isoToScreen(x - 0.5, y + size - 0.5, camera),
+    ];
+    ctx.save();
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawLastSeen(state, view) {
@@ -296,7 +355,7 @@ export class Renderer {
     }
     for (const building of Object.values(state.snapshot.buildings)) {
       const player = state.snapshot.players[building.ownerId];
-      const p = project(building.x + building.size / 2, building.y + building.size / 2);
+      const p = project(building.x + (building.size - 1) / 2, building.y + (building.size - 1) / 2);
       ctx.fillStyle = player?.color || "#d8d0c0";
       ctx.fillRect(Math.round(p.x - 2), Math.round(p.y - 2), Math.max(3, building.size + 2), Math.max(3, building.size + 2));
     }
@@ -334,6 +393,65 @@ function spriteNameFor(entity) {
   return entity.type;
 }
 
+function targetFlashFor(state, id) {
+  const effect = (state.effects || []).find((item) => item.type === "targetFlash" && item.targetId === id);
+  if (!effect) return { amount: 0, color: "white" };
+  return { amount: Math.max(0, 1 - (performance.now() - effect.createdAt) / effect.duration), color: effect.color || "white" };
+}
+
+function buildingSize(type) {
+  if (type === "farm") return 4;
+  if (type === "townCenter") return 4;
+  if (type === "barracks") return 3;
+  if (type === "house") return 2;
+  if (type === "watchTower" || type === "lumberCamp" || type === "foodDepot" || type === "miningCamp") return 1;
+  return 1;
+}
+
+function canPlacePreview(state, buildingType, x, y) {
+  if (!state.snapshot) return false;
+  const size = buildingSize(buildingType);
+  const player = state.snapshot.players[state.playerId];
+  const cost = buildingCost(buildingType);
+  if (!Object.entries(cost).every(([resource, amount]) => (player?.resources?.[resource] || 0) >= amount)) return false;
+  if (x < 0 || y < 0 || x + size > state.snapshot.map.size || y + size > state.snapshot.map.size) return false;
+  for (const building of Object.values(state.snapshot.buildings)) {
+    if (rectsOverlap({ x, y, size }, building)) return false;
+  }
+  for (const resource of Object.values(state.snapshot.resources)) {
+    const px = Math.floor(resource.x);
+    const py = Math.floor(resource.y);
+    if (px >= x && px < x + size && py >= y && py < y + size) return false;
+  }
+  return true;
+}
+
+function buildingCost(type) {
+  const costs = {
+    house: { wood: 35 },
+    farm: { wood: 45 },
+    barracks: { wood: 120, ore: 30 },
+    watchTower: { wood: 80, ore: 45 },
+    lumberCamp: { wood: 70 },
+    foodDepot: { wood: 70 },
+    miningCamp: { wood: 70 },
+  };
+  return costs[type] || {};
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.size && a.x + a.size > b.x && a.y < b.y + b.size && a.y + a.size > b.y;
+}
+
+function entityCenter(entity, camera) {
+  if (entity.kind === "building" || entity.kind === "ruin") return footprintCenter(entity.x, entity.y, entity.size || 1, camera);
+  return isoToScreen(entity.x + (entity.size || 0) / 2, entity.y + (entity.size || 0) / 2, camera);
+}
+
+function footprintCenter(x, y, size, camera) {
+  return isoToScreen(x + (size - 1) / 2, y + (size - 1) / 2, camera);
+}
+
 function lighten(color = "#ffffff") {
   return color;
 }
@@ -342,8 +460,29 @@ function entityScale(entity, zoom) {
   return worldPixel(zoom);
 }
 
-function isFlatFootprint(entity) {
-  return entity.type === "farm";
+function spriteTopY(entity, centerY, bounds, scale, zoom) {
+  const footprintBottom = centerY + ((entity.size || 0) * TILE_H * zoom) / 2;
+  return footprintBottom - (bounds.maxY + 1) * scale;
+}
+
+function brighten(color = "#ffffff", factor = 1) {
+  if (!color.startsWith("#")) return color;
+  const n = Number.parseInt(color.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const lift = (channel) => Math.max(0, Math.min(255, Math.round(channel * factor + 70 * (factor - 1))));
+  return `rgb(${lift(r)} ${lift(g)} ${lift(b)})`;
+}
+
+function redFlash(color = "#ffffff", amount = 1) {
+  if (!color.startsWith("#")) return color;
+  const n = Number.parseInt(color.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const mix = (base, target) => Math.round(base + (target - base) * Math.min(1, amount * 0.9));
+  return `rgb(${mix(r, 255)} ${mix(g, 42)} ${mix(b, 32)})`;
 }
 
 function shade(hex, factor) {

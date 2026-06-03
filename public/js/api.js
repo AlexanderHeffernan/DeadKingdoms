@@ -1,5 +1,5 @@
-export async function join(name) {
-  return post("/api/join", { name });
+export async function join(name, color) {
+  return post("/api/join", { name, color });
 }
 
 export async function sendCommand(payload) {

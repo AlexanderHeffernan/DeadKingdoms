@@ -5,11 +5,13 @@ import { MAX_PLAYERS } from "../shared/config.js";
 import { addPlayer, command, removePlayer } from "./world.js";
 
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
+const SOUNDTRACK_DIR = new URL("../../assets/soundtrack/", import.meta.url);
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".mp3": "audio/mpeg",
 };
 
 // If a client's outgoing buffer exceeds this many bytes we skip sending it
@@ -24,8 +26,38 @@ export function createHandler(world, clients) {
     if (req.method === "POST" && url.pathname === "/api/leave") return leaveGame(req, res, world);
     if (req.method === "GET" && url.pathname === "/events") return streamEvents(req, res, world, clients, url);
     if (req.method === "GET" && url.pathname === "/api/snapshot") return json(res, makeSnapshot(world));
+    if (req.method === "GET" && url.pathname === "/api/soundtrack") return listSoundtrack(res);
+    if (req.method === "GET" && url.pathname.startsWith("/assets/soundtrack/")) return serveSoundtrack(req, res, url);
     return serveStatic(req, res, url);
   };
+}
+
+async function listSoundtrack(res) {
+  try {
+    const files = (await fs.readdir(SOUNDTRACK_DIR)).filter((file) => file.toLowerCase().endsWith(".mp3"));
+    json(res, { tracks: files.map((file) => `/assets/soundtrack/${encodeURIComponent(file)}`) });
+  } catch {
+    json(res, { tracks: [] });
+  }
+}
+
+async function serveSoundtrack(req, res, url) {
+  const name = decodeURIComponent(url.pathname.replace("/assets/soundtrack/", ""));
+  if (!name || name.includes("/") || name.includes("\\")) {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+    return;
+  }
+  const filePath = join(SOUNDTRACK_DIR.pathname, name);
+  try {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) throw new Error("Not a file");
+    res.writeHead(200, { "Content-Type": MIME[extname(filePath)] || "application/octet-stream" });
+    createReadStream(filePath).pipe(res);
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+  }
 }
 
 export function broadcast(world, clients) {
@@ -45,7 +77,7 @@ async function joinGame(req, res, world) {
   const active = Object.values(world.players).filter((player) => !player.defeated).length;
   if (active >= MAX_PLAYERS) return json(res, { ok: false, error: "Server is full." }, 403);
   const body = await readJson(req);
-  const playerId = addPlayer(world, String(body.name || "Player"));
+  const playerId = addPlayer(world, String(body.name || "Player"), body.color);
   json(res, { ok: true, playerId });
 }
 

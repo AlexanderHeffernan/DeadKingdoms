@@ -45,6 +45,7 @@ export function makeSnapshot(world, playerId = null, sentExplored = null) {
           popCap: player.popCap,
           defeated: player.defeated,
           score: player.score,
+          joinedAt: player.joinedAt,
         },
       ]),
     ),
@@ -107,8 +108,8 @@ function visibleTiles(world, playerId) {
   for (const building of Object.values(world.buildings)) {
     if (building.ownerId !== playerId) continue;
     const radius = building.vision || 5;
-    const cx = Math.round(building.x + (building.size || 0) / 2);
-    const cy = Math.round(building.y + (building.size || 0) / 2);
+    const cx = Math.round(building.x + ((building.size || 1) - 1) / 2);
+    const cy = Math.round(building.y + ((building.size || 1) - 1) / 2);
     addCircle(cx, cy, radius);
   }
   player.explored = explored;

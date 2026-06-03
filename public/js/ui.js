@@ -2,12 +2,28 @@ import { BUILDINGS, TRAINING } from "./constants.js";
 import { palette } from "./sprites/palette.js";
 import { sprites } from "./sprites/index.js";
 
+const BUILD_SHORTCUTS = {
+  house: "H",
+  farm: "F",
+  barracks: "B",
+  watchTower: "T",
+  lumberCamp: "L",
+  foodDepot: "D",
+  miningCamp: "M",
+};
+
+const TRAIN_SHORTCUTS = {
+  villager: "V",
+  soldier: "S",
+};
+
 export class UI {
   constructor(state, actions) {
     this.state = state;
     this.actions = actions;
     this.resources = document.getElementById("resources");
     this.status = document.getElementById("status");
+    this.ping = document.getElementById("ping");
     this.leaderboard = document.getElementById("leaderboard");
     this.selection = document.getElementById("selection");
     this.actionsEl = document.getElementById("actions");
@@ -28,8 +44,11 @@ export class UI {
       ${resourcePill("wood", Math.floor(player.resources.wood))}
       ${resourcePill("food", Math.floor(player.resources.food))}
       ${resourcePill("ore", Math.floor(player.resources.ore))}
+      ${populationPill(player.population, player.popCap, idleVillagerCount(snapshot, this.state.playerId))}
     `;
-    this.status.textContent = `Population ${player.population}/${player.popCap} · ${player.defeated ? "Defeated" : "Active"}`;
+    this.attachResourceHovers();
+    this.status.textContent = player.defeated ? "Defeated" : "";
+    this.ping.textContent = `Ping ${Math.max(0, Date.now() - snapshot.now)}ms`;
     this.renderLeaderboard(snapshot);
     this.renderSelection(snapshot);
     const notice = snapshot.notices.at(-1)?.text || "";
@@ -38,7 +57,7 @@ export class UI {
 
   renderLeaderboard(snapshot) {
     this.leaderboard.innerHTML = snapshot.leaderboard
-      .map((entry) => `<li><span style="color:${entry.color}">${escapeHtml(entry.name)}</span> ${entry.score}</li>`)
+      .map((entry) => `<li><span style="color:${entry.color}">${escapeHtml(entry.name)}</span> <strong>${entry.score}</strong> <em>${aliveTime(entry.joinedAt, snapshot.now)}</em></li>`)
       .join("");
   }
 
@@ -70,26 +89,33 @@ export class UI {
   renderActions(selected) {
     const actions = [];
     const ownedUnits = selected.filter((entity) => entity.kind === "unit" && entity.ownerId === this.state.playerId);
-    const ownedBuildings = selected.filter((entity) => entity.kind === "building" && entity.ownerId === this.state.playerId);
+    const ownedAnyBuildings = selected.filter((entity) => entity.kind === "building" && entity.ownerId === this.state.playerId);
+    const ownedBuildings = selected.filter((entity) => entity.kind === "building" && entity.ownerId === this.state.playerId && isComplete(entity));
     const hasVillager = ownedUnits.some((entity) => entity.type === "villager");
     if (hasVillager) {
       for (const [buildingType, def] of Object.entries(BUILDINGS)) {
-        actions.push({ spriteName: buildingType, label: def.label, cost: def.cost, action: () => this.actions.setBuildMode(buildingType) });
+        actions.push({ spriteName: buildingType, label: def.label, cost: def.cost, shortcut: BUILD_SHORTCUTS[buildingType], action: () => this.actions.setBuildMode(buildingType) });
       }
     }
     for (const building of ownedBuildings) {
       if (building.type === "farm") {
         const player = this.state.snapshot.players[this.state.playerId];
-        actions.push({ spriteName: "farm", label: player.autoReplenishFarms ? "Auto reseed: on" : "Auto reseed: off", cost: {}, action: () => this.actions.toggleAutoFarm() });
-        actions.push({ spriteName: "farm", label: "Reseed farm", cost: { wood: 45 }, action: () => this.actions.replenishFarm(building.id), forceDisabled: !building.exhausted && building.amount > 0 });
+        actions.push({ spriteName: "farm", label: player.autoReplenishFarms ? "Auto reseed: on" : "Auto reseed: off", cost: {}, displayCost: { wood: 45 }, shortcut: "A", action: () => this.actions.toggleAutoFarm() });
+        actions.push({ spriteName: "farm", label: "Reseed farm", cost: { wood: 45 }, shortcut: "R", action: () => this.actions.replenishFarm(building.id), forceDisabled: !building.exhausted && building.amount > 0 });
       }
       if (building.queue?.length) {
         const first = building.queue[0];
         actions.push({ queue: true, label: `Training ${building.queue.length}/10`, detail: `${Math.max(0, Math.round(first.remaining))}s` });
       }
       for (const train of TRAINING[building.type] || []) {
-        actions.push({ spriteName: train.unitType, label: train.label, cost: train.cost, action: () => this.actions.train(building.id, train.unitType), forceDisabled: building.queue?.length >= 10 });
+        actions.push({ spriteName: train.unitType, label: train.label, cost: train.cost, shortcut: TRAIN_SHORTCUTS[train.unitType], action: () => this.actions.train(building.id, train.unitType), forceDisabled: building.queue?.length >= 10 });
       }
+      if ((TRAINING[building.type] || []).length) {
+        actions.push({ spriteName: "soldier", label: "Set rally point", cost: {}, shortcut: "Y", action: () => this.actions.setRallyMode(building.id) });
+      }
+    }
+    for (const building of ownedAnyBuildings) {
+      actions.push({ spriteName: "ruin", label: `Delete ${label(building.type)}`, cost: {}, shortcut: "Del", action: () => this.actions.deleteBuilding(building.id) });
     }
     this.renderActionSet(actions);
   }
@@ -101,7 +127,8 @@ export class UI {
       spriteName: action.spriteName,
       label: action.label,
       detail: action.detail,
-      cost: action.cost,
+      cost: action.displayCost || action.cost,
+      shortcut: action.shortcut,
       disabled: action.forceDisabled || !canAfford(player.resources, action.cost || {}),
     })));
     if (signature === this.actionSignature) return;
@@ -110,7 +137,7 @@ export class UI {
     this.hideHover();
     for (const action of actions) {
       if (action.queue) this.addQueue(action.label, action.detail);
-      else this.addButton(action.spriteName, action.label, action.cost, action.action, action.forceDisabled);
+      else this.addButton(action.spriteName, action.label, action.cost, action.action, action.forceDisabled, action.displayCost, action.shortcut);
     }
   }
 
@@ -121,7 +148,7 @@ export class UI {
     this.actionsEl.append(queue);
   }
 
-  addButton(spriteName, label, cost = {}, onPointerDown, forceDisabled = false) {
+  addButton(spriteName, label, cost = {}, onPointerDown, forceDisabled = false, displayCost = null, shortcut = "") {
     const player = this.state.snapshot.players[this.state.playerId];
     const disabled = forceDisabled || !canAfford(player.resources, cost);
     const button = document.createElement("button");
@@ -130,7 +157,8 @@ export class UI {
     button.type = "button";
     button.setAttribute("aria-label", label);
     button.dataset.label = label;
-    button.dataset.cost = formatCost(cost);
+    button.dataset.cost = formatCost(displayCost || cost);
+    button.dataset.shortcut = shortcut || "";
     button.dataset.disabledReason = disabled ? disabledReason(player.resources, cost, forceDisabled) : "";
     button.append(icon(spriteName));
     button.addEventListener("pointerdown", (event) => {
@@ -145,11 +173,16 @@ export class UI {
   }
 
   showHover(button) {
+    if (button.dataset.hoverTitle) {
+      this.showInfoHover(button);
+      return;
+    }
     const cost = button.dataset.cost || "free";
     const disabled = button.dataset.disabledReason;
     this.hoverCard.innerHTML = `
       <div class="hover-title">${escapeHtml(button.dataset.label)}</div>
       <div class="hover-line">Cost: ${escapeHtml(cost)}</div>
+      ${button.dataset.shortcut ? `<div class="hover-line">Shortcut: ${escapeHtml(button.dataset.shortcut)}</div>` : ""}
       ${disabled ? `<div class="hover-warning">${escapeHtml(disabled)}</div>` : ""}
     `;
     const rect = button.getBoundingClientRect();
@@ -160,6 +193,25 @@ export class UI {
 
   hideHover() {
     this.hoverCard.classList.add("hidden");
+  }
+
+  attachResourceHovers() {
+    for (const pill of this.resources.querySelectorAll(".resource-pill")) {
+      pill.addEventListener("mouseenter", () => this.showInfoHover(pill));
+      pill.addEventListener("mousemove", () => this.showInfoHover(pill));
+      pill.addEventListener("mouseleave", () => this.hideHover());
+    }
+  }
+
+  showInfoHover(target) {
+    this.hoverCard.innerHTML = `
+      <div class="hover-title">${escapeHtml(target.dataset.hoverTitle || "")}</div>
+      <div class="hover-line">${escapeHtml(target.dataset.hoverDetail || "")}</div>
+    `;
+    const rect = target.getBoundingClientRect();
+    this.hoverCard.classList.remove("hidden");
+    this.hoverCard.style.left = `${Math.round(rect.left)}px`;
+    this.hoverCard.style.top = `${Math.round(rect.bottom + 8)}px`;
   }
 
   showToast(text) {
@@ -180,6 +232,14 @@ function escapeHtml(value) {
 
 function canAfford(resources, cost) {
   return Object.entries(cost).every(([resource, amount]) => (resources[resource] || 0) >= amount);
+}
+
+function isComplete(entity) {
+  return !entity.maxHp || entity.hp >= entity.maxHp;
+}
+
+function idleVillagerCount(snapshot, playerId) {
+  return Object.values(snapshot.units).filter((unit) => unit.ownerId === playerId && unit.type === "villager" && (!unit.command || unit.command.type === "idle")).length;
 }
 
 function formatCost(cost) {
@@ -218,41 +278,91 @@ function icon(spriteName) {
 }
 
 function resourcePill(resource, amount) {
-  return `<span class="resource-pill" title="${resource}">${resourceIcon(resource)}<strong>${amount}</strong></span>`;
+  return `<span class="resource-pill" data-hover-title="${resourceLabel(resource)}" data-hover-detail="${resourceDescription(resource)}">${resourceIcon(resource)}<strong>${amount}</strong></span>`;
+}
+
+function populationPill(population, popCap, idleVillagers) {
+  return `<span class="resource-pill" data-hover-title="Population" data-hover-detail="${population}/${popCap} used. ${idleVillagers} villager${idleVillagers === 1 ? "" : "s"} not currently working. Press . to cycle idle villagers one at a time.">${populationIcon()}<strong>${population}/${popCap}</strong></span>`;
+}
+
+function resourceLabel(resource) {
+  return resource.replace(/^./, (char) => char.toUpperCase());
+}
+
+function resourceDescription(resource) {
+  const descriptions = {
+    wood: "Used to construct buildings, farms, and reseed exhausted farms.",
+    food: "Used to train villagers and soldiers. Gather from berries, farms, and food depots.",
+    ore: "Used for military buildings, towers, and soldiers.",
+  };
+  return descriptions[resource] || "Stored resource.";
+}
+
+function aliveTime(joinedAt, now) {
+  const totalMinutes = Math.max(0, Math.floor(((now || Date.now()) - (joinedAt || now || Date.now())) / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function populationIcon() {
+  return `<span class="resource-icon" aria-hidden="true">
+    <i style="left:9px;top:3px;background:#e0a46a"></i><i style="left:12px;top:3px;background:#e0a46a"></i>
+    <i style="left:9px;top:6px;background:#b2824f"></i><i style="left:12px;top:6px;background:#b2824f"></i>
+    <i style="left:6px;top:12px;background:#4f8fd8"></i><i style="left:9px;top:12px;background:#4f8fd8"></i><i style="left:12px;top:12px;background:#4f8fd8"></i><i style="left:15px;top:12px;background:#4f8fd8"></i>
+    <i style="left:6px;top:15px;background:#2f5d9a"></i><i style="left:9px;top:15px;background:#2f5d9a"></i><i style="left:12px;top:15px;background:#2f5d9a"></i><i style="left:15px;top:15px;background:#2f5d9a"></i>
+    <i style="left:9px;top:18px;background:#252321"></i><i style="left:15px;top:18px;background:#252321"></i>
+  </span>`;
 }
 
 function resourceIcon(resource) {
   const grids = {
     wood: [
-      ".WW.",
-      "bWWb",
-      ".WW.",
-      "b..b",
+      "........",
+      ".bbWWW..",
+      "bBWWWWb.",
+      ".bbWWW..",
+      "...bbWWW",
+      "..bBWWWW",
+      "...bbWWW",
+      "........",
     ],
     food: [
-      ".LL.",
-      "LllL",
-      ".ll.",
-      "..W.",
+      "........",
+      "...MM...",
+      "..MFFM..",
+      ".MFRRFM.",
+      ".FRRRRF.",
+      "..FRRF..",
+      "...ff...",
+      "........",
     ],
     ore: [
-      ".QQ.",
-      "QMMQ",
-      ".MQ.",
-      "....",
+      "........",
+      "...QQ...",
+      "..QMMQ..",
+      ".QMMMMQ.",
+      "..QMMQ..",
+      ".QQ..QQ.",
+      "QMMQQMMQ",
+      "........",
     ],
   };
   const colors = {
     ".": "transparent",
     W: "#6a4a32",
     b: "#8b623e",
+    B: "#b2824f",
+    R: "#9f262f",
+    F: "#d84b3e",
+    f: "#f0a28a",
     L: "#6fa04a",
     l: "#5a7f38",
     Q: "#c1b77b",
     M: "#9aa3a0",
   };
   const pixels = grids[resource].flatMap((row, y) =>
-    [...row].map((key, x) => `<i style="left:${x * 4}px;top:${y * 4}px;background:${colors[key]}"></i>`),
+    [...row].map((key, x) => `<i style="left:${x * 3}px;top:${y * 3}px;background:${colors[key]}"></i>`),
   ).join("");
   return `<span class="resource-icon" aria-hidden="true">${pixels}</span>`;
 }

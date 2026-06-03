@@ -1,22 +1,23 @@
 import { BUILDING_DEFS, COLORS, FARM_FOOD, FARM_REPLENISH_COST, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, UNIT_DEFS } from "../shared/config.js";
 import { id } from "./id.js";
-import { clamp, distance, moveToward } from "./math.js";
+import { clamp, distance, moveToward, rectsOverlap } from "./math.js";
 
 const SPAWNS = [
   { x: 8, y: 8 },
-  { x: 82, y: 9 },
-  { x: 9, y: 82 },
-  { x: 82, y: 82 },
-  { x: 45, y: 9 },
-  { x: 9, y: 45 },
-  { x: 83, y: 45 },
-  { x: 45, y: 83 },
-  { x: 24, y: 25 },
-  { x: 68, y: 68 },
+  { x: 178, y: 9 },
+  { x: 9, y: 178 },
+  { x: 178, y: 178 },
+  { x: 95, y: 9 },
+  { x: 9, y: 95 },
+  { x: 179, y: 95 },
+  { x: 95, y: 179 },
+  { x: 48, y: 50 },
+  { x: 140, y: 140 },
 ];
 
 const TREE_STUMP_THRESHOLD = 36;
 const STUMP_DECAY_SECONDS = 60;
+const RUIN_DECAY_SECONDS = 60;
 
 export function createWorld() {
   const world = {
@@ -35,11 +36,11 @@ export function createWorld() {
   return world;
 }
 
-export function addPlayer(world, name) {
+export function addPlayer(world, name, requestedColor = null) {
   const activeCount = Object.values(world.players).filter((p) => !p.defeated).length;
   const playerId = id("p");
   const spawn = chooseSpawn(world, activeCount);
-  const color = COLORS[activeCount % COLORS.length];
+  const color = normalizeColor(requestedColor) || COLORS[activeCount % COLORS.length];
   world.players[playerId] = {
     id: playerId,
     name: name.slice(0, 18) || "Player",
@@ -51,23 +52,24 @@ export function addPlayer(world, name) {
     popCap: 0,
     defeated: false,
     score: 0,
+    joinedAt: Date.now(),
   };
 
-  clearSpawnTrees(world, spawn.x, spawn.y, 7);
+  clearSpawnResources(world, spawn.x, spawn.y, 14);
   createBuilding(world, playerId, "townCenter", spawn.x, spawn.y, true);
-  createBuilding(world, playerId, "house", spawn.x + 3, spawn.y + 1, true);
-  createUnit(world, playerId, "villager", spawn.x + 1.5, spawn.y + 2.4);
-  createUnit(world, playerId, "villager", spawn.x + 2.2, spawn.y + 2.8);
-  createUnit(world, playerId, "soldier", spawn.x + 0.8, spawn.y + 3.1);
+  createUnit(world, playerId, "villager", spawn.x + 4.4, spawn.y + 4.5);
+  createUnit(world, playerId, "villager", spawn.x + 5.0, spawn.y + 4.9);
+  createUnit(world, playerId, "soldier", spawn.x + 3.8, spawn.y + 5.2);
   addLocalResources(world, spawn.x, spawn.y);
   notice(world, `${world.players[playerId].name} joined the world.`);
   recalcPlayer(world, playerId);
+  updateLeaderboard(world);
   return playerId;
 }
 
-function clearSpawnTrees(world, x, y, radius) {
+function clearSpawnResources(world, x, y, radius) {
   for (const resource of Object.values(world.resources)) {
-    if ((resource.stage === "tree" || resource.type === "tree") && distance(resource, { x, y }) <= radius) {
+    if (distance(resource, { x, y }) <= radius) {
       delete world.resources[resource.id];
     }
   }
@@ -77,16 +79,8 @@ export function removePlayer(world, playerId) {
   const player = world.players[playerId];
   if (!player) return;
   notice(world, `${player.name} left the world.`);
+  destroyPlayerStuff(world, playerId);
   delete world.players[playerId];
-  for (const unit of Object.values(world.units)) {
-    if (unit.ownerId === playerId) delete world.units[unit.id];
-  }
-  for (const building of Object.values(world.buildings)) {
-    if (building.ownerId === playerId) {
-      createRuin(world, building);
-      delete world.buildings[building.id];
-    }
-  }
   updateLeaderboard(world);
 }
 
@@ -98,6 +92,9 @@ export function command(world, playerId, body) {
   rebuildOccupancy(world);
   if (body.type === "move") return commandMove(world, playerId, body);
   if (body.type === "build") return commandBuild(world, playerId, body);
+  if (body.type === "finishBuild") return commandFinishBuild(world, playerId, body);
+  if (body.type === "deleteBuilding") return commandDeleteBuilding(world, playerId, body);
+  if (body.type === "setRallyPoint") return commandSetRallyPoint(world, playerId, body);
   if (body.type === "train") return commandTrain(world, playerId, body);
   if (body.type === "attack") return commandAttack(world, playerId, body);
   if (body.type === "gather") return commandGather(world, playerId, body);
@@ -110,7 +107,9 @@ export function stepWorld(world, dt) {
   world.tick += 1;
   rebuildOccupancy(world);
   stepResourceDecay(world, dt);
+  stepRuinDecay(world, dt);
   for (const unit of Object.values(world.units)) stepUnit(world, unit, dt);
+  resolveUnitSeparation(world);
   for (const building of Object.values(world.buildings)) stepBuilding(world, building, dt);
   for (const playerId of Object.keys(world.players)) recalcPlayer(world, playerId);
   updateLeaderboard(world);
@@ -130,6 +129,7 @@ function rebuildOccupancy(world) {
     if (x >= 0 && y >= 0 && x < size && y < size) grid[y * size + x] = 1;
   }
   for (const building of Object.values(world.buildings)) {
+    if (building.type === "farm") continue;
     for (let dy = 0; dy < building.size; dy += 1) {
       for (let dx = 0; dx < building.size; dx += 1) {
         const x = building.x + dx;
@@ -147,7 +147,7 @@ function occupied(world, x, y) {
 }
 
 function seedResources(world) {
-  for (let grove = 0; grove < 44; grove += 1) {
+  for (let grove = 0; grove < 176; grove += 1) {
     const cx = 4 + Math.floor(Math.random() * (MAP_SIZE - 8));
     const cy = 4 + Math.floor(Math.random() * (MAP_SIZE - 8));
     const count = 12 + Math.floor(Math.random() * 18);
@@ -157,25 +157,37 @@ function seedResources(world) {
       createResource(world, "tree", cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
     }
   }
-  for (let vein = 0; vein < 15; vein += 1) {
+  for (let vein = 0; vein < 60; vein += 1) {
     const cx = 5 + Math.floor(Math.random() * (MAP_SIZE - 10));
     const cy = 5 + Math.floor(Math.random() * (MAP_SIZE - 10));
     for (let i = 0; i < 5 + Math.floor(Math.random() * 4); i += 1) {
       createResource(world, "ore", cx + Math.floor(Math.random() * 5) - 2, cy + Math.floor(Math.random() * 5) - 2);
     }
   }
+  for (let patch = 0; patch < 88; patch += 1) {
+    const cx = 5 + Math.floor(Math.random() * (MAP_SIZE - 10));
+    const cy = 5 + Math.floor(Math.random() * (MAP_SIZE - 10));
+    for (let i = 0; i < 4 + Math.floor(Math.random() * 4); i += 1) {
+      createResource(world, "berry", cx + Math.floor(Math.random() * 4) - 2, cy + Math.floor(Math.random() * 4) - 2);
+    }
+  }
 }
 
 function addLocalResources(world, x, y) {
+  const sx = x < MAP_SIZE / 2 ? 1 : -1;
+  const sy = y < MAP_SIZE / 2 ? 1 : -1;
   const spots = [
-    ["tree", x - 3, y + 1],
-    ["tree", x - 4, y + 2],
-    ["tree", x + 4, y + 2],
-    ["tree", x + 5, y + 3],
-    ["tree", x + 5, y + 4],
-    ["tree", x + 6, y + 3],
-    ["ore", x + 2, y + 5],
-    ["ore", x + 3, y + 5],
+    ["tree", x + sx * 15, y + sy * 1],
+    ["tree", x + sx * 16, y + sy * 2],
+    ["tree", x + sx * 15, y + sy * 3],
+    ["tree", x + sx * 17, y + sy * 3],
+    ["tree", x + sx * 16, y + sy * 4],
+    ["tree", x + sx * 18, y + sy * 4],
+    ["berry", x + sx * 11, y + sy * 11],
+    ["berry", x + sx * 12, y + sy * 12],
+    ["berry", x + sx * 10, y + sy * 12],
+    ["ore", x + sx * 4, y + sy * 15],
+    ["ore", x + sx * 5, y + sy * 16],
   ];
   for (const [type, rx, ry] of spots) createResource(world, type, rx, ry);
 }
@@ -234,6 +246,8 @@ function createBuilding(world, ownerId, type, x, y, free = false) {
     cooldown: 0,
     attackFlash: 0,
     vision: def.vision || 5,
+    rallyPoint: null,
+    builderIds: [],
   };
   if (type === "farm") {
     building.amount = def.farmFood || FARM_FOOD;
@@ -249,9 +263,7 @@ function createBuilding(world, ownerId, type, x, y, free = false) {
 function createResource(world, type, x, y) {
   x = clamp(Math.round(x), 1, MAP_SIZE - 2);
   y = clamp(Math.round(y), 1, MAP_SIZE - 2);
-  const blocked = [...Object.values(world.resources), ...Object.values(world.buildings)].some((entity) =>
-    Math.round(entity.x) === x && Math.round(entity.y) === y,
-  );
+  const blocked = [...Object.values(world.resources), ...Object.values(world.buildings)].some((entity) => pointInsideEntity(x, y, entity));
   if (blocked) return null;
   const def = RESOURCE_DEFS[type];
   const resource = {
@@ -283,6 +295,11 @@ function createRuin(world, building) {
   };
 }
 
+function pointInsideEntity(x, y, entity) {
+  const size = entity.size || 1;
+  return x >= Math.floor(entity.x) && x < Math.floor(entity.x) + size && y >= Math.floor(entity.y) && y < Math.floor(entity.y) + size;
+}
+
 function commandMove(world, playerId, body) {
   forOwnUnits(world, playerId, body.unitIds, (unit, index) => {
     const target = {
@@ -301,16 +318,19 @@ function commandMove(world, playerId, body) {
 function commandAttack(world, playerId, body) {
   const target = world.units[body.targetId] || world.buildings[body.targetId];
   if (!target || target.ownerId === playerId) return { ok: false, error: "Invalid target." };
+  let assigned = false;
   forOwnUnits(world, playerId, body.unitIds, (unit) => {
     unit.command = { type: "attack", targetId: target.id, path: null };
+    assigned = true;
   });
-  return { ok: true };
+  return assigned ? { ok: true } : { ok: false, error: "Select units to command." };
 }
 
 function commandGather(world, playerId, body) {
   const resource = world.resources[body.targetId] || farmAsResource(world.buildings[body.targetId]);
   if (!resource) return { ok: false, error: "Invalid resource." };
   if (resource.type === "farm" && resource.ownerId !== playerId) return { ok: false, error: "You can only work your own farms." };
+  let assigned = false;
   forOwnUnits(world, playerId, body.unitIds, (unit) => {
     if (UNIT_DEFS[unit.type].canGather) {
       unit.command = {
@@ -322,9 +342,10 @@ function commandGather(world, playerId, body) {
         progress: 0,
         path: null,
       };
+      assigned = true;
     }
   });
-  return { ok: true };
+  return assigned ? { ok: true } : { ok: false, error: "Select villagers to gather." };
 }
 
 function commandToggleAutoFarm(world, playerId) {
@@ -335,7 +356,7 @@ function commandToggleAutoFarm(world, playerId) {
 
 function commandReplenishFarm(world, playerId, body) {
   const farm = world.buildings[body.farmId];
-  if (!farm || farm.ownerId !== playerId || farm.type !== "farm") return { ok: false, error: "Select one of your farms." };
+  if (!farm || farm.ownerId !== playerId || farm.type !== "farm" || !isComplete(farm)) return { ok: false, error: "Select one of your completed farms." };
   return replenishFarm(world, farm) ? { ok: true } : { ok: false, error: "Not enough wood to reseed farm." };
 }
 
@@ -352,7 +373,45 @@ function commandBuild(world, playerId, body) {
   const building = createBuilding(world, playerId, body.buildingType, x, y);
   if (!building) return { ok: false, error: "Not enough resources." };
   building.hp = Math.max(12, Math.floor(building.maxHp * 0.25));
-  for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null };
+  building.builderIds = builders.map((unit) => unit.id);
+  const resourceKind = depotGatherKind(building);
+  for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.type === "farm" };
+  return { ok: true };
+}
+
+function commandFinishBuild(world, playerId, body) {
+  const building = world.buildings[body.buildingId];
+  if (!building || building.ownerId !== playerId) return { ok: false, error: "Invalid building." };
+  if (isComplete(building)) return { ok: false, error: "Building is already complete." };
+  const builders = Object.values(world.units).filter(
+    (unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && UNIT_DEFS[unit.type].canBuild,
+  );
+  if (builders.length === 0) return { ok: false, error: "Select a villager to build." };
+  const resourceKind = depotGatherKind(building);
+  building.builderIds = [...new Set([...(building.builderIds || []), ...builders.map((unit) => unit.id)])];
+  for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.type === "farm" };
+  return { ok: true };
+}
+
+function commandDeleteBuilding(world, playerId, body) {
+  const building = world.buildings[body.buildingId];
+  if (!building || building.ownerId !== playerId) return { ok: false, error: "Select one of your buildings." };
+  createRuin(world, building);
+  delete world.buildings[building.id];
+  for (const unit of Object.values(world.units)) {
+    if (unit.command?.targetId === building.id) unit.command = { type: "idle" };
+  }
+  return { ok: true };
+}
+
+function commandSetRallyPoint(world, playerId, body) {
+  const building = world.buildings[body.buildingId];
+  const def = building && BUILDING_DEFS[building.type];
+  if (!building || building.ownerId !== playerId || !def?.trains?.length) return { ok: false, error: "Select a production building." };
+  building.rallyPoint = {
+    x: clamp(Number(body.x), 0, MAP_SIZE - 1),
+    y: clamp(Number(body.y), 0, MAP_SIZE - 1),
+  };
   return { ok: true };
 }
 
@@ -360,7 +419,7 @@ function commandTrain(world, playerId, body) {
   const building = world.buildings[body.buildingId];
   const unitDef = UNIT_DEFS[body.unitType];
   const buildingDef = building && BUILDING_DEFS[building.type];
-  if (!building || building.ownerId !== playerId || !unitDef || !buildingDef?.trains?.includes(body.unitType)) {
+  if (!building || building.ownerId !== playerId || !isComplete(building) || !unitDef || !buildingDef?.trains?.includes(body.unitType)) {
     return { ok: false, error: "Cannot train there." };
   }
   const player = world.players[playerId];
@@ -403,11 +462,15 @@ function stepBuilding(world, building, dt) {
   const def = BUILDING_DEFS[building.type];
   building.cooldown = Math.max(0, building.cooldown - dt);
   building.attackFlash = Math.max(0, (building.attackFlash || 0) - dt);
+  if (!isComplete(building)) return;
   if (building.queue.length > 0) {
     building.queue[0].remaining -= dt;
     if (building.queue[0].remaining <= 0) {
       const item = building.queue.shift();
-      createUnit(world, building.ownerId, item.unitType, building.x + building.size + 0.4, building.y + building.size + 0.2);
+      const unit = createUnit(world, building.ownerId, item.unitType, building.x + building.size + 0.4, building.y + building.size + 0.2);
+      if (building.rallyPoint) {
+        unit.command = { type: "move", ...building.rallyPoint, path: findPath(world, unit, building.rallyPoint) };
+      }
     }
   }
   if (def.attack) {
@@ -476,14 +539,16 @@ function stepGather(world, unit, command, dt) {
     unit.command = { type: "idle" };
     return;
   }
-  if (distance(unit, resource) > 1.1) {
-    moveNearTarget(world, unit, command, resource, 1.1, UNIT_DEFS[unit.type].speed * dt);
+  const targetPoint = resource.kind === "building" ? centerOf(resource) : resource;
+  const gatherRange = resource.kind === "building" ? resource.size + 0.7 : 1.1;
+  if (distance(unit, targetPoint) > gatherRange) {
+    moveNearTarget(world, unit, command, targetPoint, gatherRange, UNIT_DEFS[unit.type].speed * dt);
     return;
   }
   unit.workFlash = 0.25;
   command.progress = (command.progress || 0) + dt;
-  if (command.progress >= 1.1) {
-    const amount = Math.min(UNIT_DEFS[unit.type].carryCapacity || 24, resource.amount);
+  if (command.progress >= gatherSeconds(resource)) {
+    const amount = Math.min(gatherAmount(unit, resource), resource.amount);
     resource.amount -= amount;
     unit.carried = { resource: resource.resource, amount };
     command.progress = 0;
@@ -498,11 +563,28 @@ function stepGather(world, unit, command, dt) {
   }
 }
 
+function gatherSeconds(resource) {
+  if (resource.kind === "building" && resource.type === "farm") return 8;
+  return 1.1;
+}
+
+function gatherAmount(unit, resource) {
+  if (resource.kind === "building" && resource.type === "farm") return 6;
+  return UNIT_DEFS[unit.type].carryCapacity || 24;
+}
+
 function stepResourceDecay(world, dt) {
   for (const resource of Object.values(world.resources)) {
     if (resource.stage !== "stump") continue;
     resource.decay = (resource.decay || 0) + dt;
     if (resource.decay >= STUMP_DECAY_SECONDS) delete world.resources[resource.id];
+  }
+}
+
+function stepRuinDecay(world, dt) {
+  for (const ruin of Object.values(world.ruins)) {
+    ruin.age = (ruin.age || 0) + dt;
+    if (ruin.age >= RUIN_DECAY_SECONDS) delete world.ruins[ruin.id];
   }
 }
 
@@ -520,13 +602,63 @@ function stepBuild(world, unit, command, dt) {
     unit.command = { type: "idle" };
     return;
   }
+  if (isComplete(building)) {
+    assignPostBuildGather(world, unit, command.resourceKind, command.gatherBuiltFarm ? building : null);
+    return;
+  }
   if (distance(unit, centerOf(building)) > building.size + 0.7) {
     moveNearTarget(world, unit, command, centerOf(building), building.size + 0.7, UNIT_DEFS[unit.type].speed * dt);
     return;
   }
   unit.workFlash = 0.2;
   building.hp = Math.min(building.maxHp, building.hp + 38 * dt);
-  if (building.hp >= building.maxHp) unit.command = { type: "idle" };
+  if (building.hp >= building.maxHp) assignPostBuildGather(world, unit, command.resourceKind, command.gatherBuiltFarm ? building : null);
+}
+
+function assignPostBuildGather(world, unit, resourceKind, builtFarm = null) {
+  if (builtFarm && UNIT_DEFS[unit.type].canGather && isComplete(builtFarm)) {
+    unit.command = { type: "gather", targetId: builtFarm.id, resourceKind: "food", progress: 0, path: null };
+    return;
+  }
+  const nextBuild = findNextBuildSite(world, unit);
+  if (nextBuild) {
+    nextBuild.builderIds = [...new Set([...(nextBuild.builderIds || []), unit.id])];
+    unit.command = { type: "build", targetId: nextBuild.id, path: null, resourceKind: depotGatherKind(nextBuild), gatherBuiltFarm: nextBuild.type === "farm" };
+    return;
+  }
+  if (!resourceKind || !UNIT_DEFS[unit.type].canGather) {
+    unit.command = { type: "idle" };
+    return;
+  }
+  const next = findNextResource(world, unit, resourceKind);
+  unit.command = next ? { type: "gather", targetId: next.id, resourceKind, progress: 0, path: null } : { type: "idle" };
+}
+
+function findNextBuildSite(world, unit) {
+  let bestInitiated = null;
+  let bestInitiatedDist = Infinity;
+  let bestNearby = null;
+  let bestNearbyDist = 28;
+  for (const building of Object.values(world.buildings)) {
+    if (building.ownerId !== unit.ownerId || isComplete(building)) continue;
+    const d = distance(unit, centerOf(building));
+    if (building.builderIds?.includes(unit.id) && d < bestInitiatedDist) {
+      bestInitiated = building;
+      bestInitiatedDist = d;
+    }
+    if (d < bestNearbyDist) {
+      bestNearby = building;
+      bestNearbyDist = d;
+    }
+  }
+  return bestInitiated || bestNearby;
+}
+
+function depotGatherKind(building) {
+  if (building.type === "lumberCamp") return "wood";
+  if (building.type === "foodDepot") return "food";
+  if (building.type === "miningCamp") return "ore";
+  return null;
 }
 
 function autoAcquire(world, unit) {
@@ -550,7 +682,7 @@ function findNextResource(world, unit, resourceKind) {
   }
   if (resourceKind === "food") {
     for (const b of Object.values(world.buildings)) {
-      if (b.ownerId !== unit.ownerId || b.type !== "farm" || (b.amount || 0) <= 0) continue;
+      if (b.ownerId !== unit.ownerId || b.type !== "farm" || !isComplete(b) || (b.amount || 0) <= 0) continue;
       const d = distance(unit, b);
       if (d < bestDist) {
         best = b;
@@ -566,7 +698,7 @@ function nearestDepot(world, ownerId, resource, source) {
   let bestDist = Infinity;
   for (const building of Object.values(world.buildings)) {
     const def = BUILDING_DEFS[building.type];
-    if (building.ownerId !== ownerId || !def.accepts?.includes(resource)) continue;
+    if (building.ownerId !== ownerId || !isComplete(building) || !def.accepts?.includes(resource)) continue;
     const d = distance(source, centerOf(building));
     if (d < bestDist) {
       best = building;
@@ -578,6 +710,7 @@ function nearestDepot(world, ownerId, resource, source) {
 
 function farmAsResource(building) {
   if (!building || building.type !== "farm") return null;
+  if (!isComplete(building)) return null;
   return building;
 }
 
@@ -627,10 +760,26 @@ function defeatPlayer(world, playerId, attackerId) {
   player.defeated = true;
   const attacker = world.players[attackerId];
   notice(world, `${player.name}'s town center was destroyed${attacker ? ` by ${attacker.name}` : ""}.`);
+  destroyPlayerStuff(world, playerId);
+}
+
+function destroyPlayerStuff(world, playerId) {
+  for (const unit of Object.values(world.units)) {
+    if (unit.ownerId === playerId) delete world.units[unit.id];
+  }
+  for (const building of Object.values(world.buildings)) {
+    if (building.ownerId === playerId) {
+      createRuin(world, building);
+      delete world.buildings[building.id];
+    }
+  }
 }
 
 function canPlace(world, x, y, size) {
-  if (x < 0 || y < 0 || x + size >= MAP_SIZE || y + size >= MAP_SIZE) return false;
+  if (x < 0 || y < 0 || x + size > MAP_SIZE || y + size > MAP_SIZE) return false;
+  for (const building of Object.values(world.buildings)) {
+    if (rectsOverlap({ x, y, size }, building)) return false;
+  }
   for (let dy = 0; dy < size; dy += 1) {
     for (let dx = 0; dx < size; dx += 1) {
       if (occupied(world, x + dx, y + dy)) return false;
@@ -648,6 +797,36 @@ function moveUnit(world, unit, target, maxStep) {
     return true;
   }
   return arrived;
+}
+
+function resolveUnitSeparation(world) {
+  const units = Object.values(world.units);
+  const minDistance = 0.48;
+  for (let i = 0; i < units.length; i += 1) {
+    for (let j = i + 1; j < units.length; j += 1) {
+      const a = units[i];
+      const b = units[j];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist >= minDistance) continue;
+      const push = (minDistance - (dist || 0.001)) / 2;
+      const nx = dist ? dx / dist : 1;
+      const ny = dist ? dy / dist : 0;
+      nudgeUnit(world, a, -nx * push, -ny * push);
+      nudgeUnit(world, b, nx * push, ny * push);
+    }
+  }
+}
+
+function nudgeUnit(world, unit, dx, dy) {
+  const before = { x: unit.x, y: unit.y };
+  unit.x = clamp(unit.x + dx, 0.2, MAP_SIZE - 0.2);
+  unit.y = clamp(unit.y + dy, 0.2, MAP_SIZE - 0.2);
+  if (occupied(world, Math.floor(unit.x), Math.floor(unit.y))) {
+    unit.x = before.x;
+    unit.y = before.y;
+  }
 }
 
 function moveWithPath(world, unit, command, maxStep) {
@@ -780,7 +959,7 @@ function unpackPath(node) {
 }
 
 function centerOf(entity) {
-  const offset = entity.size ? entity.size / 2 : 0;
+  const offset = entity.size ? (entity.size - 1) / 2 : 0;
   return { x: entity.x + offset, y: entity.y + offset };
 }
 
@@ -798,19 +977,29 @@ function recalcPlayer(world, playerId) {
   const units = Object.values(world.units).filter((unit) => unit.ownerId === playerId);
   const buildings = Object.values(world.buildings).filter((building) => building.ownerId === playerId);
   player.population = units.length;
-  player.popCap = 4 + buildings.reduce((sum, building) => sum + (BUILDING_DEFS[building.type].pop || 0), 0);
+  player.popCap = 4 + buildings.filter(isComplete).reduce((sum, building) => sum + (BUILDING_DEFS[building.type].pop || 0), 0);
   const unitScore = units.reduce((sum, unit) => sum + UNIT_DEFS[unit.type].score, 0);
   const buildingScore = buildings.reduce((sum, building) => sum + BUILDING_DEFS[building.type].score, 0);
   const resourceScore = Math.floor(Object.values(player.resources).reduce((sum, amount) => sum + amount, 0) / 8);
   player.score = player.defeated ? 0 : unitScore + buildingScore + resourceScore;
 }
 
+function isComplete(building) {
+  return building.hp >= building.maxHp;
+}
+
 function updateLeaderboard(world) {
   world.leaderboard = Object.values(world.players)
-    .map((player) => ({ id: player.id, name: player.name, color: player.color, score: player.score, defeated: player.defeated }))
+    .filter((player) => !player.defeated)
+    .map((player) => ({ id: player.id, name: player.name, color: player.color, score: player.score, defeated: player.defeated, joinedAt: player.joinedAt }))
     .sort((a, b) => b.score - a.score);
 }
 
 function notice(world, text) {
   world.notices.push({ id: id("n"), text, at: Date.now() });
+}
+
+function normalizeColor(value) {
+  if (typeof value !== "string") return null;
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : null;
 }

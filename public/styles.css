@@ -80,6 +80,18 @@ button:disabled {
   padding: 0 10px;
 }
 
+.join-panel input[type="color"] {
+  width: 100%;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.join-notice {
+  min-height: 18px;
+  color: #e9bd59;
+  font-size: 13px;
+}
+
 .game {
   position: relative;
   width: 100vw;
@@ -120,6 +132,10 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.top-right h2 {
+  padding-right: 34px;
+}
+
 #minimap {
   display: block;
   width: 180px;
@@ -128,6 +144,40 @@ button:disabled {
   border: 1px solid rgb(244 239 230 / 0.22);
   background: #111813;
   image-rendering: pixelated;
+}
+
+.mute-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(17 24 19 / 0.85);
+}
+
+.mute-button::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  image-rendering: pixelated;
+  background:
+    linear-gradient(#e9bd59 0 0) 1px 7px / 5px 6px no-repeat,
+    linear-gradient(#e9bd59 0 0) 6px 4px / 5px 12px no-repeat,
+    linear-gradient(#e9bd59 0 0) 11px 5px / 2px 10px no-repeat,
+    linear-gradient(#e9bd59 0 0) 14px 7px / 2px 6px no-repeat;
+}
+
+.mute-button.muted::after {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 3px;
+  background: #d84b3e;
+  transform: rotate(-35deg);
 }
 
 .top-right h2 {
@@ -141,42 +191,68 @@ button:disabled {
   padding-left: 22px;
 }
 
+.ping {
+  margin: -4px 0 8px;
+  color: #cfc7b7;
+  font-size: 12px;
+}
+
 .top-right li {
   margin: 5px 0;
   font-size: 13px;
 }
 
+.top-right li em {
+  color: #cfc7b7;
+  font-style: normal;
+  font-size: 12px;
+}
+
 .resources {
   display: flex;
-  gap: 12px;
+  gap: 14px;
   padding: 10px 12px 6px;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .resource-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  cursor: help;
 }
 
 .resource-icon {
   position: relative;
   display: inline-block;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   image-rendering: pixelated;
 }
 
 .resource-icon i {
   position: absolute;
-  width: 4px;
-  height: 4px;
+  width: 3px;
+  height: 3px;
 }
 
 .status {
   padding: 0 12px 10px;
   color: #cfc7b7;
   font-size: 12px;
+}
+
+.leave-button {
+  margin: 0 12px 12px;
+  width: calc(100% - 24px);
+  min-height: 30px;
+  border-color: #8b3f35;
+  background: #3f2b28;
+  font-size: 12px;
+}
+
+.leave-button:hover {
+  background: #5b342e;
 }
 
 .bottom {
