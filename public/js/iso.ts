@@ -1,6 +1,6 @@
 import { TILE_H, TILE_W } from "./constants.js";
 
-export function isoToScreen(x, y, camera) {
+export function isoToScreen(x: number, y: number, camera: { x: number; y: number; zoom?: number }) {
   const zoom = camera.zoom || 1;
   return {
     x: Math.round(camera.x + (x - y) * TILE_W / 2 * zoom),
@@ -8,7 +8,7 @@ export function isoToScreen(x, y, camera) {
   };
 }
 
-export function screenToIso(x, y, camera) {
+export function screenToIso(x: number, y: number, camera: { x: number; y: number; zoom?: number }) {
   const zoom = camera.zoom || 1;
   const sx = (x - camera.x) / zoom;
   const sy = (y - camera.y) / zoom;
@@ -18,7 +18,7 @@ export function screenToIso(x, y, camera) {
   };
 }
 
-export function entitySort(a, b) {
+export function entitySort(a: { x: number; y: number; size?: number }, b: { x: number; y: number; size?: number }) {
   const ad = (a.x + (a.size || 0)) + (a.y + (a.size || 0));
   const bd = (b.x + (b.size || 0)) + (b.y + (b.size || 0));
   return ad - bd;

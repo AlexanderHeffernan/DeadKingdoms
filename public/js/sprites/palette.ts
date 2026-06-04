@@ -29,4 +29,4 @@ export const palette = {
   "q": "#8f8a68",
   "Q": "#c1b77b",
   "u": "#2b2b2a",
-};
+} as const;

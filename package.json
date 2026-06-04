@@ -5,9 +5,20 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "start": "node src/server/index.js"
+    "build:server": "tsc -p tsconfig.json",
+    "build:client": "esbuild public/js/app.ts --bundle --format=esm --target=es2020 --minify --outfile=public/js/app.js",
+    "build": "npm run build:server && npm run build:client",
+    "dev:client": "tsc -p tsconfig.client.json",
+    "dev": "npm run build:server && npm run dev:client && node dist/server/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "start": "node dist/server/index.js"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.8.3"
   }
 }

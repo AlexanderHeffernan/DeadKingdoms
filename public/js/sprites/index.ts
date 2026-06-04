@@ -14,7 +14,9 @@ import tree from "./tree.js";
 import villager from "./villager.js";
 import watchTower from "./watchTower.js";
 
-export const sprites = {
+import type { SpriteName } from "../../../src/shared/types.js";
+
+export const sprites: Record<SpriteName, readonly string[]> = {
   barracks,
   berry,
   farm,
@@ -30,4 +32,4 @@ export const sprites = {
   tree,
   villager,
   watchTower,
-};
+} as const;

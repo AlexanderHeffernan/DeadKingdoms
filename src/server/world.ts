@@ -1,6 +1,26 @@
-import { BUILDING_DEFS, COLORS, FARM_FOOD, FARM_REPLENISH_COST, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, UNIT_DEFS } from "../shared/config.js";
+import { BUILDING_DEFS, COLORS, FARM_FOOD, FARM_REPLENISH_COST, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, STARTING_UNITS, UNIT_DEFS } from "../shared/config.js";
 import { id } from "./id.js";
 import { clamp, distance, moveToward, rectsOverlap } from "./math.js";
+import type {
+  BuildQueueItem,
+  Building,
+  BuildingId,
+  BuildingType,
+  CommandPayload,
+  CommandResult,
+  EntityId,
+  PathNode,
+  Player,
+  PlayerId,
+  ResourceNode,
+  ResourceType,
+  Ruin,
+  Unit,
+  UnitCommand,
+  UnitId,
+  UnitType,
+  World,
+} from "../shared/types.js";
 
 const SPAWNS = [
   { x: 8, y: 8 },
@@ -19,8 +39,8 @@ const TREE_STUMP_THRESHOLD = 36;
 const STUMP_DECAY_SECONDS = 60;
 const RUIN_DECAY_SECONDS = 60;
 
-export function createWorld() {
-  const world = {
+export function createWorld(): World {
+  const world: World = {
     map: { size: MAP_SIZE },
     players: {},
     units: {},
@@ -36,11 +56,11 @@ export function createWorld() {
   return world;
 }
 
-export function addPlayer(world, name, requestedColor = null) {
+export function addPlayer(world: World, name: string, requestedColor: string | null = null): PlayerId {
   const activeCount = Object.values(world.players).filter((p) => !p.defeated).length;
   const playerId = id("p");
   const spawn = chooseSpawn(world, activeCount);
-  const color = normalizeColor(requestedColor) || COLORS[activeCount % COLORS.length];
+  const color: string = normalizeColor(requestedColor) || COLORS[activeCount % COLORS.length]!;
   world.players[playerId] = {
     id: playerId,
     name: name.slice(0, 18) || "Player",
@@ -57,17 +77,15 @@ export function addPlayer(world, name, requestedColor = null) {
 
   clearSpawnResources(world, spawn.x, spawn.y, 14);
   createBuilding(world, playerId, "townCenter", spawn.x, spawn.y, true);
-  createUnit(world, playerId, "villager", spawn.x + 4.4, spawn.y + 4.5);
-  createUnit(world, playerId, "villager", spawn.x + 5.0, spawn.y + 4.9);
-  createUnit(world, playerId, "soldier", spawn.x + 3.8, spawn.y + 5.2);
+  for (const unit of STARTING_UNITS) createUnit(world, playerId, unit.unitType, spawn.x + unit.x, spawn.y + unit.y);
   addLocalResources(world, spawn.x, spawn.y);
-  notice(world, `${world.players[playerId].name} joined the world.`);
+  notice(world, `${world.players[playerId]!.name} joined the world.`);
   recalcPlayer(world, playerId);
   updateLeaderboard(world);
   return playerId;
 }
 
-function clearSpawnResources(world, x, y, radius) {
+function clearSpawnResources(world: World, x: number, y: number, radius: number) {
   for (const resource of Object.values(world.resources)) {
     if (distance(resource, { x, y }) <= radius) {
       delete world.resources[resource.id];
@@ -75,7 +93,7 @@ function clearSpawnResources(world, x, y, radius) {
   }
 }
 
-export function removePlayer(world, playerId) {
+export function removePlayer(world: World, playerId: PlayerId) {
   const player = world.players[playerId];
   if (!player) return;
   notice(world, `${player.name} left the world.`);
@@ -84,26 +102,16 @@ export function removePlayer(world, playerId) {
   updateLeaderboard(world);
 }
 
-export function command(world, playerId, body) {
+export function command(world: World, playerId: PlayerId, body: CommandPayload): CommandResult {
   const player = world.players[playerId];
   if (!player || player.defeated) return { ok: false, error: "Player unavailable." };
-  // Keep the occupancy grid fresh for canPlace / pathfinding when multiple
-  // commands arrive between simulation ticks.
   rebuildOccupancy(world);
-  if (body.type === "move") return commandMove(world, playerId, body);
-  if (body.type === "build") return commandBuild(world, playerId, body);
-  if (body.type === "finishBuild") return commandFinishBuild(world, playerId, body);
-  if (body.type === "deleteBuilding") return commandDeleteBuilding(world, playerId, body);
-  if (body.type === "setRallyPoint") return commandSetRallyPoint(world, playerId, body);
-  if (body.type === "train") return commandTrain(world, playerId, body);
-  if (body.type === "attack") return commandAttack(world, playerId, body);
-  if (body.type === "gather") return commandGather(world, playerId, body);
-  if (body.type === "toggleAutoFarm") return commandToggleAutoFarm(world, playerId);
-  if (body.type === "replenishFarm") return commandReplenishFarm(world, playerId, body);
-  return { ok: false, error: "Unknown command." };
+  const handler = COMMAND_HANDLERS[body.type];
+  if (!handler) return { ok: false, error: "Unknown command." };
+  return handler(world, playerId, body as never);
 }
 
-export function stepWorld(world, dt) {
+export function stepWorld(world: World, dt: number) {
   world.tick += 1;
   rebuildOccupancy(world);
   stepResourceDecay(world, dt);
@@ -115,7 +123,44 @@ export function stepWorld(world, dt) {
   updateLeaderboard(world);
 }
 
-function rebuildOccupancy(world) {
+type CommandHandler<T extends CommandPayload["type"]> = (
+  world: World,
+  playerId: PlayerId,
+  body: Extract<CommandPayload, { type: T }>,
+) => CommandResult;
+
+const COMMAND_HANDLERS: { [K in CommandPayload["type"]]: CommandHandler<K> } = {
+  move: commandMove,
+  build: commandBuild,
+  finishBuild: commandFinishBuild,
+  deleteBuilding: commandDeleteBuilding,
+  setRallyPoint: commandSetRallyPoint,
+  train: commandTrain,
+  attack: commandAttack,
+  gather: commandGather,
+  toggleAutoFarm: commandToggleAutoFarm,
+  replenishFarm: commandReplenishFarm,
+};
+
+type UnitCommandHandler<T extends UnitCommand["type"]> = (
+  world: World,
+  unit: Unit,
+  command: Extract<UnitCommand, { type: T }>,
+  dt: number,
+) => void;
+
+const UNIT_COMMANDS: { [K in UnitCommand["type"]]: UnitCommandHandler<K> } = {
+  idle: (world, unit) => autoAcquire(world, unit),
+  move: (world, unit, command, dt) => {
+    unit.facing = command.x < unit.x ? "left" : "right";
+    if (moveWithPath(world, unit, command, unitBehavior(unit).stats.speed * dt)) unit.command = { type: "idle" };
+  },
+  attack: stepAttack,
+  gather: stepGather,
+  build: stepBuild,
+};
+
+function rebuildOccupancy(world: World) {
   const size = MAP_SIZE;
   if (!world._occupancy || world._occupancy.length !== size * size) {
     world._occupancy = new Uint8Array(size * size);
@@ -140,13 +185,13 @@ function rebuildOccupancy(world) {
   }
 }
 
-function occupied(world, x, y) {
+function occupied(world: World, x: number, y: number): boolean {
   if (!world._occupancy) return false;
   if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) return true;
   return world._occupancy[y * MAP_SIZE + x] === 1;
 }
 
-function seedResources(world) {
+function seedResources(world: World) {
   for (let grove = 0; grove < 176; grove += 1) {
     const cx = 4 + Math.floor(Math.random() * (MAP_SIZE - 8));
     const cy = 4 + Math.floor(Math.random() * (MAP_SIZE - 8));
@@ -173,27 +218,27 @@ function seedResources(world) {
   }
 }
 
-function addLocalResources(world, x, y) {
+function addLocalResources(world: World, x: number, y: number) {
   const sx = x < MAP_SIZE / 2 ? 1 : -1;
   const sy = y < MAP_SIZE / 2 ? 1 : -1;
   const spots = [
-    ["tree", x + sx * 15, y + sy * 1],
-    ["tree", x + sx * 16, y + sy * 2],
-    ["tree", x + sx * 15, y + sy * 3],
-    ["tree", x + sx * 17, y + sy * 3],
-    ["tree", x + sx * 16, y + sy * 4],
-    ["tree", x + sx * 18, y + sy * 4],
-    ["berry", x + sx * 11, y + sy * 11],
-    ["berry", x + sx * 12, y + sy * 12],
-    ["berry", x + sx * 10, y + sy * 12],
-    ["ore", x + sx * 4, y + sy * 15],
-    ["ore", x + sx * 5, y + sy * 16],
+    ["tree", x + sx * 15, y + sy * 1] as const,
+    ["tree", x + sx * 16, y + sy * 2] as const,
+    ["tree", x + sx * 15, y + sy * 3] as const,
+    ["tree", x + sx * 17, y + sy * 3] as const,
+    ["tree", x + sx * 16, y + sy * 4] as const,
+    ["tree", x + sx * 18, y + sy * 4] as const,
+    ["berry", x + sx * 11, y + sy * 11] as const,
+    ["berry", x + sx * 12, y + sy * 12] as const,
+    ["berry", x + sx * 10, y + sy * 12] as const,
+    ["ore", x + sx * 4, y + sy * 15] as const,
+    ["ore", x + sx * 5, y + sy * 16] as const,
   ];
-  for (const [type, rx, ry] of spots) createResource(world, type, rx, ry);
+  for (const [type, rx, ry] of spots) createResource(world, type as "tree" | "ore" | "berry", rx, ry);
 }
 
-function chooseSpawn(world, count) {
-  let best = SPAWNS[count % SPAWNS.length];
+function chooseSpawn(world: World, count: number) {
+  let best = SPAWNS[count % SPAWNS.length]!;
   let bestDistance = -1;
   for (const spawn of SPAWNS) {
     const nearest = Object.values(world.buildings)
@@ -207,17 +252,17 @@ function chooseSpawn(world, count) {
   return best;
 }
 
-function createUnit(world, ownerId, type, x, y) {
+function createUnit(world: World, ownerId: PlayerId, type: UnitType, x: number, y: number): Unit {
   const def = UNIT_DEFS[type];
-  const unit = {
+  const unit: Unit = {
     id: id("u"),
     kind: "unit",
     ownerId,
     type,
     x,
     y,
-    hp: def.maxHp,
-    maxHp: def.maxHp,
+    hp: def.stats.maxHp,
+    maxHp: def.stats.maxHp,
     command: { type: "idle" },
     cooldown: 0,
     attackFlash: 0,
@@ -230,9 +275,9 @@ function createUnit(world, ownerId, type, x, y) {
   return unit;
 }
 
-function createBuilding(world, ownerId, type, x, y, free = false) {
+function createBuilding(world: World, ownerId: PlayerId, type: BuildingType, x: number, y: number, free = false): Building | null {
   const def = BUILDING_DEFS[type];
-  const building = {
+  const building: Building = {
     id: id("b"),
     kind: "building",
     ownerId,
@@ -250,23 +295,24 @@ function createBuilding(world, ownerId, type, x, y, free = false) {
     builderIds: [],
   };
   if (type === "farm") {
-    building.amount = def.farmFood || FARM_FOOD;
-    building.maxAmount = def.farmFood || FARM_FOOD;
+    const farmDef = def as typeof BUILDING_DEFS["farm"];
+    building.amount = farmDef.farmFood || FARM_FOOD;
+    building.maxAmount = farmDef.farmFood || FARM_FOOD;
     building.resource = "food";
     building.exhausted = false;
   }
-  if (!free && !spend(world.players[ownerId], def.cost)) return null;
+  if (!free && !spend(world.players[ownerId]!, def.cost)) return null;
   world.buildings[building.id] = building;
   return building;
 }
 
-function createResource(world, type, x, y) {
+function createResource(world: World, type: keyof typeof RESOURCE_DEFS, x: number, y: number): ResourceNode | null {
   x = clamp(Math.round(x), 1, MAP_SIZE - 2);
   y = clamp(Math.round(y), 1, MAP_SIZE - 2);
   const blocked = [...Object.values(world.resources), ...Object.values(world.buildings)].some((entity) => pointInsideEntity(x, y, entity));
   if (blocked) return null;
   const def = RESOURCE_DEFS[type];
-  const resource = {
+  const resource: ResourceNode = {
     id: id("r"),
     kind: "resource",
     type,
@@ -282,7 +328,7 @@ function createResource(world, type, x, y) {
   return resource;
 }
 
-function createRuin(world, building) {
+function createRuin(world: World, building: Building) {
   const ruinId = id("x");
   world.ruins[ruinId] = {
     id: ruinId,
@@ -295,12 +341,12 @@ function createRuin(world, building) {
   };
 }
 
-function pointInsideEntity(x, y, entity) {
+function pointInsideEntity(x: number, y: number, entity: { x: number; y: number; size?: number }): boolean {
   const size = entity.size || 1;
   return x >= Math.floor(entity.x) && x < Math.floor(entity.x) + size && y >= Math.floor(entity.y) && y < Math.floor(entity.y) + size;
 }
 
-function commandMove(world, playerId, body) {
+function commandMove(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "move" }>): CommandResult {
   forOwnUnits(world, playerId, body.unitIds, (unit, index) => {
     const target = {
       x: clamp(Number(body.x) + (index % 3) * 0.25, 0, MAP_SIZE - 1),
@@ -315,7 +361,7 @@ function commandMove(world, playerId, body) {
   return { ok: true };
 }
 
-function commandAttack(world, playerId, body) {
+function commandAttack(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "attack" }>): CommandResult {
   const target = world.units[body.targetId] || world.buildings[body.targetId];
   if (!target || target.ownerId === playerId) return { ok: false, error: "Invalid target." };
   let assigned = false;
@@ -326,50 +372,51 @@ function commandAttack(world, playerId, body) {
   return assigned ? { ok: true } : { ok: false, error: "Select units to command." };
 }
 
-function commandGather(world, playerId, body) {
+function commandGather(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "gather" }>): CommandResult {
   const resource = world.resources[body.targetId] || farmAsResource(world.buildings[body.targetId]);
   if (!resource) return { ok: false, error: "Invalid resource." };
   if (resource.type === "farm" && resource.ownerId !== playerId) return { ok: false, error: "You can only work your own farms." };
   let assigned = false;
   forOwnUnits(world, playerId, body.unitIds, (unit) => {
-    if (UNIT_DEFS[unit.type].canGather) {
+    if (unitBehavior(unit).canGather()) {
       unit.command = {
         type: "gather",
         targetId: resource.id,
-        // Remember what this villager was after so we can auto-find another
+        // Remember what this worker was after so we can auto-find another
         // tree / ore vein / farm when the current target is gone.
-        resourceKind: resource.resource,
+        resourceKind: resource.resource!,
         progress: 0,
         path: null,
       };
       assigned = true;
     }
   });
-  return assigned ? { ok: true } : { ok: false, error: "Select villagers to gather." };
+  return assigned ? { ok: true } : { ok: false, error: "Select gather-capable units." };
 }
 
-function commandToggleAutoFarm(world, playerId) {
+function commandToggleAutoFarm(world: World, playerId: PlayerId): CommandResult {
   const player = world.players[playerId];
+  if (!player) return { ok: false, error: "Player not found." };
   player.autoReplenishFarms = !player.autoReplenishFarms;
   return { ok: true, autoReplenishFarms: player.autoReplenishFarms };
 }
 
-function commandReplenishFarm(world, playerId, body) {
+function commandReplenishFarm(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "replenishFarm" }>): CommandResult {
   const farm = world.buildings[body.farmId];
   if (!farm || farm.ownerId !== playerId || farm.type !== "farm" || !isComplete(farm)) return { ok: false, error: "Select one of your completed farms." };
   return replenishFarm(world, farm) ? { ok: true } : { ok: false, error: "Not enough wood to reseed farm." };
 }
 
-function commandBuild(world, playerId, body) {
+function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "build" }>): CommandResult {
   const def = BUILDING_DEFS[body.buildingType];
   if (!def) return { ok: false, error: "Unknown building." };
   const x = clamp(Math.round(Number(body.x)), 0, MAP_SIZE - def.size);
   const y = clamp(Math.round(Number(body.y)), 0, MAP_SIZE - def.size);
   if (!canPlace(world, x, y, def.size)) return { ok: false, error: "Blocked tile." };
   const builders = Object.values(world.units).filter(
-    (unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && UNIT_DEFS[unit.type].canBuild,
+    (unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild(),
   );
-  if (builders.length === 0) return { ok: false, error: "Select a villager to build." };
+  if (builders.length === 0) return { ok: false, error: "Select build-capable units." };
   const building = createBuilding(world, playerId, body.buildingType, x, y);
   if (!building) return { ok: false, error: "Not enough resources." };
   building.hp = Math.max(12, Math.floor(building.maxHp * 0.25));
@@ -379,35 +426,34 @@ function commandBuild(world, playerId, body) {
   return { ok: true };
 }
 
-function commandFinishBuild(world, playerId, body) {
+function commandFinishBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "finishBuild" }>): CommandResult {
   const building = world.buildings[body.buildingId];
   if (!building || building.ownerId !== playerId) return { ok: false, error: "Invalid building." };
   if (isComplete(building)) return { ok: false, error: "Building is already complete." };
   const builders = Object.values(world.units).filter(
-    (unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && UNIT_DEFS[unit.type].canBuild,
+    (unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild(),
   );
-  if (builders.length === 0) return { ok: false, error: "Select a villager to build." };
+  if (builders.length === 0) return { ok: false, error: "Select build-capable units." };
   const resourceKind = depotGatherKind(building);
   building.builderIds = [...new Set([...(building.builderIds || []), ...builders.map((unit) => unit.id)])];
   for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.type === "farm" };
   return { ok: true };
 }
 
-function commandDeleteBuilding(world, playerId, body) {
+function commandDeleteBuilding(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "deleteBuilding" }>): CommandResult {
   const building = world.buildings[body.buildingId];
   if (!building || building.ownerId !== playerId) return { ok: false, error: "Select one of your buildings." };
   createRuin(world, building);
   delete world.buildings[building.id];
   for (const unit of Object.values(world.units)) {
-    if (unit.command?.targetId === building.id) unit.command = { type: "idle" };
+    if ("targetId" in unit.command && unit.command.targetId === building.id) unit.command = { type: "idle" };
   }
   return { ok: true };
 }
 
-function commandSetRallyPoint(world, playerId, body) {
+function commandSetRallyPoint(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "setRallyPoint" }>): CommandResult {
   const building = world.buildings[body.buildingId];
-  const def = building && BUILDING_DEFS[building.type];
-  if (!building || building.ownerId !== playerId || !def?.trains?.length) return { ok: false, error: "Select a production building." };
+  if (!building || building.ownerId !== playerId || !("trains" in BUILDING_DEFS[building.type])) return { ok: false, error: "Select a production building." };
   building.rallyPoint = {
     x: clamp(Number(body.x), 0, MAP_SIZE - 1),
     y: clamp(Number(body.y), 0, MAP_SIZE - 1),
@@ -415,22 +461,26 @@ function commandSetRallyPoint(world, playerId, body) {
   return { ok: true };
 }
 
-function commandTrain(world, playerId, body) {
+function commandTrain(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "train" }>): CommandResult {
   const building = world.buildings[body.buildingId];
   const unitDef = UNIT_DEFS[body.unitType];
-  const buildingDef = building && BUILDING_DEFS[building.type];
-  if (!building || building.ownerId !== playerId || !isComplete(building) || !unitDef || !buildingDef?.trains?.includes(body.unitType)) {
+  if (!building || building.ownerId !== playerId || !isComplete(building) || !unitDef) {
+    return { ok: false, error: "Cannot train there." };
+  }
+  const buildingDef = BUILDING_DEFS[building.type];
+  if (!("trains" in buildingDef) || !(buildingDef.trains as readonly UnitType[]).includes(body.unitType)) {
     return { ok: false, error: "Cannot train there." };
   }
   const player = world.players[playerId];
+  if (!player) return { ok: false, error: "Player not found." };
   if (player.population >= player.popCap) return { ok: false, error: "Population cap reached." };
   if (building.queue.length >= 10) return { ok: false, error: "Training queue is full." };
-  if (!spend(player, unitDef.cost)) return { ok: false, error: "Not enough resources." };
-  building.queue.push({ unitType: body.unitType, remaining: unitDef.trainTime });
+  if (!spend(player, unitDef.stats.cost)) return { ok: false, error: "Not enough resources." };
+  building.queue.push({ unitType: body.unitType, remaining: unitDef.stats.trainTime } as BuildQueueItem);
   return { ok: true };
 }
 
-function forOwnUnits(world, playerId, unitIds, fn) {
+function forOwnUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined, fn: (unit: Unit, index: number) => void) {
   if (!Array.isArray(unitIds)) return;
   unitIds.forEach((unitId, index) => {
     const unit = world.units[unitId];
@@ -438,42 +488,34 @@ function forOwnUnits(world, playerId, unitIds, fn) {
   });
 }
 
-function stepUnit(world, unit, dt) {
+function stepUnit(world: World, unit: Unit, dt: number) {
   unit.cooldown = Math.max(0, unit.cooldown - dt);
   unit.attackFlash = Math.max(0, (unit.attackFlash || 0) - dt);
   unit.workFlash = Math.max(0, (unit.workFlash || 0) - dt);
-  unit.vision = UNIT_DEFS[unit.type].vision || 5;
+  unit.vision = unitBehavior(unit).stats.vision || 5;
   const command = unit.command || { type: "idle" };
-  if (command.type === "move") {
-    unit.facing = command.x < unit.x ? "left" : "right";
-    if (moveWithPath(world, unit, command, UNIT_DEFS[unit.type].speed * dt)) unit.command = { type: "idle" };
-  } else if (command.type === "attack") {
-    stepAttack(world, unit, command, dt);
-  } else if (command.type === "gather") {
-    stepGather(world, unit, command, dt);
-  } else if (command.type === "build") {
-    stepBuild(world, unit, command, dt);
-  } else {
-    autoAcquire(world, unit);
-  }
+  const handler = UNIT_COMMANDS[command.type];
+  if (handler) handler(world, unit, command as never, dt);
 }
 
-function stepBuilding(world, building, dt) {
+function stepBuilding(world: World, building: Building, dt: number) {
   const def = BUILDING_DEFS[building.type];
   building.cooldown = Math.max(0, building.cooldown - dt);
   building.attackFlash = Math.max(0, (building.attackFlash || 0) - dt);
   if (!isComplete(building)) return;
   if (building.queue.length > 0) {
-    building.queue[0].remaining -= dt;
-    if (building.queue[0].remaining <= 0) {
+    const current = building.queue[0];
+    if (current) current.remaining -= dt;
+    if (current && current.remaining <= 0) {
       const item = building.queue.shift();
+      if (!item) return;
       const unit = createUnit(world, building.ownerId, item.unitType, building.x + building.size + 0.4, building.y + building.size + 0.2);
       if (building.rallyPoint) {
         unit.command = { type: "move", ...building.rallyPoint, path: findPath(world, unit, building.rallyPoint) };
       }
     }
   }
-  if (def.attack) {
+  if ("attack" in def) {
     const target = nearestEnemy(world, building, def.range);
     if (target && building.cooldown <= 0) {
       damage(world, target, def.attack, building.ownerId);
@@ -483,23 +525,23 @@ function stepBuilding(world, building, dt) {
   }
 }
 
-function stepAttack(world, unit, command, dt) {
+function stepAttack(world: World, unit: Unit, command: Extract<UnitCommand, { type: "attack" }>, dt: number) {
   const target = world.units[command.targetId] || world.buildings[command.targetId];
   if (!target || target.ownerId === unit.ownerId) {
     const nextTarget = nearestEnemy(world, unit, 5.5);
     unit.command = nextTarget ? { type: "attack", targetId: nextTarget.id } : { type: "idle" };
     return;
   }
-  const def = UNIT_DEFS[unit.type];
-  const range = def.range + (target.size || 0.6);
+  const def = unitBehavior(unit);
+  const range = def.stats.range + (target.size || 0.6);
   if (distance(unit, centerOf(target)) > range) {
     unit.facing = centerOf(target).x < unit.x ? "left" : "right";
-    moveNearTarget(world, unit, command, centerOf(target), range, def.speed * dt);
+    moveNearTarget(world, unit, command, centerOf(target), range, def.stats.speed * dt);
     return;
   }
   if (unit.cooldown <= 0) {
-    damage(world, target, def.attack, unit.ownerId);
-    unit.cooldown = def.cooldown;
+    damage(world, target, def.stats.attack, unit.ownerId);
+    unit.cooldown = def.stats.cooldown;
     unit.attackFlash = 0.22;
     const nextTarget = nearestEnemy(world, unit, 5.5);
     if (nextTarget && !world.units[command.targetId] && !world.buildings[command.targetId]) {
@@ -508,27 +550,25 @@ function stepAttack(world, unit, command, dt) {
   }
 }
 
-function stepGather(world, unit, command, dt) {
-  let resource = world.resources[command.targetId] || farmAsResource(world.buildings[command.targetId]);
-  if (unit.carried?.amount > 0) {
+function stepGather(world: World, unit: Unit, command: Extract<UnitCommand, { type: "gather" }>, dt: number) {
+  let resource: ResourceNode | Building | null | undefined = world.resources[command.targetId] || farmAsResource(world.buildings[command.targetId]);
+  if (unit.carried && unit.carried.amount > 0) {
     const depot = nearestDepot(world, unit.ownerId, unit.carried.resource, unit);
     if (!depot) return;
     if (distance(unit, centerOf(depot)) > depot.size + 0.7) {
-      moveNearTarget(world, unit, command, centerOf(depot), depot.size + 0.7, UNIT_DEFS[unit.type].speed * dt);
+      moveNearTarget(world, unit, command, centerOf(depot), depot.size + 0.7, unitBehavior(unit).stats.speed * dt);
       return;
     }
-    world.players[unit.ownerId].resources[unit.carried.resource] += unit.carried.amount;
+    world.players[unit.ownerId]!.resources[unit.carried.resource] += unit.carried.amount;
     unit.carried = null;
     return;
   }
-  if (!resource || resource.amount <= 0 || !UNIT_DEFS[unit.type].canGather) {
+  const behavior = unitBehavior(unit);
+  if (!resource || resource.amount! <= 0 || !behavior.canGather()) {
     if (resource?.kind === "building" && resource.type === "farm") {
       maybeAutoReplenishFarm(world, resource);
-      // If auto-replenish refilled the farm, keep working it.
-      if (resource.amount > 0) return;
+      if (resource.amount! > 0) return;
     }
-    // Try to find another source of the same resource type so the villager
-    // keeps working without manual re-targeting.
     const next = findNextResource(world, unit, command.resourceKind);
     if (next) {
       command.targetId = next.id;
@@ -540,40 +580,30 @@ function stepGather(world, unit, command, dt) {
     return;
   }
   const targetPoint = resource.kind === "building" ? centerOf(resource) : resource;
-  const gatherRange = resource.kind === "building" ? resource.size + 0.7 : 1.1;
+  const gatherRange = resource.kind === "building" ? resource.size! + 0.7 : 1.1;
   if (distance(unit, targetPoint) > gatherRange) {
-    moveNearTarget(world, unit, command, targetPoint, gatherRange, UNIT_DEFS[unit.type].speed * dt);
+    moveNearTarget(world, unit, command, targetPoint, gatherRange, behavior.stats.speed * dt);
     return;
   }
   unit.workFlash = 0.25;
   command.progress = (command.progress || 0) + dt;
-  if (command.progress >= gatherSeconds(resource)) {
-    const amount = Math.min(gatherAmount(unit, resource), resource.amount);
-    resource.amount -= amount;
-    unit.carried = { resource: resource.resource, amount };
+  if (command.progress >= behavior.gatherSeconds(resource)) {
+    const amount = Math.min(behavior.gatherAmount(resource), resource.amount!);
+    resource.amount! -= amount;
+    unit.carried = { resource: resource.resource! as ResourceType, amount };
     command.progress = 0;
     if (resource.kind === "building" && resource.type === "farm") {
-      resource.exhausted = resource.amount <= 0;
+      resource.exhausted = resource.amount! <= 0;
       maybeAutoReplenishFarm(world, resource);
-    } else if (resource.amount <= 0) {
+    } else if (resource.amount! <= 0) {
       delete world.resources[resource.id];
-    } else if (resource.type === "tree" && resource.amount <= TREE_STUMP_THRESHOLD) {
-      makeStump(resource);
+    } else if (resource.type === "tree" && resource.amount! <= TREE_STUMP_THRESHOLD) {
+      makeStump(resource as ResourceNode);
     }
   }
 }
 
-function gatherSeconds(resource) {
-  if (resource.kind === "building" && resource.type === "farm") return 8;
-  return 1.1;
-}
-
-function gatherAmount(unit, resource) {
-  if (resource.kind === "building" && resource.type === "farm") return 6;
-  return UNIT_DEFS[unit.type].carryCapacity || 24;
-}
-
-function stepResourceDecay(world, dt) {
+function stepResourceDecay(world: World, dt: number) {
   for (const resource of Object.values(world.resources)) {
     if (resource.stage !== "stump") continue;
     resource.decay = (resource.decay || 0) + dt;
@@ -581,14 +611,14 @@ function stepResourceDecay(world, dt) {
   }
 }
 
-function stepRuinDecay(world, dt) {
+function stepRuinDecay(world: World, dt: number) {
   for (const ruin of Object.values(world.ruins)) {
     ruin.age = (ruin.age || 0) + dt;
     if (ruin.age >= RUIN_DECAY_SECONDS) delete world.ruins[ruin.id];
   }
 }
 
-function makeStump(resource) {
+function makeStump(resource: ResourceNode) {
   if (resource.stage === "stump") return;
   resource.stage = "stump";
   resource.type = "stump";
@@ -596,7 +626,7 @@ function makeStump(resource) {
   resource.decay = 0;
 }
 
-function stepBuild(world, unit, command, dt) {
+function stepBuild(world: World, unit: Unit, command: Extract<UnitCommand, { type: "build" }>, dt: number) {
   const building = world.buildings[command.targetId];
   if (!building || building.ownerId !== unit.ownerId) {
     unit.command = { type: "idle" };
@@ -607,7 +637,7 @@ function stepBuild(world, unit, command, dt) {
     return;
   }
   if (distance(unit, centerOf(building)) > building.size + 0.7) {
-    moveNearTarget(world, unit, command, centerOf(building), building.size + 0.7, UNIT_DEFS[unit.type].speed * dt);
+    moveNearTarget(world, unit, command, centerOf(building), building.size + 0.7, unitBehavior(unit).stats.speed * dt);
     return;
   }
   unit.workFlash = 0.2;
@@ -615,8 +645,8 @@ function stepBuild(world, unit, command, dt) {
   if (building.hp >= building.maxHp) assignPostBuildGather(world, unit, command.resourceKind, command.gatherBuiltFarm ? building : null);
 }
 
-function assignPostBuildGather(world, unit, resourceKind, builtFarm = null) {
-  if (builtFarm && UNIT_DEFS[unit.type].canGather && isComplete(builtFarm)) {
+function assignPostBuildGather(world: World, unit: Unit, resourceKind: ResourceType | null, builtFarm: Building | null = null) {
+  if (builtFarm && unitBehavior(unit).canGather() && isComplete(builtFarm)) {
     unit.command = { type: "gather", targetId: builtFarm.id, resourceKind: "food", progress: 0, path: null };
     return;
   }
@@ -626,7 +656,7 @@ function assignPostBuildGather(world, unit, resourceKind, builtFarm = null) {
     unit.command = { type: "build", targetId: nextBuild.id, path: null, resourceKind: depotGatherKind(nextBuild), gatherBuiltFarm: nextBuild.type === "farm" };
     return;
   }
-  if (!resourceKind || !UNIT_DEFS[unit.type].canGather) {
+  if (!resourceKind || !unitBehavior(unit).canGather()) {
     unit.command = { type: "idle" };
     return;
   }
@@ -634,7 +664,7 @@ function assignPostBuildGather(world, unit, resourceKind, builtFarm = null) {
   unit.command = next ? { type: "gather", targetId: next.id, resourceKind, progress: 0, path: null } : { type: "idle" };
 }
 
-function findNextBuildSite(world, unit) {
+function findNextBuildSite(world: World, unit: Unit): Building | null {
   let bestInitiated = null;
   let bestInitiatedDist = Infinity;
   let bestNearby = null;
@@ -654,20 +684,20 @@ function findNextBuildSite(world, unit) {
   return bestInitiated || bestNearby;
 }
 
-function depotGatherKind(building) {
+function depotGatherKind(building: Building): ResourceType | null {
   if (building.type === "lumberCamp") return "wood";
   if (building.type === "foodDepot") return "food";
   if (building.type === "miningCamp") return "ore";
   return null;
 }
 
-function autoAcquire(world, unit) {
-  if (unit.type !== "soldier") return;
+function autoAcquire(world: World, unit: Unit) {
+  if (!unitBehavior(unit).canAutoAcquireTargets()) return;
   const target = nearestEnemy(world, unit, 5.5);
   if (target) unit.command = { type: "attack", targetId: target.id };
 }
 
-function findNextResource(world, unit, resourceKind) {
+function findNextResource(world: World, unit: Unit, resourceKind: ResourceType | null): ResourceNode | Building | null {
   if (!resourceKind) return null;
   const RANGE = 30;
   let best = null;
@@ -693,12 +723,12 @@ function findNextResource(world, unit, resourceKind) {
   return best;
 }
 
-function nearestDepot(world, ownerId, resource, source) {
+function nearestDepot(world: World, ownerId: PlayerId, resource: ResourceType, source: { x: number; y: number }) {
   let best = null;
   let bestDist = Infinity;
   for (const building of Object.values(world.buildings)) {
     const def = BUILDING_DEFS[building.type];
-    if (building.ownerId !== ownerId || !isComplete(building) || !def.accepts?.includes(resource)) continue;
+    if (building.ownerId !== ownerId || !isComplete(building) || !("accepts" in def) || !(def.accepts as readonly ResourceType[]).includes(resource)) continue;
     const d = distance(source, centerOf(building));
     if (d < bestDist) {
       best = building;
@@ -708,19 +738,19 @@ function nearestDepot(world, ownerId, resource, source) {
   return best;
 }
 
-function farmAsResource(building) {
+function farmAsResource(building: Building | undefined): Building | null {
   if (!building || building.type !== "farm") return null;
   if (!isComplete(building)) return null;
   return building;
 }
 
-function maybeAutoReplenishFarm(world, farm) {
+function maybeAutoReplenishFarm(world: World, farm: Building) {
   const player = world.players[farm.ownerId];
-  if (!player?.autoReplenishFarms || farm.amount > 0) return;
+  if (!player?.autoReplenishFarms || (farm.amount ?? 0) > 0) return;
   replenishFarm(world, farm);
 }
 
-function replenishFarm(world, farm) {
+function replenishFarm(world: World, farm: Building): boolean {
   const player = world.players[farm.ownerId];
   if (!player || !spend(player, FARM_REPLENISH_COST)) return false;
   farm.amount = farm.maxAmount || FARM_FOOD;
@@ -728,7 +758,7 @@ function replenishFarm(world, farm) {
   return true;
 }
 
-function nearestEnemy(world, source, range) {
+function nearestEnemy(world: World, source: Unit | Building, range: number) {
   let best = null;
   let bestDist = range;
   for (const entity of [...Object.values(world.units), ...Object.values(world.buildings)]) {
@@ -742,7 +772,7 @@ function nearestEnemy(world, source, range) {
   return best;
 }
 
-function damage(world, target, amount, attackerId) {
+function damage(world: World, target: Unit | Building, amount: number, attackerId: PlayerId) {
   target.hp -= amount;
   if (target.hp > 0) return;
   if (target.kind === "building") {
@@ -754,7 +784,7 @@ function damage(world, target, amount, attackerId) {
   }
 }
 
-function defeatPlayer(world, playerId, attackerId) {
+function defeatPlayer(world: World, playerId: PlayerId, attackerId: PlayerId) {
   const player = world.players[playerId];
   if (!player || player.defeated) return;
   player.defeated = true;
@@ -763,7 +793,7 @@ function defeatPlayer(world, playerId, attackerId) {
   destroyPlayerStuff(world, playerId);
 }
 
-function destroyPlayerStuff(world, playerId) {
+function destroyPlayerStuff(world: World, playerId: PlayerId) {
   for (const unit of Object.values(world.units)) {
     if (unit.ownerId === playerId) delete world.units[unit.id];
   }
@@ -775,7 +805,7 @@ function destroyPlayerStuff(world, playerId) {
   }
 }
 
-function canPlace(world, x, y, size) {
+function canPlace(world: World, x: number, y: number, size: number): boolean {
   if (x < 0 || y < 0 || x + size > MAP_SIZE || y + size > MAP_SIZE) return false;
   for (const building of Object.values(world.buildings)) {
     if (rectsOverlap({ x, y, size }, building)) return false;
@@ -788,7 +818,7 @@ function canPlace(world, x, y, size) {
   return true;
 }
 
-function moveUnit(world, unit, target, maxStep) {
+function moveUnit(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
   const before = { x: unit.x, y: unit.y };
   const arrived = moveToward(unit, target, maxStep);
   if (isUnitBlocked(world, unit, target)) {
@@ -799,13 +829,13 @@ function moveUnit(world, unit, target, maxStep) {
   return arrived;
 }
 
-function resolveUnitSeparation(world) {
+function resolveUnitSeparation(world: World) {
   const units = Object.values(world.units);
   const minDistance = 0.48;
   for (let i = 0; i < units.length; i += 1) {
     for (let j = i + 1; j < units.length; j += 1) {
-      const a = units[i];
-      const b = units[j];
+      const a = units[i]!;
+      const b = units[j]!;
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const dist = Math.hypot(dx, dy);
@@ -819,7 +849,7 @@ function resolveUnitSeparation(world) {
   }
 }
 
-function nudgeUnit(world, unit, dx, dy) {
+function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {
   const before = { x: unit.x, y: unit.y };
   unit.x = clamp(unit.x + dx, 0.2, MAP_SIZE - 0.2);
   unit.y = clamp(unit.y + dy, 0.2, MAP_SIZE - 0.2);
@@ -829,7 +859,7 @@ function nudgeUnit(world, unit, dx, dy) {
   }
 }
 
-function moveWithPath(world, unit, command, maxStep) {
+function moveWithPath(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number): boolean {
   if (!command.path || command.path.length === 0) {
     command.path = findPath(world, unit, command);
   }
@@ -840,7 +870,7 @@ function moveWithPath(world, unit, command, maxStep) {
   return (!command.path || command.path.length === 0) && distance(unit, command) < 0.35;
 }
 
-function moveNearTarget(world, unit, command, target, range, maxStep) {
+function moveNearTarget(world: World, unit: Unit, command: UnitCommand, target: { x: number; y: number }, range: number, maxStep: number): boolean {
   if (distance(unit, target) <= range) return true;
   if (!command.path || command.path.length === 0 || world.tick % 12 === 0) {
     command.path = findPath(world, unit, nearestWalkableAround(world, target));
@@ -852,7 +882,7 @@ function moveNearTarget(world, unit, command, target, range, maxStep) {
   return false;
 }
 
-function isUnitBlocked(world, unit, target) {
+function isUnitBlocked(world: World, unit: Unit, target: { x: number; y: number }): boolean {
   const tileX = Math.floor(unit.x);
   const tileY = Math.floor(unit.y);
   if (!occupied(world, tileX, tileY)) return false;
@@ -867,12 +897,12 @@ function isUnitBlocked(world, unit, target) {
   return distance(unit, target) > 1.6;
 }
 
-function findPath(world, unit, target) {
+function findPath(world: World, unit: Unit, target: { x: number; y: number }): PathNode[] {
   const start = { x: Math.floor(unit.x), y: Math.floor(unit.y) };
   const goal = nearestWalkableAround(world, target);
   if (!isInMap(goal.x, goal.y)) return [];
   if (start.x === goal.x && start.y === goal.y) return [{ x: goal.x + 0.5, y: goal.y + 0.5 }];
-  const open = [{ ...start, g: 0, f: heuristic(start, goal), parent: null }];
+  const open: PathNode[] = [{ ...start, g: 0, f: heuristic(start, goal), parent: null }];
   const best = new Map([[key(start), open[0]]]);
   const closed = new Set();
   const dirs = [
@@ -888,8 +918,8 @@ function findPath(world, unit, target) {
   let iterations = 0;
   while (open.length && iterations < 900) {
     iterations += 1;
-    open.sort((a, b) => a.f - b.f);
-    const current = open.shift();
+    open.sort((a, b) => (a.f ?? 0) - (b.f ?? 0));
+    const current = open.shift()!;
     if (current.x === goal.x && current.y === goal.y) return unpackPath(current);
     closed.add(key(current));
     for (const dir of dirs) {
@@ -897,9 +927,9 @@ function findPath(world, unit, target) {
       if (!isInMap(next.x, next.y) || closed.has(key(next))) continue;
       if (!isWalkable(world, next.x, next.y) && !(next.x === goal.x && next.y === goal.y)) continue;
       if (dir.x !== 0 && dir.y !== 0 && (!isWalkable(world, current.x + dir.x, current.y) || !isWalkable(world, current.x, current.y + dir.y))) continue;
-      const cost = current.g + (dir.x !== 0 && dir.y !== 0 ? 1.4 : 1);
+      const cost = (current.g ?? 0) + (dir.x !== 0 && dir.y !== 0 ? 1.4 : 1);
       const existing = best.get(key(next));
-      if (existing && existing.g <= cost) continue;
+      if (existing && (existing.g ?? 0) <= cost) continue;
       const node = { ...next, g: cost, f: cost + heuristic(next, goal), parent: current };
       best.set(key(next), node);
       open.push(node);
@@ -908,7 +938,7 @@ function findPath(world, unit, target) {
   return [];
 }
 
-function nearestWalkableAround(world, target) {
+function nearestWalkableAround(world: World, target: { x: number; y: number }) {
   const origin = { x: Math.floor(target.x), y: Math.floor(target.y) };
   if (isWalkable(world, origin.x, origin.y)) return origin;
   let best = origin;
@@ -930,24 +960,24 @@ function nearestWalkableAround(world, target) {
   return best;
 }
 
-function isWalkable(world, x, y) {
+function isWalkable(world: World, x: number, y: number): boolean {
   if (!isInMap(x, y)) return false;
   return !occupied(world, x, y);
 }
 
-function isInMap(x, y) {
+function isInMap(x: number, y: number): boolean {
   return x >= 0 && y >= 0 && x < MAP_SIZE && y < MAP_SIZE;
 }
 
-function key(point) {
+function key(point: { x: number; y: number }): string {
   return `${point.x},${point.y}`;
 }
 
-function heuristic(a, b) {
+function heuristic(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function unpackPath(node) {
+function unpackPath(node: PathNode): PathNode[] {
   const path = [];
   let current = node;
   while (current?.parent) {
@@ -958,48 +988,56 @@ function unpackPath(node) {
   return path;
 }
 
-function centerOf(entity) {
+function centerOf(entity: { x: number; y: number; size?: number }) {
   const offset = entity.size ? (entity.size - 1) / 2 : 0;
   return { x: entity.x + offset, y: entity.y + offset };
 }
 
-function spend(player, cost = {}) {
-  for (const [resource, amount] of Object.entries(cost)) {
+function spend(player: Player, cost: Partial<Record<ResourceType, number>> = {}): boolean {
+  const entries = Object.entries(cost) as [ResourceType, number][];
+  for (const [resource, amount] of entries) {
     if ((player.resources[resource] || 0) < amount) return false;
   }
-  for (const [resource, amount] of Object.entries(cost)) player.resources[resource] -= amount;
+  for (const [resource, amount] of entries) player.resources[resource] -= amount;
   return true;
 }
 
-function recalcPlayer(world, playerId) {
+function recalcPlayer(world: World, playerId: PlayerId) {
   const player = world.players[playerId];
   if (!player) return;
   const units = Object.values(world.units).filter((unit) => unit.ownerId === playerId);
   const buildings = Object.values(world.buildings).filter((building) => building.ownerId === playerId);
   player.population = units.length;
-  player.popCap = 4 + buildings.filter(isComplete).reduce((sum, building) => sum + (BUILDING_DEFS[building.type].pop || 0), 0);
-  const unitScore = units.reduce((sum, unit) => sum + UNIT_DEFS[unit.type].score, 0);
+  player.popCap = 4 + buildings.filter(isComplete).reduce((sum, building) => {
+    const def = BUILDING_DEFS[building.type];
+    return sum + ("pop" in def ? def.pop : 0);
+  }, 0);
+  const unitScore = units.reduce((sum, unit) => sum + unitBehavior(unit).stats.score, 0);
   const buildingScore = buildings.reduce((sum, building) => sum + BUILDING_DEFS[building.type].score, 0);
   const resourceScore = Math.floor(Object.values(player.resources).reduce((sum, amount) => sum + amount, 0) / 8);
   player.score = player.defeated ? 0 : unitScore + buildingScore + resourceScore;
 }
 
-function isComplete(building) {
+function isComplete(building: Building): boolean {
   return building.hp >= building.maxHp;
 }
 
-function updateLeaderboard(world) {
+function updateLeaderboard(world: World) {
   world.leaderboard = Object.values(world.players)
     .filter((player) => !player.defeated)
     .map((player) => ({ id: player.id, name: player.name, color: player.color, score: player.score, defeated: player.defeated, joinedAt: player.joinedAt }))
     .sort((a, b) => b.score - a.score);
 }
 
-function notice(world, text) {
+function notice(world: World, text: string) {
   world.notices.push({ id: id("n"), text, at: Date.now() });
 }
 
-function normalizeColor(value) {
+function normalizeColor(value: unknown): string | null {
   if (typeof value !== "string") return null;
   return /^#[0-9a-f]{6}$/i.test(value) ? value : null;
+}
+
+function unitBehavior(unit: Unit) {
+  return UNIT_DEFS[unit.type];
 }

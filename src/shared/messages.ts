@@ -1,11 +1,18 @@
-export function makeSnapshot(world, playerId = null, sentExplored = null) {
+import type { PlayerId, Snapshot, VisibilityCache, World } from "./types.js";
+import { isVisible } from "./visibility.js";
+
+export function makeSnapshot(
+  world: World,
+  playerId: PlayerId | null = null,
+  sentExplored: Set<number> | null = null,
+): Snapshot {
   const visible = playerId ? cachedVisibility(world, playerId) : null;
   const visibleSet = visible ? visible.visible : null;
-  const filterVisible = (entities) => {
+  const filterVisible = <T extends { x: number; y: number; size?: number }>(entities: Record<string, T>): Record<string, T> => {
     if (!visibleSet) return entities;
-    const out = {};
+    const out: Record<string, T> = {};
     for (const id in entities) {
-      const entity = entities[id];
+      const entity = entities[id]!;
       if (isVisible(visibleSet, entity.x, entity.y, entity.size || 1, world.map.size)) out[id] = entity;
     }
     return out;
@@ -67,7 +74,7 @@ export function makeSnapshot(world, playerId = null, sentExplored = null) {
   };
 }
 
-function cachedVisibility(world, playerId) {
+function cachedVisibility(world: World, playerId: PlayerId): VisibilityCache | null {
   const player = world.players[playerId];
   if (!player) return null;
   if (player._visCache && player._visCache.tick === world.tick) return player._visCache;
@@ -77,13 +84,13 @@ function cachedVisibility(world, playerId) {
   return computed;
 }
 
-function visibleTiles(world, playerId) {
+function visibleTiles(world: World, playerId: PlayerId): VisibilityCache {
   const player = world.players[playerId];
-  const explored = player?.explored || new Set();
-  const visible = new Set();
+  const explored: Set<number> = player?.explored || new Set();
+  const visible = new Set<number>();
   if (!player) return { visible, explored };
   const size = world.map.size;
-  const addCircle = (cx, cy, radius) => {
+  const addCircle = (cx: number, cy: number, radius: number) => {
     const r2 = radius * radius;
     const minX = Math.max(0, cx - radius);
     const maxX = Math.min(size - 1, cx + radius);
@@ -114,17 +121,4 @@ function visibleTiles(world, playerId) {
   }
   player.explored = explored;
   return { visible, explored };
-}
-
-function isVisible(visibleSet, x, y, size, mapSize) {
-  const x0 = Math.floor(x);
-  const y0 = Math.floor(y);
-  const x1 = Math.ceil(x + size);
-  const y1 = Math.ceil(y + size);
-  for (let yy = y0; yy < y1; yy += 1) {
-    for (let xx = x0; xx < x1; xx += 1) {
-      if (visibleSet.has(yy * mapSize + xx)) return true;
-    }
-  }
-  return false;
 }
