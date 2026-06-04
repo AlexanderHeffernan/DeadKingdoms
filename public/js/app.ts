@@ -3,9 +3,10 @@ import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
 import { BUILDINGS, SCALE, TILE_H, TRAINING } from "./constants.js";
+import { UNIT_DEFS } from "../../src/shared/config.js";
 import { sprites } from "./sprites/index.js";
 import { spriteBounds } from "./spriteBounds.js";
-import type { Building, BuildingType, CommandPayload, EntityId, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit } from "../../src/shared/types.js";
+import type { Building, BuildingType, CommandPayload, EntityId, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
 import type { ClientCommand, GameState, ViewState } from "./clientTypes.js";
 
 const state: GameState = {
@@ -14,7 +15,7 @@ const state: GameState = {
   selectedIds: new Set(),
   lastSeen: { buildings: {}, resources: {}, ruins: {} },
   effects: [],
-  idleVillagerCycleIndex: -1,
+  idleWorkerCycleIndex: -1,
   // Persistent fog-of-war memory. Server sends only newly-discovered tile keys
   // each tick as `visibility.exploredDelta`; the client accumulates them.
   exploredSet: new Set(),
@@ -57,7 +58,7 @@ const ui = new UI(state, {
   setBuildMode(type) {
     view.buildMode = type;
   },
-  train(buildingId: string, unitType: "villager" | "soldier") {
+  train(buildingId: string, unitType: UnitType) {
     issue({ type: "train", buildingId, unitType });
   },
   toggleAutoFarm() {
@@ -461,19 +462,22 @@ function onKeyDown(event: KeyboardEvent) {
     return;
   }
   if (key === "delete" || key === "backspace") return deleteSelectedBuilding();
-  if (key === ".") return selectIdleVillagers();
+  if (key === ".") return selectIdleWorkers();
   const buildShortcuts: Record<string, string> = { h: "house", f: "farm", b: "barracks", t: "watchTower", l: "lumberCamp", d: "foodDepot", m: "miningCamp" };
   if (buildShortcuts[key]) return startBuildShortcut(buildShortcuts[key] as BuildingType);
-  if (key === "v") return trainShortcut("villager");
-  if (key === "s") return trainShortcut("soldier");
+  const shortcutUnit = unitTypeForShortcut(key);
+  if (shortcutUnit) return trainShortcut(shortcutUnit);
   if (key === "r") return selectedFarmAction((farm) => issue({ type: "replenishFarm", farmId: farm.id }));
   if (key === "a") return selectedFarmAction(() => issue({ type: "toggleAutoFarm" }));
   if (key === "y") return setRallyForSelectedProduction();
 }
 
 function startBuildShortcut(buildingType: BuildingType) {
-  const hasVillager = [...state.selectedIds].some((id) => state.snapshot?.units[id]?.ownerId === state.playerId && state.snapshot?.units[id]?.type === "villager");
-  if (!hasVillager) return ui.showToast("Select a villager to build.");
+  const hasBuilder = [...state.selectedIds].some((id) => {
+    const unit = state.snapshot?.units[id];
+    return unit?.ownerId === state.playerId && unitBehavior(unit).canBuild();
+  });
+  if (!hasBuilder) return ui.showToast("Select build-capable units.");
   const def = BUILDINGS[buildingType as keyof typeof BUILDINGS];
   if (!def) return;
   if (!canAfford(def.cost || {})) return ui.showToast("Not enough resources.");
@@ -481,7 +485,7 @@ function startBuildShortcut(buildingType: BuildingType) {
   ui.showToast(`Place ${def.label}.`);
 }
 
-function trainShortcut(unitType: "villager" | "soldier") {
+function trainShortcut(unitType: UnitType) {
   if (!state.snapshot || !state.playerId) return;
   const building = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => {
     if (!entity || entity.ownerId !== state.playerId) return false;
@@ -506,16 +510,16 @@ function deleteSelectedBuilding() {
   if (building) issue({ type: "deleteBuilding", buildingId: building.id });
 }
 
-function selectIdleVillagers() {
+function selectIdleWorkers() {
   const idle = Object.values(state.snapshot?.units || {})
-    .filter((unit) => unit.ownerId === state.playerId && unit.type === "villager" && (!unit.command || unit.command.type === "idle"))
+    .filter((unit) => unit.ownerId === state.playerId && unitBehavior(unit).canGather() && (!unit.command || unit.command.type === "idle"))
     .sort((a, b) => a.id.localeCompare(b.id));
   state.selectedIds.clear();
   if (idle.length > 0) {
-    state.idleVillagerCycleIndex = (state.idleVillagerCycleIndex + 1) % idle.length;
-    state.selectedIds.add(idle[state.idleVillagerCycleIndex]!.id);
+    state.idleWorkerCycleIndex = (state.idleWorkerCycleIndex + 1) % idle.length;
+    state.selectedIds.add(idle[state.idleWorkerCycleIndex]!.id);
   } else {
-    state.idleVillagerCycleIndex = -1;
+    state.idleWorkerCycleIndex = -1;
   }
   ui.render();
 }
@@ -523,7 +527,7 @@ function selectIdleVillagers() {
 function selectedProductionBuilding() {
   return [...state.selectedIds]
     .map((id) => state.snapshot?.buildings[id])
-    .find((building) => building?.ownerId === state.playerId && (building.type === "townCenter" || building.type === "barracks"));
+    .find((building) => building?.ownerId === state.playerId && ((TRAINING as Record<string, unknown[]>)[building.type] || []).length > 0);
 }
 
 function setRallyForSelectedProduction() {
@@ -768,6 +772,17 @@ function worldPixel(zoom: number) {
 
 function entityPixel(entity: Unit | Building | ResourceNode, zoom: number) {
   return worldPixel(zoom);
+}
+
+function unitBehavior(unit: Unit) {
+  return UNIT_DEFS[unit.type];
+}
+
+function unitTypeForShortcut(key: string): UnitType | null {
+  for (const [unitType, unit] of Object.entries(UNIT_DEFS) as [UnitType, (typeof UNIT_DEFS)[UnitType]][]) {
+    if (unit.trainShortcut?.toLowerCase() === key) return unitType;
+  }
+  return null;
 }
 
 function cullSelection() {

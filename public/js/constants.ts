@@ -1,3 +1,5 @@
+import { BUILDING_DEFS, UNIT_DEFS } from "../../src/shared/config.js";
+
 export const TILE_W = 64;
 export const TILE_H = 32;
 export const SCALE = 4;
@@ -13,6 +15,20 @@ export const BUILDINGS = {
 } as const;
 
 export const TRAINING = {
-  townCenter: [{ unitType: "villager", label: "Villager", cost: { food: 45 } }],
-  barracks: [{ unitType: "soldier", label: "Soldier", cost: { food: 45, ore: 20 } }],
-} as const;
+  ...Object.fromEntries(
+    Object.entries(BUILDING_DEFS)
+      .filter(([, building]) => "trains" in building)
+      .map(([buildingType, building]) => [
+        buildingType,
+        (building as { trains: readonly (keyof typeof UNIT_DEFS)[] }).trains.map((unitType) => {
+          const unit = UNIT_DEFS[unitType];
+          return {
+            unitType,
+            label: unit.label,
+            cost: unit.stats.cost,
+            shortcut: unit.trainShortcut,
+          };
+        }),
+      ]),
+  ),
+} as Record<string, { unitType: keyof typeof UNIT_DEFS; label: string; cost: Record<string, number>; shortcut?: string }[]>;

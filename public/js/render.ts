@@ -256,7 +256,7 @@ export class Renderer {
       ctx.fillRect(Math.round(centerX - visualWidth * 0.18), Math.round(topY + px * 2), Math.max(px * 3, visualWidth * 0.16), px * 2);
       ctx.fillStyle = "#f4efe6";
       ctx.fillRect(Math.round(centerX - visualWidth * 0.18), Math.round(topY + px * 2), px, px);
-    } else if (entity.kind === "unit" && entity.type === "villager") {
+    } else if (entity.kind === "unit") {
       ctx.fillStyle = color;
       ctx.fillRect(Math.round(centerX - px * 3), Math.round(topY + px * 7), px * 5, px * 2);
     }

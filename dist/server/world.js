@@ -1,4 +1,4 @@
-import { BUILDING_DEFS, COLORS, FARM_FOOD, FARM_REPLENISH_COST, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, UNIT_DEFS } from "../shared/config.js";
+import { BUILDING_DEFS, COLORS, FARM_FOOD, FARM_REPLENISH_COST, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, STARTING_UNITS, UNIT_DEFS } from "../shared/config.js";
 import { id } from "./id.js";
 import { clamp, distance, moveToward, rectsOverlap } from "./math.js";
 const SPAWNS = [
@@ -52,9 +52,8 @@ export function addPlayer(world, name, requestedColor = null) {
     };
     clearSpawnResources(world, spawn.x, spawn.y, 14);
     createBuilding(world, playerId, "townCenter", spawn.x, spawn.y, true);
-    createUnit(world, playerId, "villager", spawn.x + 4.4, spawn.y + 4.5);
-    createUnit(world, playerId, "villager", spawn.x + 5.0, spawn.y + 4.9);
-    createUnit(world, playerId, "soldier", spawn.x + 3.8, spawn.y + 5.2);
+    for (const unit of STARTING_UNITS)
+        createUnit(world, playerId, unit.unitType, spawn.x + unit.x, spawn.y + unit.y);
     addLocalResources(world, spawn.x, spawn.y);
     notice(world, `${world.players[playerId].name} joined the world.`);
     recalcPlayer(world, playerId);
@@ -117,7 +116,7 @@ const UNIT_COMMANDS = {
     idle: (world, unit) => autoAcquire(world, unit),
     move: (world, unit, command, dt) => {
         unit.facing = command.x < unit.x ? "left" : "right";
-        if (moveWithPath(world, unit, command, UNIT_DEFS[unit.type].speed * dt))
+        if (moveWithPath(world, unit, command, unitBehavior(unit).stats.speed * dt))
             unit.command = { type: "idle" };
     },
     attack: stepAttack,
@@ -227,8 +226,8 @@ function createUnit(world, ownerId, type, x, y) {
         type,
         x,
         y,
-        hp: def.maxHp,
-        maxHp: def.maxHp,
+        hp: def.stats.maxHp,
+        maxHp: def.stats.maxHp,
         command: { type: "idle" },
         cooldown: 0,
         attackFlash: 0,
@@ -342,11 +341,11 @@ function commandGather(world, playerId, body) {
         return { ok: false, error: "You can only work your own farms." };
     let assigned = false;
     forOwnUnits(world, playerId, body.unitIds, (unit) => {
-        if (UNIT_DEFS[unit.type].canGather) {
+        if (unitBehavior(unit).canGather()) {
             unit.command = {
                 type: "gather",
                 targetId: resource.id,
-                // Remember what this villager was after so we can auto-find another
+                // Remember what this worker was after so we can auto-find another
                 // tree / ore vein / farm when the current target is gone.
                 resourceKind: resource.resource,
                 progress: 0,
@@ -355,7 +354,7 @@ function commandGather(world, playerId, body) {
             assigned = true;
         }
     });
-    return assigned ? { ok: true } : { ok: false, error: "Select villagers to gather." };
+    return assigned ? { ok: true } : { ok: false, error: "Select gather-capable units." };
 }
 function commandToggleAutoFarm(world, playerId) {
     const player = world.players[playerId];
@@ -378,9 +377,9 @@ function commandBuild(world, playerId, body) {
     const y = clamp(Math.round(Number(body.y)), 0, MAP_SIZE - def.size);
     if (!canPlace(world, x, y, def.size))
         return { ok: false, error: "Blocked tile." };
-    const builders = Object.values(world.units).filter((unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && UNIT_DEFS[unit.type].canBuild);
+    const builders = Object.values(world.units).filter((unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild());
     if (builders.length === 0)
-        return { ok: false, error: "Select a villager to build." };
+        return { ok: false, error: "Select build-capable units." };
     const building = createBuilding(world, playerId, body.buildingType, x, y);
     if (!building)
         return { ok: false, error: "Not enough resources." };
@@ -397,9 +396,9 @@ function commandFinishBuild(world, playerId, body) {
         return { ok: false, error: "Invalid building." };
     if (isComplete(building))
         return { ok: false, error: "Building is already complete." };
-    const builders = Object.values(world.units).filter((unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && UNIT_DEFS[unit.type].canBuild);
+    const builders = Object.values(world.units).filter((unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild());
     if (builders.length === 0)
-        return { ok: false, error: "Select a villager to build." };
+        return { ok: false, error: "Select build-capable units." };
     const resourceKind = depotGatherKind(building);
     building.builderIds = [...new Set([...(building.builderIds || []), ...builders.map((unit) => unit.id)])];
     for (const unit of builders)
@@ -445,9 +444,9 @@ function commandTrain(world, playerId, body) {
         return { ok: false, error: "Population cap reached." };
     if (building.queue.length >= 10)
         return { ok: false, error: "Training queue is full." };
-    if (!spend(player, unitDef.cost))
+    if (!spend(player, unitDef.stats.cost))
         return { ok: false, error: "Not enough resources." };
-    building.queue.push({ unitType: body.unitType, remaining: unitDef.trainTime });
+    building.queue.push({ unitType: body.unitType, remaining: unitDef.stats.trainTime });
     return { ok: true };
 }
 function forOwnUnits(world, playerId, unitIds, fn) {
@@ -463,7 +462,7 @@ function stepUnit(world, unit, dt) {
     unit.cooldown = Math.max(0, unit.cooldown - dt);
     unit.attackFlash = Math.max(0, (unit.attackFlash || 0) - dt);
     unit.workFlash = Math.max(0, (unit.workFlash || 0) - dt);
-    unit.vision = UNIT_DEFS[unit.type].vision || 5;
+    unit.vision = unitBehavior(unit).stats.vision || 5;
     const command = unit.command || { type: "idle" };
     const handler = UNIT_COMMANDS[command.type];
     if (handler)
@@ -505,16 +504,16 @@ function stepAttack(world, unit, command, dt) {
         unit.command = nextTarget ? { type: "attack", targetId: nextTarget.id } : { type: "idle" };
         return;
     }
-    const def = UNIT_DEFS[unit.type];
-    const range = def.range + (target.size || 0.6);
+    const def = unitBehavior(unit);
+    const range = def.stats.range + (target.size || 0.6);
     if (distance(unit, centerOf(target)) > range) {
         unit.facing = centerOf(target).x < unit.x ? "left" : "right";
-        moveNearTarget(world, unit, command, centerOf(target), range, def.speed * dt);
+        moveNearTarget(world, unit, command, centerOf(target), range, def.stats.speed * dt);
         return;
     }
     if (unit.cooldown <= 0) {
-        damage(world, target, def.attack, unit.ownerId);
-        unit.cooldown = def.cooldown;
+        damage(world, target, def.stats.attack, unit.ownerId);
+        unit.cooldown = def.stats.cooldown;
         unit.attackFlash = 0.22;
         const nextTarget = nearestEnemy(world, unit, 5.5);
         if (nextTarget && !world.units[command.targetId] && !world.buildings[command.targetId]) {
@@ -529,14 +528,15 @@ function stepGather(world, unit, command, dt) {
         if (!depot)
             return;
         if (distance(unit, centerOf(depot)) > depot.size + 0.7) {
-            moveNearTarget(world, unit, command, centerOf(depot), depot.size + 0.7, UNIT_DEFS[unit.type].speed * dt);
+            moveNearTarget(world, unit, command, centerOf(depot), depot.size + 0.7, unitBehavior(unit).stats.speed * dt);
             return;
         }
         world.players[unit.ownerId].resources[unit.carried.resource] += unit.carried.amount;
         unit.carried = null;
         return;
     }
-    if (!resource || resource.amount <= 0 || !UNIT_DEFS[unit.type].canGather) {
+    const behavior = unitBehavior(unit);
+    if (!resource || resource.amount <= 0 || !behavior.canGather()) {
         if (resource?.kind === "building" && resource.type === "farm") {
             maybeAutoReplenishFarm(world, resource);
             if (resource.amount > 0)
@@ -555,13 +555,13 @@ function stepGather(world, unit, command, dt) {
     const targetPoint = resource.kind === "building" ? centerOf(resource) : resource;
     const gatherRange = resource.kind === "building" ? resource.size + 0.7 : 1.1;
     if (distance(unit, targetPoint) > gatherRange) {
-        moveNearTarget(world, unit, command, targetPoint, gatherRange, UNIT_DEFS[unit.type].speed * dt);
+        moveNearTarget(world, unit, command, targetPoint, gatherRange, behavior.stats.speed * dt);
         return;
     }
     unit.workFlash = 0.25;
     command.progress = (command.progress || 0) + dt;
-    if (command.progress >= gatherSeconds(resource)) {
-        const amount = Math.min(gatherAmount(unit, resource), resource.amount);
+    if (command.progress >= behavior.gatherSeconds(resource)) {
+        const amount = Math.min(behavior.gatherAmount(resource), resource.amount);
         resource.amount -= amount;
         unit.carried = { resource: resource.resource, amount };
         command.progress = 0;
@@ -576,16 +576,6 @@ function stepGather(world, unit, command, dt) {
             makeStump(resource);
         }
     }
-}
-function gatherSeconds(resource) {
-    if (resource.kind === "building" && resource.type === "farm")
-        return 8;
-    return 1.1;
-}
-function gatherAmount(unit, resource) {
-    if (resource.kind === "building" && resource.type === "farm")
-        return 6;
-    return UNIT_DEFS[unit.type].carryCapacity;
 }
 function stepResourceDecay(world, dt) {
     for (const resource of Object.values(world.resources)) {
@@ -622,7 +612,7 @@ function stepBuild(world, unit, command, dt) {
         return;
     }
     if (distance(unit, centerOf(building)) > building.size + 0.7) {
-        moveNearTarget(world, unit, command, centerOf(building), building.size + 0.7, UNIT_DEFS[unit.type].speed * dt);
+        moveNearTarget(world, unit, command, centerOf(building), building.size + 0.7, unitBehavior(unit).stats.speed * dt);
         return;
     }
     unit.workFlash = 0.2;
@@ -631,7 +621,7 @@ function stepBuild(world, unit, command, dt) {
         assignPostBuildGather(world, unit, command.resourceKind, command.gatherBuiltFarm ? building : null);
 }
 function assignPostBuildGather(world, unit, resourceKind, builtFarm = null) {
-    if (builtFarm && UNIT_DEFS[unit.type].canGather && isComplete(builtFarm)) {
+    if (builtFarm && unitBehavior(unit).canGather() && isComplete(builtFarm)) {
         unit.command = { type: "gather", targetId: builtFarm.id, resourceKind: "food", progress: 0, path: null };
         return;
     }
@@ -641,7 +631,7 @@ function assignPostBuildGather(world, unit, resourceKind, builtFarm = null) {
         unit.command = { type: "build", targetId: nextBuild.id, path: null, resourceKind: depotGatherKind(nextBuild), gatherBuiltFarm: nextBuild.type === "farm" };
         return;
     }
-    if (!resourceKind || !UNIT_DEFS[unit.type].canGather) {
+    if (!resourceKind || !unitBehavior(unit).canGather()) {
         unit.command = { type: "idle" };
         return;
     }
@@ -678,7 +668,7 @@ function depotGatherKind(building) {
     return null;
 }
 function autoAcquire(world, unit) {
-    if (unit.type !== "soldier")
+    if (!unitBehavior(unit).canAutoAcquireTargets())
         return;
     const target = nearestEnemy(world, unit, 5.5);
     if (target)
@@ -1012,7 +1002,7 @@ function recalcPlayer(world, playerId) {
         const def = BUILDING_DEFS[building.type];
         return sum + ("pop" in def ? def.pop : 0);
     }, 0);
-    const unitScore = units.reduce((sum, unit) => sum + UNIT_DEFS[unit.type].score, 0);
+    const unitScore = units.reduce((sum, unit) => sum + unitBehavior(unit).stats.score, 0);
     const buildingScore = buildings.reduce((sum, building) => sum + BUILDING_DEFS[building.type].score, 0);
     const resourceScore = Math.floor(Object.values(player.resources).reduce((sum, amount) => sum + amount, 0) / 8);
     player.score = player.defeated ? 0 : unitScore + buildingScore + resourceScore;
@@ -1033,4 +1023,7 @@ function normalizeColor(value) {
     if (typeof value !== "string")
         return null;
     return /^#[0-9a-f]{6}$/i.test(value) ? value : null;
+}
+function unitBehavior(unit) {
+    return UNIT_DEFS[unit.type];
 }

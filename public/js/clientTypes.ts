@@ -1,4 +1,4 @@
-import type { Building, CommandPayload, ResourceNode, Ruin, Snapshot, Unit } from "../../src/shared/types.js";
+import type { Building, CommandPayload, ResourceNode, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
 
 export type Effect =
   | { type: "moveCross"; x: number; y: number; createdAt: number; duration: number }
@@ -16,7 +16,7 @@ export type GameState = {
   selectedIds: Set<string>;
   lastSeen: LastSeen;
   effects: Effect[];
-  idleVillagerCycleIndex: number;
+  idleWorkerCycleIndex: number;
   exploredSet: Set<number>;
 };
 
@@ -38,7 +38,7 @@ export type ViewState = {
 
 export type UIActions = {
   setBuildMode: (type: string) => void;
-  train: (buildingId: string, unitType: "villager" | "soldier") => void;
+  train: (buildingId: string, unitType: UnitType) => void;
   toggleAutoFarm: () => void;
   replenishFarm: (farmId: string) => void;
   deleteBuilding: (buildingId: string) => void;

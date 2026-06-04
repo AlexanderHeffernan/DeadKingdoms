@@ -1,4 +1,5 @@
 import { BUILDINGS, TRAINING } from "./constants.js";
+import { UNIT_DEFS } from "../../src/shared/config.js";
 import { palette } from "./sprites/palette.js";
 import { sprites } from "./sprites/index.js";
 import type { Building, ResourceNode, Snapshot, SpriteName, Unit } from "../../src/shared/types.js";
@@ -12,11 +13,6 @@ const BUILD_SHORTCUTS = {
   lumberCamp: "L",
   foodDepot: "D",
   miningCamp: "M",
-};
-
-const TRAIN_SHORTCUTS = {
-  villager: "V",
-  soldier: "S",
 };
 
 export class UI {
@@ -59,7 +55,7 @@ export class UI {
       ${resourcePill("wood", Math.floor(player.resources.wood))}
       ${resourcePill("food", Math.floor(player.resources.food))}
       ${resourcePill("ore", Math.floor(player.resources.ore))}
-      ${populationPill(player.population, player.popCap, idleVillagerCount(snapshot, this.state.playerId ?? ""))}
+      ${populationPill(player.population, player.popCap, idleWorkerCount(snapshot, this.state.playerId ?? ""))}
     `;
     this.attachResourceHovers();
     this.status.textContent = player.defeated ? "Defeated" : "";
@@ -110,8 +106,8 @@ export class UI {
     const ownedUnits = selected.filter((entity): entity is Unit => entity.kind === "unit" && entity.ownerId === this.state.playerId);
     const ownedAnyBuildings = selected.filter((entity): entity is Building => entity.kind === "building" && entity.ownerId === this.state.playerId);
     const ownedBuildings = selected.filter((entity): entity is Building => entity.kind === "building" && entity.ownerId === this.state.playerId && isComplete(entity));
-    const hasVillager = ownedUnits.some((entity) => entity.type === "villager");
-    if (hasVillager) {
+    const hasBuilder = ownedUnits.some((entity) => unitBehavior(entity).canBuild());
+    if (hasBuilder) {
       for (const [buildingType, def] of Object.entries(BUILDINGS)) {
         actions.push({ spriteName: buildingType, label: def.label, cost: def.cost, shortcut: BUILD_SHORTCUTS[buildingType as keyof typeof BUILD_SHORTCUTS], action: () => this.actions.setBuildMode(buildingType) });
       }
@@ -130,11 +126,11 @@ export class UI {
       const training = TRAINING[building.type as keyof typeof TRAINING];
       if (training) {
         for (const train of training) {
-          actions.push({ spriteName: train.unitType, label: train.label, cost: train.cost, shortcut: TRAIN_SHORTCUTS[train.unitType as keyof typeof TRAIN_SHORTCUTS], action: () => this.actions.train(building.id, train.unitType), forceDisabled: (building.queue?.length ?? 0) >= 10 });
+          actions.push({ spriteName: train.unitType, label: train.label, cost: train.cost, shortcut: train.shortcut, action: () => this.actions.train(building.id, train.unitType), forceDisabled: (building.queue?.length ?? 0) >= 10 });
         }
       }
       if (training?.length) {
-        actions.push({ spriteName: "soldier", label: "Set rally point", cost: {}, shortcut: "Y", action: () => this.actions.setRallyMode(building.id) });
+        actions.push({ spriteName: training[0]?.unitType, label: "Set rally point", cost: {}, shortcut: "Y", action: () => this.actions.setRallyMode(building.id) });
       }
     }
     for (const building of ownedAnyBuildings) {
@@ -267,8 +263,8 @@ function isComplete(entity: Building) {
   return !entity.maxHp || entity.hp >= entity.maxHp;
 }
 
-function idleVillagerCount(snapshot: Snapshot, playerId: string) {
-  return Object.values(snapshot.units).filter((unit) => unit.ownerId === playerId && unit.type === "villager" && (!unit.command || unit.command.type === "idle")).length;
+function idleWorkerCount(snapshot: Snapshot, playerId: string) {
+  return Object.values(snapshot.units).filter((unit) => unit.ownerId === playerId && unitBehavior(unit).canGather() && (!unit.command || unit.command.type === "idle")).length;
 }
 
 function formatCost(cost: Record<string, number>) {
@@ -310,8 +306,8 @@ function resourcePill(resource: string, amount: number) {
   return `<span class="resource-pill" data-hover-title="${resourceLabel(resource)}" data-hover-detail="${resourceDescription(resource)}">${resourceIcon(resource)}<strong>${amount}</strong></span>`;
 }
 
-function populationPill(population: number, popCap: number, idleVillagers: number) {
-  return `<span class="resource-pill" data-hover-title="Population" data-hover-detail="${population}/${popCap} used. ${idleVillagers} villager${idleVillagers === 1 ? "" : "s"} not currently working. Press . to cycle idle villagers one at a time.">${populationIcon()}<strong>${population}/${popCap}</strong></span>`;
+function populationPill(population: number, popCap: number, idleWorkers: number) {
+  return `<span class="resource-pill" data-hover-title="Population" data-hover-detail="${population}/${popCap} used. ${idleWorkers} worker${idleWorkers === 1 ? "" : "s"} not currently working. Press . to cycle idle workers one at a time.">${populationIcon()}<strong>${population}/${popCap}</strong></span>`;
 }
 
 function resourceLabel(resource: string) {
@@ -321,10 +317,14 @@ function resourceLabel(resource: string) {
 function resourceDescription(resource: string) {
   const descriptions = {
     wood: "Used to construct buildings, farms, and reseed exhausted farms.",
-    food: "Used to train villagers and soldiers. Gather from berries, farms, and food depots.",
-    ore: "Used for military buildings, towers, and soldiers.",
+    food: "Used to train units. Gather from berries, farms, and food depots.",
+    ore: "Used for military buildings, towers, and units.",
   };
   return descriptions[resource as keyof typeof descriptions] || "Stored resource.";
+}
+
+function unitBehavior(unit: Unit) {
+  return UNIT_DEFS[unit.type];
 }
 
 function aliveTime(joinedAt: number, now: number) {

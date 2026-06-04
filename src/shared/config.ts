@@ -29,39 +29,16 @@ export const COLORS = [
   "#80c34f",
 ];
 
-export const UNIT_DEFS = {
-  villager: {
-    label: "Villager",
-    sprite: "villager",
-    maxHp: 40,
-    speed: 3.2,
-    attack: 3,
-    range: 0.9,
-    cooldown: 1.1,
-    score: 8,
-    trainTime: 7,
-    cost: { food: 45 },
-    canGather: true,
-    canBuild: true,
-    carryCapacity: 36,
-    vision: 6,
-  },
-  soldier: {
-    label: "Soldier",
-    sprite: "soldier",
-    maxHp: 70,
-    speed: 4.1,
-    attack: 9,
-    range: 1.05,
-    cooldown: 0.8,
-    score: 18,
-    trainTime: 8,
-    cost: { food: 45, ore: 20 },
-    canGather: false,
-    canBuild: false,
-    vision: 7,
-  },
-} as const;
+export const UNIT_DEFS = defineUnits([
+  new VillagerUnit(),
+  new SoldierUnit(),
+] as const);
+
+export const STARTING_UNITS = [
+  { unitType: "villager", x: 4.4, y: 4.5 },
+  { unitType: "villager", x: 5.0, y: 4.9 },
+  { unitType: "soldier", x: 3.8, y: 5.2 },
+] as const;
 
 export const BUILDING_DEFS = {
   townCenter: {
@@ -174,3 +151,4 @@ export const RESOURCE_DEFS = {
     score: 0,
   },
 } as const;
+import { defineUnits, SoldierUnit, VillagerUnit } from "./unitDefinitions.js";
