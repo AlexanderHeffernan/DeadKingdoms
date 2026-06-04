@@ -1,0 +1,17 @@
+services:
+  rts:
+    image: ${RTS_IMAGE:-persistent-rts-arena:latest}
+    container_name: persistent-rts-arena
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: persistent-rts-arena-watchtower
+    restart: unless-stopped
+    command: --interval 300 --cleanup persistent-rts-arena
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

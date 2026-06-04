@@ -2,7 +2,12 @@
 
 A browser-playable multiplayer RTS MVP inspired by persistent arena games and classic isometric RTS controls.
 
-## Run
+Play the live version at <https://rts.alexheffernan.dev>.
+
+## Run with Node.js
+
+Requires Node.js 20 or newer. No install step is required; the app currently has
+no runtime npm dependencies.
 
 ```sh
 node src/server/index.js
@@ -10,7 +15,23 @@ node src/server/index.js
 
 Open `http://127.0.0.1:3000`.
 
-No install step is required. The first pass uses plain Node.js, HTTP commands, and Server-Sent Events.
+## Run with Docker
+
+Build and run the game on your machine or server:
+
+```sh
+docker build -t persistent-rts-arena:latest .
+docker compose up -d
+```
+
+Open `http://SERVER_IP:3000`.
+
+Useful commands:
+
+```sh
+docker compose logs -f rts
+docker compose down
+```
 
 ## MVP Scope
 
