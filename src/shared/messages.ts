@@ -57,7 +57,9 @@ export function makeSnapshot(
       ]),
     ),
     units: filterVisible(world.units),
-    buildings: filterVisible(world.buildings),
+    buildings: Object.fromEntries(
+      Object.entries(filterVisible(world.buildings)).map(([id, building]) => [id, building.serialize()]),
+    ),
     resources: filterVisible(world.resources),
     ruins: filterVisible(world.ruins),
     visibility: visible

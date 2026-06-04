@@ -13,9 +13,6 @@ export const STARTING_RESOURCES = {
   ore: 80,
 };
 
-export const FARM_FOOD = 160;
-export const FARM_REPLENISH_COST = { wood: 45 };
-
 export const COLORS = [
   "#4f8fd8",
   "#d8574f",
@@ -29,104 +26,11 @@ export const COLORS = [
   "#80c34f",
 ];
 
-export const UNIT_DEFS = defineUnits([
-  new VillagerUnit(),
-  new SoldierUnit(),
-] as const);
-
 export const STARTING_UNITS = [
   { unitType: "villager", x: 4.4, y: 4.5 },
   { unitType: "villager", x: 5.0, y: 4.9 },
   { unitType: "soldier", x: 3.8, y: 5.2 },
 ] as const;
-
-export const BUILDING_DEFS = {
-  townCenter: {
-    label: "Town Center",
-    sprite: "townCenter",
-    maxHp: 520,
-    size: 4,
-    score: 120,
-    cost: { wood: 0 },
-    trains: ["villager"],
-    vision: 8,
-    accepts: ["wood", "food", "ore"],
-  },
-  house: {
-    label: "House",
-    sprite: "house",
-    maxHp: 140,
-    size: 2,
-    score: 28,
-    cost: { wood: 35 },
-    pop: 4,
-    vision: 5,
-  },
-  barracks: {
-    label: "Barracks",
-    sprite: "barracks",
-    maxHp: 260,
-    size: 3,
-    score: 70,
-    cost: { wood: 120, ore: 30 },
-    trains: ["soldier"],
-    vision: 6,
-  },
-  watchTower: {
-    label: "Watch Tower",
-    sprite: "watchTower",
-    maxHp: 210,
-    size: 1,
-    score: 55,
-    cost: { wood: 80, ore: 45 },
-    attack: 14,
-    range: 5.5,
-    cooldown: 1.4,
-    vision: 11,
-  },
-  farm: {
-    label: "Farm",
-    sprite: "farm",
-    maxHp: 95,
-    size: 4,
-    score: 22,
-    cost: { wood: 45 },
-    resource: "food",
-    farmFood: FARM_FOOD,
-    replenishCost: FARM_REPLENISH_COST,
-    vision: 3,
-  },
-  lumberCamp: {
-    label: "Lumber Camp",
-    sprite: "lumberCamp",
-    maxHp: 150,
-    size: 1,
-    score: 32,
-    cost: { wood: 70 },
-    accepts: ["wood"],
-    vision: 5,
-  },
-  foodDepot: {
-    label: "Food Depot",
-    sprite: "foodDepot",
-    maxHp: 150,
-    size: 1,
-    score: 32,
-    cost: { wood: 70 },
-    accepts: ["food"],
-    vision: 5,
-  },
-  miningCamp: {
-    label: "Mining Camp",
-    sprite: "miningCamp",
-    maxHp: 150,
-    size: 1,
-    score: 32,
-    cost: { wood: 70 },
-    accepts: ["ore"],
-    vision: 5,
-  },
-} as const;
 
 export const RESOURCE_DEFS = {
   tree: {
@@ -151,4 +55,3 @@ export const RESOURCE_DEFS = {
     score: 0,
   },
 } as const;
-import { defineUnits, SoldierUnit, VillagerUnit } from "./unitDefinitions.js";

@@ -3,11 +3,12 @@ import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
 import { BUILDINGS, SCALE, TILE_H, TRAINING } from "./constants.js";
-import { UNIT_DEFS } from "../../src/shared/config.js";
+import { BUILDING_DEFS, deserializeBuilding } from "../../src/shared/buildingRegistry.js";
+import { allUnitClasses, unitBehaviorFor } from "../../src/shared/unitRegistry.js";
 import { sprites } from "./sprites/index.js";
 import { spriteBounds } from "./spriteBounds.js";
 import type { Building, BuildingType, CommandPayload, EntityId, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
-import type { ClientCommand, GameState, ViewState } from "./clientTypes.js";
+import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
 const state: GameState = {
   playerId: localStorage.getItem("rtsPlayerId") || null,
@@ -221,7 +222,7 @@ function connectEvents() {
   if (!state.playerId) return;
   eventStream = new EventSource(`/events?playerId=${encodeURIComponent(state.playerId)}`);
   eventStream.onmessage = (event) => {
-    const snap = JSON.parse(event.data) as Snapshot;
+    const snap = hydrateSnapshot(JSON.parse(event.data) as Snapshot);
   if (!state.playerId || !snap.players?.[state.playerId] || snap.players[state.playerId]!.defeated) {
       handleEliminated();
       return;
@@ -261,7 +262,7 @@ function resetToJoin(message: string) {
   if (message) ui.showToast(message);
 }
 
-function applyVisibility(snap: Snapshot) {
+function applyVisibility(snap: ClientSnapshot) {
   if (!snap.visibility) return;
   if (Array.isArray(snap.visibility.explored)) {
     // Initial / full set
@@ -273,6 +274,13 @@ function applyVisibility(snap: Snapshot) {
   snap.visibility.exploredSet = state.exploredSet;
 }
 
+function hydrateSnapshot(snap: Snapshot): ClientSnapshot {
+  const buildings = Object.fromEntries(
+    Object.entries(snap.buildings).map(([id, building]) => [id, deserializeBuilding(building)]),
+  ) as ClientSnapshot["buildings"];
+  return { ...snap, buildings };
+}
+
 let centered = false;
 function centerOnTownOnce() {
   if (centered || !state.snapshot) return;
@@ -282,7 +290,7 @@ function centerOnTownOnce() {
 function centerOnTown(once = true) {
   if (!state.snapshot) return;
   if (once && centered) return;
-  const town = Object.values(state.snapshot.buildings).find((building) => building.ownerId === state.playerId && building.type === "townCenter");
+  const town = Object.values(state.snapshot.buildings).find((building) => building.ownerId === state.playerId && building.isTownCenter());
   if (!town) return;
   const screen = isoToScreen(town.x + (town.size - 1) / 2, town.y + (town.size - 1) / 2, { x: 0, y: 0, zoom: view.camera.zoom });
   view.camera.x = window.innerWidth / 2 - screen.x;
@@ -359,7 +367,7 @@ function handleRightClick(event: MouseEvent) {
     issue({ type: "finishBuild", unitIds: ownUnits, buildingId: hit.id }, { silent: true }).then((result) => {
       addTargetFlash(hit.id, result.ok ? "white" : "red");
     });
-  } else if (hit?.kind === "resource" || hit?.type === "farm") {
+  } else if (hit?.kind === "resource" || (hit?.kind === "building" && hit.canBeGatheredBy(state.playerId!))) {
     issue({ type: "gather", unitIds: ownUnits, targetId: hit.id }, { silent: true }).then((result) => {
       addTargetFlash(hit.id, result.ok ? "white" : "red");
     });
@@ -501,7 +509,7 @@ function trainShortcut(unitType: UnitType) {
 }
 
 function selectedFarmAction(action: (farm: Building) => void) {
-  const farm = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId && entity.type === "farm");
+  const farm = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId && entity.gatherResource());
   if (farm) action(farm);
 }
 
@@ -561,7 +569,7 @@ function canPlacePreview(buildingType: BuildingType, x: number, y: number) {
 }
 
 function buildingSize(type: BuildingType) {
-  if (type === "farm" || type === "townCenter") return 4;
+  if (type in BUILDING_DEFS) return BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.size;
   if (type === "barracks") return 3;
   if (type === "house") return 2;
   return 1;
@@ -701,7 +709,7 @@ function forgetVisibleMissing(memory: Record<string, Building | ResourceNode | {
   }
 }
 
-function isVisibleNow(visibility: Snapshot["visibility"], x: number, y: number, size: number, mapSize: number) {
+function isVisibleNow(visibility: ClientSnapshot["visibility"], x: number, y: number, size: number, mapSize: number) {
   const visible = visibility?.visibleSet;
   if (!visible) return false;
   for (let yy = Math.floor(y); yy < Math.ceil(y + size); yy += 1) {
@@ -775,12 +783,12 @@ function entityPixel(entity: Unit | Building | ResourceNode, zoom: number) {
 }
 
 function unitBehavior(unit: Unit) {
-  return UNIT_DEFS[unit.type];
+  return unitBehaviorFor(unit.type);
 }
 
 function unitTypeForShortcut(key: string): UnitType | null {
-  for (const [unitType, unit] of Object.entries(UNIT_DEFS) as [UnitType, (typeof UNIT_DEFS)[UnitType]][]) {
-    if (unit.trainShortcut?.toLowerCase() === key) return unitType;
+  for (const Unit of allUnitClasses()) {
+    if (Unit.trainShortcut?.toLowerCase() === key) return Unit.type;
   }
   return null;
 }

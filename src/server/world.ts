@@ -1,4 +1,7 @@
-import { BUILDING_DEFS, COLORS, FARM_FOOD, FARM_REPLENISH_COST, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, STARTING_UNITS, UNIT_DEFS } from "../shared/config.js";
+import { COLORS, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, STARTING_UNITS } from "../shared/config.js";
+import { BUILDING_DEFS, createBuildingEntity } from "../shared/buildingRegistry.js";
+import { unitBehaviorFor } from "../shared/unitRegistry.js";
+import type { GatherTarget } from "../shared/buildingDefinitions.js";
 import { id } from "./id.js";
 import { clamp, distance, moveToward, rectsOverlap } from "./math.js";
 import type {
@@ -174,7 +177,7 @@ function rebuildOccupancy(world: World) {
     if (x >= 0 && y >= 0 && x < size && y < size) grid[y * size + x] = 1;
   }
   for (const building of Object.values(world.buildings)) {
-    if (building.type === "farm") continue;
+    if (!building.isWalkBlocking()) continue;
     for (let dy = 0; dy < building.size; dy += 1) {
       for (let dx = 0; dx < building.size; dx += 1) {
         const x = building.x + dx;
@@ -253,7 +256,7 @@ function chooseSpawn(world: World, count: number) {
 }
 
 function createUnit(world: World, ownerId: PlayerId, type: UnitType, x: number, y: number): Unit {
-  const def = UNIT_DEFS[type];
+  const def = unitBehaviorFor(type);
   const unit: Unit = {
     id: id("u"),
     kind: "unit",
@@ -277,31 +280,8 @@ function createUnit(world: World, ownerId: PlayerId, type: UnitType, x: number, 
 
 function createBuilding(world: World, ownerId: PlayerId, type: BuildingType, x: number, y: number, free = false): Building | null {
   const def = BUILDING_DEFS[type];
-  const building: Building = {
-    id: id("b"),
-    kind: "building",
-    ownerId,
-    type,
-    x: Math.round(x),
-    y: Math.round(y),
-    size: def.size,
-    hp: def.maxHp,
-    maxHp: def.maxHp,
-    queue: [],
-    cooldown: 0,
-    attackFlash: 0,
-    vision: def.vision || 5,
-    rallyPoint: null,
-    builderIds: [],
-  };
-  if (type === "farm") {
-    const farmDef = def as typeof BUILDING_DEFS["farm"];
-    building.amount = farmDef.farmFood || FARM_FOOD;
-    building.maxAmount = farmDef.farmFood || FARM_FOOD;
-    building.resource = "food";
-    building.exhausted = false;
-  }
-  if (!free && !spend(world.players[ownerId]!, def.cost)) return null;
+  const building = createBuildingEntity(type, { id: id("b"), ownerId, x, y });
+  if (!free && !spend(world.players[ownerId]!, def.stats.cost)) return null;
   world.buildings[building.id] = building;
   return building;
 }
@@ -373,9 +353,8 @@ function commandAttack(world: World, playerId: PlayerId, body: Extract<CommandPa
 }
 
 function commandGather(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "gather" }>): CommandResult {
-  const resource = world.resources[body.targetId] || farmAsResource(world.buildings[body.targetId]);
+  const resource = world.resources[body.targetId] || gatherableBuilding(world.buildings[body.targetId], playerId);
   if (!resource) return { ok: false, error: "Invalid resource." };
-  if (resource.type === "farm" && resource.ownerId !== playerId) return { ok: false, error: "You can only work your own farms." };
   let assigned = false;
   forOwnUnits(world, playerId, body.unitIds, (unit) => {
     if (unitBehavior(unit).canGather()) {
@@ -403,16 +382,16 @@ function commandToggleAutoFarm(world: World, playerId: PlayerId): CommandResult 
 
 function commandReplenishFarm(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "replenishFarm" }>): CommandResult {
   const farm = world.buildings[body.farmId];
-  if (!farm || farm.ownerId !== playerId || farm.type !== "farm" || !isComplete(farm)) return { ok: false, error: "Select one of your completed farms." };
+  if (!farm || farm.ownerId !== playerId || !farm.canBeGatheredBy(playerId)) return { ok: false, error: "Select one of your completed farms." };
   return replenishFarm(world, farm) ? { ok: true } : { ok: false, error: "Not enough wood to reseed farm." };
 }
 
 function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "build" }>): CommandResult {
   const def = BUILDING_DEFS[body.buildingType];
   if (!def) return { ok: false, error: "Unknown building." };
-  const x = clamp(Math.round(Number(body.x)), 0, MAP_SIZE - def.size);
-  const y = clamp(Math.round(Number(body.y)), 0, MAP_SIZE - def.size);
-  if (!canPlace(world, x, y, def.size)) return { ok: false, error: "Blocked tile." };
+  const x = clamp(Math.round(Number(body.x)), 0, MAP_SIZE - def.stats.size);
+  const y = clamp(Math.round(Number(body.y)), 0, MAP_SIZE - def.stats.size);
+  if (!canPlace(world, x, y, def.stats.size)) return { ok: false, error: "Blocked tile." };
   const builders = Object.values(world.units).filter(
     (unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild(),
   );
@@ -421,8 +400,8 @@ function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPay
   if (!building) return { ok: false, error: "Not enough resources." };
   building.hp = Math.max(12, Math.floor(building.maxHp * 0.25));
   building.builderIds = builders.map((unit) => unit.id);
-  const resourceKind = depotGatherKind(building);
-  for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.type === "farm" };
+  const resourceKind = building.depotGatherKind();
+  for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild() };
   return { ok: true };
 }
 
@@ -434,9 +413,9 @@ function commandFinishBuild(world: World, playerId: PlayerId, body: Extract<Comm
     (unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild(),
   );
   if (builders.length === 0) return { ok: false, error: "Select build-capable units." };
-  const resourceKind = depotGatherKind(building);
+  const resourceKind = building.depotGatherKind();
   building.builderIds = [...new Set([...(building.builderIds || []), ...builders.map((unit) => unit.id)])];
-  for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.type === "farm" };
+  for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild() };
   return { ok: true };
 }
 
@@ -453,7 +432,7 @@ function commandDeleteBuilding(world: World, playerId: PlayerId, body: Extract<C
 
 function commandSetRallyPoint(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "setRallyPoint" }>): CommandResult {
   const building = world.buildings[body.buildingId];
-  if (!building || building.ownerId !== playerId || !("trains" in BUILDING_DEFS[building.type])) return { ok: false, error: "Select a production building." };
+  if (!building || building.ownerId !== playerId || building.trainableUnits().length === 0) return { ok: false, error: "Select a production building." };
   building.rallyPoint = {
     x: clamp(Number(body.x), 0, MAP_SIZE - 1),
     y: clamp(Number(body.y), 0, MAP_SIZE - 1),
@@ -463,12 +442,11 @@ function commandSetRallyPoint(world: World, playerId: PlayerId, body: Extract<Co
 
 function commandTrain(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "train" }>): CommandResult {
   const building = world.buildings[body.buildingId];
-  const unitDef = UNIT_DEFS[body.unitType];
+  const unitDef = unitBehaviorFor(body.unitType);
   if (!building || building.ownerId !== playerId || !isComplete(building) || !unitDef) {
     return { ok: false, error: "Cannot train there." };
   }
-  const buildingDef = BUILDING_DEFS[building.type];
-  if (!("trains" in buildingDef) || !(buildingDef.trains as readonly UnitType[]).includes(body.unitType)) {
+  if (!building.canTrain(body.unitType)) {
     return { ok: false, error: "Cannot train there." };
   }
   const player = world.players[playerId];
@@ -499,7 +477,6 @@ function stepUnit(world: World, unit: Unit, dt: number) {
 }
 
 function stepBuilding(world: World, building: Building, dt: number) {
-  const def = BUILDING_DEFS[building.type];
   building.cooldown = Math.max(0, building.cooldown - dt);
   building.attackFlash = Math.max(0, (building.attackFlash || 0) - dt);
   if (!isComplete(building)) return;
@@ -515,11 +492,12 @@ function stepBuilding(world: World, building: Building, dt: number) {
       }
     }
   }
-  if ("attack" in def) {
-    const target = nearestEnemy(world, building, def.range);
+  const attack = building.attackStats();
+  if (attack) {
+    const target = nearestEnemy(world, building, attack.range);
     if (target && building.cooldown <= 0) {
-      damage(world, target, def.attack, building.ownerId);
-      building.cooldown = def.cooldown;
+      damage(world, target, attack.attack, building.ownerId);
+      building.cooldown = attack.cooldown;
       building.attackFlash = 0.22;
     }
   }
@@ -551,7 +529,7 @@ function stepAttack(world: World, unit: Unit, command: Extract<UnitCommand, { ty
 }
 
 function stepGather(world: World, unit: Unit, command: Extract<UnitCommand, { type: "gather" }>, dt: number) {
-  let resource: ResourceNode | Building | null | undefined = world.resources[command.targetId] || farmAsResource(world.buildings[command.targetId]);
+  let resource: ResourceNode | Building | null | undefined = world.resources[command.targetId] || gatherableBuilding(world.buildings[command.targetId], unit.ownerId);
   if (unit.carried && unit.carried.amount > 0) {
     const depot = nearestDepot(world, unit.ownerId, unit.carried.resource, unit);
     if (!depot) return;
@@ -565,8 +543,8 @@ function stepGather(world: World, unit: Unit, command: Extract<UnitCommand, { ty
   }
   const behavior = unitBehavior(unit);
   if (!resource || resource.amount! <= 0 || !behavior.canGather()) {
-    if (resource?.kind === "building" && resource.type === "farm") {
-      maybeAutoReplenishFarm(world, resource);
+    if (isBuilding(resource)) {
+      maybeAutoReplenishBuilding(world, resource);
       if (resource.amount! > 0) return;
     }
     const next = findNextResource(world, unit, command.resourceKind);
@@ -579,22 +557,24 @@ function stepGather(world: World, unit: Unit, command: Extract<UnitCommand, { ty
     unit.command = { type: "idle" };
     return;
   }
-  const targetPoint = resource.kind === "building" ? centerOf(resource) : resource;
-  const gatherRange = resource.kind === "building" ? resource.size! + 0.7 : 1.1;
+  const targetPoint = isBuilding(resource) ? centerOf(resource) : resource;
+  const gatherRange = isBuilding(resource) ? resource.gatherRange() : 1.1;
   if (distance(unit, targetPoint) > gatherRange) {
     moveNearTarget(world, unit, command, targetPoint, gatherRange, behavior.stats.speed * dt);
     return;
   }
   unit.workFlash = 0.25;
   command.progress = (command.progress || 0) + dt;
-  if (command.progress >= behavior.gatherSeconds(resource)) {
-    const amount = Math.min(behavior.gatherAmount(resource), resource.amount!);
+  const gatherTarget = gatherTargetFor(resource);
+  const gatherSeconds = behavior.gatherSeconds(gatherTarget);
+  if (command.progress >= gatherSeconds) {
+    const amount = Math.min(behavior.gatherAmount(gatherTarget), resource.amount!);
     resource.amount! -= amount;
-    unit.carried = { resource: resource.resource! as ResourceType, amount };
+    unit.carried = { resource: gatherResource(resource), amount };
     command.progress = 0;
-    if (resource.kind === "building" && resource.type === "farm") {
-      resource.exhausted = resource.amount! <= 0;
-      maybeAutoReplenishFarm(world, resource);
+    if (isBuilding(resource)) {
+      resource.onGatheredOut();
+      maybeAutoReplenishBuilding(world, resource);
     } else if (resource.amount! <= 0) {
       delete world.resources[resource.id];
     } else if (resource.type === "tree" && resource.amount! <= TREE_STUMP_THRESHOLD) {
@@ -647,13 +627,16 @@ function stepBuild(world: World, unit: Unit, command: Extract<UnitCommand, { typ
 
 function assignPostBuildGather(world: World, unit: Unit, resourceKind: ResourceType | null, builtFarm: Building | null = null) {
   if (builtFarm && unitBehavior(unit).canGather() && isComplete(builtFarm)) {
-    unit.command = { type: "gather", targetId: builtFarm.id, resourceKind: "food", progress: 0, path: null };
-    return;
+    const resource = builtFarm.gatherResource();
+    if (resource) {
+      unit.command = { type: "gather", targetId: builtFarm.id, resourceKind: resource, progress: 0, path: null };
+      return;
+    }
   }
   const nextBuild = findNextBuildSite(world, unit);
   if (nextBuild) {
     nextBuild.builderIds = [...new Set([...(nextBuild.builderIds || []), unit.id])];
-    unit.command = { type: "build", targetId: nextBuild.id, path: null, resourceKind: depotGatherKind(nextBuild), gatherBuiltFarm: nextBuild.type === "farm" };
+    unit.command = { type: "build", targetId: nextBuild.id, path: null, resourceKind: nextBuild.depotGatherKind(), gatherBuiltFarm: nextBuild.shouldGatherAfterBuild() };
     return;
   }
   if (!resourceKind || !unitBehavior(unit).canGather()) {
@@ -684,13 +667,6 @@ function findNextBuildSite(world: World, unit: Unit): Building | null {
   return bestInitiated || bestNearby;
 }
 
-function depotGatherKind(building: Building): ResourceType | null {
-  if (building.type === "lumberCamp") return "wood";
-  if (building.type === "foodDepot") return "food";
-  if (building.type === "miningCamp") return "ore";
-  return null;
-}
-
 function autoAcquire(world: World, unit: Unit) {
   if (!unitBehavior(unit).canAutoAcquireTargets()) return;
   const target = nearestEnemy(world, unit, 5.5);
@@ -710,14 +686,12 @@ function findNextResource(world: World, unit: Unit, resourceKind: ResourceType |
       bestDist = d;
     }
   }
-  if (resourceKind === "food") {
-    for (const b of Object.values(world.buildings)) {
-      if (b.ownerId !== unit.ownerId || b.type !== "farm" || !isComplete(b) || (b.amount || 0) <= 0) continue;
-      const d = distance(unit, b);
-      if (d < bestDist) {
-        best = b;
-        bestDist = d;
-      }
+  for (const b of Object.values(world.buildings)) {
+    if (!b.canBeGatheredBy(unit.ownerId) || b.gatherResource() !== resourceKind || b.isGatherExhausted()) continue;
+    const d = distance(unit, b);
+    if (d < bestDist) {
+      best = b;
+      bestDist = d;
     }
   }
   return best;
@@ -727,8 +701,7 @@ function nearestDepot(world: World, ownerId: PlayerId, resource: ResourceType, s
   let best = null;
   let bestDist = Infinity;
   for (const building of Object.values(world.buildings)) {
-    const def = BUILDING_DEFS[building.type];
-    if (building.ownerId !== ownerId || !isComplete(building) || !("accepts" in def) || !(def.accepts as readonly ResourceType[]).includes(resource)) continue;
+    if (building.ownerId !== ownerId || !isComplete(building) || !building.canAcceptResource(resource)) continue;
     const d = distance(source, centerOf(building));
     if (d < bestDist) {
       best = building;
@@ -738,24 +711,21 @@ function nearestDepot(world: World, ownerId: PlayerId, resource: ResourceType, s
   return best;
 }
 
-function farmAsResource(building: Building | undefined): Building | null {
-  if (!building || building.type !== "farm") return null;
-  if (!isComplete(building)) return null;
+function gatherableBuilding(building: Building | undefined, playerId: PlayerId): Building | null {
+  if (!building?.canBeGatheredBy(playerId)) return null;
   return building;
 }
 
-function maybeAutoReplenishFarm(world: World, farm: Building) {
-  const player = world.players[farm.ownerId];
-  if (!player?.autoReplenishFarms || (farm.amount ?? 0) > 0) return;
-  replenishFarm(world, farm);
+function maybeAutoReplenishBuilding(world: World, building: Building) {
+  const player = world.players[building.ownerId];
+  if (!player) return;
+  building.maybeReplenish((cost) => spend(player, cost), player.autoReplenishFarms);
 }
 
-function replenishFarm(world: World, farm: Building): boolean {
-  const player = world.players[farm.ownerId];
-  if (!player || !spend(player, FARM_REPLENISH_COST)) return false;
-  farm.amount = farm.maxAmount || FARM_FOOD;
-  farm.exhausted = false;
-  return true;
+function replenishFarm(world: World, building: Building): boolean {
+  const player = world.players[building.ownerId];
+  if (!player) return false;
+  return building.maybeReplenish((cost) => spend(player, cost), true);
 }
 
 function nearestEnemy(world: World, source: Unit | Building, range: number) {
@@ -772,13 +742,30 @@ function nearestEnemy(world: World, source: Unit | Building, range: number) {
   return best;
 }
 
+function isBuilding(entity: ResourceNode | Building | null | undefined): entity is Building {
+  return entity?.kind === "building";
+}
+
+function gatherResource(entity: ResourceNode | Building): ResourceType {
+  if (isBuilding(entity)) return entity.gatherResource()!;
+  return entity.resource;
+}
+
+function gatherTargetFor(entity: ResourceNode | Building): GatherTarget {
+  if (isBuilding(entity)) return entity;
+  return {
+    gatherAmountFor: (unit) => unit.carryCapacity(),
+    gatherSecondsFor: () => 1.1,
+  };
+}
+
 function damage(world: World, target: Unit | Building, amount: number, attackerId: PlayerId) {
   target.hp -= amount;
   if (target.hp > 0) return;
   if (target.kind === "building") {
     createRuin(world, target);
     delete world.buildings[target.id];
-    if (target.type === "townCenter") defeatPlayer(world, target.ownerId, attackerId);
+    if (target.isTownCenter()) defeatPlayer(world, target.ownerId, attackerId);
   } else {
     delete world.units[target.id];
   }
@@ -1009,17 +996,16 @@ function recalcPlayer(world: World, playerId: PlayerId) {
   const buildings = Object.values(world.buildings).filter((building) => building.ownerId === playerId);
   player.population = units.length;
   player.popCap = 4 + buildings.filter(isComplete).reduce((sum, building) => {
-    const def = BUILDING_DEFS[building.type];
-    return sum + ("pop" in def ? def.pop : 0);
+    return sum + building.populationCapacity();
   }, 0);
   const unitScore = units.reduce((sum, unit) => sum + unitBehavior(unit).stats.score, 0);
-  const buildingScore = buildings.reduce((sum, building) => sum + BUILDING_DEFS[building.type].score, 0);
+  const buildingScore = buildings.reduce((sum, building) => sum + BUILDING_DEFS[building.type].stats.score, 0);
   const resourceScore = Math.floor(Object.values(player.resources).reduce((sum, amount) => sum + amount, 0) / 8);
   player.score = player.defeated ? 0 : unitScore + buildingScore + resourceScore;
 }
 
 function isComplete(building: Building): boolean {
-  return building.hp >= building.maxHp;
+  return building.isComplete();
 }
 
 function updateLeaderboard(world: World) {
@@ -1039,5 +1025,5 @@ function normalizeColor(value: unknown): string | null {
 }
 
 function unitBehavior(unit: Unit) {
-  return UNIT_DEFS[unit.type];
+  return unitBehaviorFor(unit.type);
 }

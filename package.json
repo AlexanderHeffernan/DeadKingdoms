@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build:server": "tsc -p tsconfig.json",
-    "build:client": "esbuild public/js/app.ts --bundle --format=esm --target=es2020 --minify --outfile=public/js/app.js",
+    "build:client": "node -e \"require('node:fs').rmSync('dist/client', { recursive: true, force: true })\" && esbuild public/js/app.ts --bundle --format=esm --target=es2020 --minify --outfile=dist/client/public/js/app.js",
     "build": "npm run build:server && npm run build:client",
     "dev:client": "tsc -p tsconfig.client.json",
     "dev": "npm run build:server && npm run dev:client && node dist/server/index.js",
