@@ -5,7 +5,7 @@ export const MAP_SIZE = 192;
 export const TILE_W = 64;
 export const TILE_H = 32;
 
-export const RESOURCE_TYPES = ["wood", "food", "ore"];
+export const RESOURCE_TYPES = ["wood", "food", "ore"] as const;
 
 export const STARTING_RESOURCES = {
   wood: 180,
@@ -61,7 +61,7 @@ export const UNIT_DEFS = {
     canBuild: false,
     vision: 7,
   },
-};
+} as const;
 
 export const BUILDING_DEFS = {
   townCenter: {
@@ -149,7 +149,7 @@ export const BUILDING_DEFS = {
     accepts: ["ore"],
     vision: 5,
   },
-};
+} as const;
 
 export const RESOURCE_DEFS = {
   tree: {
@@ -173,4 +173,4 @@ export const RESOURCE_DEFS = {
     amount: 130,
     score: 0,
   },
-};
+} as const;

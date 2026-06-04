@@ -1,11 +1,12 @@
-export function spriteBounds(rows) {
+export function spriteBounds(rows: readonly string[]) {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (let y = 0; y < rows.length; y += 1) {
-    for (let x = 0; x < rows[y].length; x += 1) {
-      if (rows[y][x] === ".") continue;
+    const row = rows[y]!;
+    for (let x = 0; x < row.length; x += 1) {
+      if (row[x] === ".") continue;
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
       maxX = Math.max(maxX, x);

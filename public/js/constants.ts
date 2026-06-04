@@ -10,9 +10,9 @@ export const BUILDINGS = {
   lumberCamp: { label: "Lumber Camp", cost: { wood: 70 } },
   foodDepot: { label: "Food Depot", cost: { wood: 70 } },
   miningCamp: { label: "Mining Camp", cost: { wood: 70 } },
-};
+} as const;
 
 export const TRAINING = {
   townCenter: [{ unitType: "villager", label: "Villager", cost: { food: 45 } }],
   barracks: [{ unitType: "soldier", label: "Soldier", cost: { food: 45, ore: 20 } }],
-};
+} as const;
