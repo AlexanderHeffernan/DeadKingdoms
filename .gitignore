@@ -2,6 +2,7 @@
 node_modules/
 npm-debug.log*
 dist/
+public/js/**/*.js
 
 # Local environment and secrets
 .env
