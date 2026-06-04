@@ -1,7 +1,6 @@
 FROM node:20-alpine
 
 WORKDIR /app
-ENV NODE_ENV=production
 
 COPY --chown=node:node package.json ./
 COPY --chown=node:node package-lock.json ./
@@ -10,7 +9,9 @@ COPY --chown=node:node src ./src
 COPY --chown=node:node public ./public
 COPY --chown=node:node assets ./assets
 
-RUN npm ci && npm run build
+RUN npm ci && npm run build && npm prune --omit=dev
+
+ENV NODE_ENV=production
 
 USER node
 EXPOSE 3000
