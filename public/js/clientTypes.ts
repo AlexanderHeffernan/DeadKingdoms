@@ -1,4 +1,8 @@
-import type { Building, CommandPayload, ResourceNode, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
+import type { Building, BuildingId, CommandPayload, ResourceNode, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
+
+export type ClientSnapshot = Omit<Snapshot, "buildings"> & {
+  buildings: Record<BuildingId, Building>;
+};
 
 export type Effect =
   | { type: "moveCross"; x: number; y: number; createdAt: number; duration: number }
@@ -12,7 +16,7 @@ export type LastSeen = {
 
 export type GameState = {
   playerId: string | null;
-  snapshot: Snapshot | null;
+  snapshot: ClientSnapshot | null;
   selectedIds: Set<string>;
   lastSeen: LastSeen;
   effects: Effect[];

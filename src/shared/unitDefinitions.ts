@@ -1,4 +1,5 @@
-import type { ResourceCost } from "./types.js";
+import type { GatherTarget } from "./buildingDefinitions.js";
+import type { ResourceCost, UnitType } from "./types.js";
 
 export type UnitStats = {
   maxHp: number;
@@ -12,7 +13,22 @@ export type UnitStats = {
   vision: number;
 };
 
-/** Runtime behavior contract implemented by every trainable unit archetype. */
+export type UnitClass<T extends BaseUnit = BaseUnit> = {
+  new (): T;
+  readonly type: UnitType;
+  readonly label: string;
+  readonly sprite: string;
+  readonly stats: UnitStats;
+  readonly trainShortcut?: string | undefined;
+};
+
+/**
+ * Runtime behavior contract implemented by every trainable unit archetype.
+ *
+ * When adding a new concrete unit class in this file, also add that class to
+ * `UNIT_CLASSES` in `unitRegistry.ts` so serialized unit type names can be
+ * resolved back to runtime behavior.
+ */
 export interface UnitBehavior {
   /** Stable unit type key stored in snapshots, commands, queues, and config. */
   readonly type: string;
@@ -27,7 +43,7 @@ export interface UnitBehavior {
   readonly stats: UnitStats;
 
   /** Optional keyboard shortcut used by production-building train actions. */
-  readonly trainShortcut?: string;
+  readonly trainShortcut?: string | undefined;
 
   /** Whether this unit can receive gather commands and collect resources. */
   canGather(): boolean;
@@ -41,19 +57,39 @@ export interface UnitBehavior {
   /** Maximum resource amount this unit can carry from non-building resource nodes. */
   carryCapacity(): number;
 
-  /** Amount gathered per completed gather cycle for the supplied target kind. */
-  gatherAmount(target: { kind: string; type: string }): number;
+  /** Amount gathered per completed gather cycle for the supplied target. */
+  gatherAmount(target: GatherTarget): number;
 
-  /** Duration in seconds of one gather cycle for the supplied target kind. */
-  gatherSeconds(target: { kind: string; type: string }): number;
+  /** Duration in seconds of one gather cycle for the supplied target. */
+  gatherSeconds(target: GatherTarget): number;
 }
 
 export abstract class BaseUnit implements UnitBehavior {
-  abstract readonly type: string;
-  abstract readonly label: string;
-  abstract readonly sprite: string;
-  abstract readonly stats: UnitStats;
-  readonly trainShortcut?: string;
+  static readonly type: UnitType;
+  static readonly label: string;
+  static readonly sprite: string;
+  static readonly stats: UnitStats;
+  static readonly trainShortcut?: string | undefined;
+
+  get type() {
+    return (this.constructor as UnitClass).type;
+  }
+
+  get label() {
+    return (this.constructor as UnitClass).label;
+  }
+
+  get sprite() {
+    return (this.constructor as UnitClass).sprite;
+  }
+
+  get stats() {
+    return (this.constructor as UnitClass).stats;
+  }
+
+  get trainShortcut() {
+    return (this.constructor as UnitClass).trainShortcut;
+  }
 
   canGather() {
     return false;
@@ -71,23 +107,21 @@ export abstract class BaseUnit implements UnitBehavior {
     return 0;
   }
 
-  gatherAmount(target: { kind: string; type: string }) {
-    if (target.kind === "building" && target.type === "farm") return 6;
-    return this.carryCapacity();
+  gatherAmount(target: GatherTarget) {
+    return target.gatherAmountFor(this);
   }
 
-  gatherSeconds(target: { kind: string; type: string }) {
-    if (target.kind === "building" && target.type === "farm") return 8;
-    return 1.1;
+  gatherSeconds(target: GatherTarget) {
+    return target.gatherSecondsFor(this);
   }
 }
 
 export class VillagerUnit extends BaseUnit {
-  readonly type = "villager";
-  readonly label = "Villager";
-  readonly sprite = "villager";
-  readonly trainShortcut = "V";
-  readonly stats = {
+  static readonly type = "villager";
+  static readonly label = "Villager";
+  static readonly sprite = "villager";
+  static readonly trainShortcut = "V";
+  static readonly stats = {
     maxHp: 40,
     speed: 3.2,
     attack: 3,
@@ -113,11 +147,11 @@ export class VillagerUnit extends BaseUnit {
 }
 
 export class SoldierUnit extends BaseUnit {
-  readonly type = "soldier";
-  readonly label = "Soldier";
-  readonly sprite = "soldier";
-  readonly trainShortcut = "S";
-  readonly stats = {
+  static readonly type = "soldier";
+  static readonly label = "Soldier";
+  static readonly sprite = "soldier";
+  static readonly trainShortcut = "S";
+  static readonly stats = {
     maxHp: 70,
     speed: 4.1,
     attack: 9,
@@ -132,10 +166,4 @@ export class SoldierUnit extends BaseUnit {
   canAutoAcquireTargets() {
     return true;
   }
-}
-
-export function defineUnits<const T extends readonly UnitBehavior[]>(units: T) {
-  return Object.fromEntries(units.map((unit) => [unit.type, unit])) as {
-    [K in T[number]["type"]]: Extract<T[number], { type: K }>;
-  };
 }

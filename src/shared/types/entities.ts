@@ -14,6 +14,7 @@ import type {
 } from "./core.js";
 import type { UnitCommand } from "./unitCommands.js";
 import type { VisibilityCache } from "./visibility.js";
+import type { BuildingEntity, BuildingSnapshot } from "../buildingDefinitions.js";
 
 /** Player-owned economy, score, fog-of-war, and population state. */
 export interface Player {
@@ -65,25 +66,10 @@ export interface BuildQueueItem {
 }
 
 /** Simulated player structure, including production, combat, storage, and farm state. */
-export interface Building extends BaseEntity {
-  id: BuildingId;
-  kind: "building";
-  type: BuildingType;
-  ownerId: PlayerId;
-  size: number;
-  hp: number;
-  maxHp: number;
-  queue: BuildQueueItem[];
-  cooldown: number;
-  attackFlash: number;
-  vision?: number;
-  rallyPoint: Vec2 | null;
-  builderIds: UnitId[];
-  amount?: number;
-  maxAmount?: number;
-  resource?: ResourceType;
-  exhausted?: boolean;
-}
+export type Building = BuildingEntity;
+
+/** JSON-safe building payload used only at network boundaries. */
+export type SerializedBuilding = BuildingSnapshot;
 
 /** Gatherable world resource or depleted stump. */
 export interface ResourceNode extends BaseEntity {

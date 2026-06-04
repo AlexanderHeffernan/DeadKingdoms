@@ -1,9 +1,9 @@
 import { BUILDINGS, TRAINING } from "./constants.js";
-import { UNIT_DEFS } from "../../src/shared/config.js";
+import { unitBehaviorFor } from "../../src/shared/unitRegistry.js";
 import { palette } from "./sprites/palette.js";
 import { sprites } from "./sprites/index.js";
 import type { Building, ResourceNode, Snapshot, SpriteName, Unit } from "../../src/shared/types.js";
-import type { GameState, SelectionEntity, UIActions } from "./clientTypes.js";
+import type { ClientSnapshot, GameState, SelectionEntity, UIActions } from "./clientTypes.js";
 
 const BUILD_SHORTCUTS = {
   house: "H",
@@ -66,13 +66,13 @@ export class UI {
     if (notice && notice !== this.lastToast) this.showToast(notice);
   }
 
-  renderLeaderboard(snapshot: Snapshot) {
+  renderLeaderboard(snapshot: ClientSnapshot) {
     this.leaderboard.innerHTML = snapshot.leaderboard
       .map((entry) => `<li><span style="color:${entry.color}">${escapeHtml(entry.name)}</span> <strong>${entry.score}</strong> <em>${aliveTime(entry.joinedAt, snapshot.now)}</em></li>`)
       .join("");
   }
 
-  renderSelection(snapshot: Snapshot) {
+  renderSelection(snapshot: ClientSnapshot) {
     const selected = [...this.state.selectedIds]
       .map((id) => snapshot.units[id] || snapshot.buildings[id] || snapshot.resources[id])
       .filter((item): item is SelectionEntity => Boolean(item));
@@ -91,7 +91,7 @@ export class UI {
     }, {});
     const carried = isUnit(first) && first.carried ? ` · carrying ${Math.floor(first.carried.amount)} ${first.carried.resource}` : "";
     const resource = first.kind === "resource" ? ` · ${Math.floor(first.amount)}/${first.maxAmount} ${first.resource} left` : "";
-    const farm = first.kind === "building" && first.type === "farm"
+    const farm = isBuilding(first) && first.gatherResource()
       ? ` · ${Math.floor(first.amount || 0)}/${first.maxAmount || 0} food left${first.exhausted ? " · exhausted" : ""}`
       : "";
     this.selection.innerHTML = `
@@ -113,11 +113,11 @@ export class UI {
       }
     }
     for (const building of ownedBuildings) {
-      if (building.type === "farm") {
+      if (building.gatherResource()) {
         const player = this.state.snapshot!.players[this.state.playerId!];
         if (!player) continue;
-        actions.push({ spriteName: "farm", label: player.autoReplenishFarms ? "Auto reseed: on" : "Auto reseed: off", cost: {}, displayCost: { wood: 45 }, shortcut: "A", action: () => this.actions.toggleAutoFarm() });
-        actions.push({ spriteName: "farm", label: "Reseed farm", cost: { wood: 45 }, shortcut: "R", action: () => this.actions.replenishFarm(building.id), forceDisabled: !building.exhausted && (building.amount ?? 0) > 0 });
+        actions.push({ spriteName: building.type, label: player.autoReplenishFarms ? "Auto reseed: on" : "Auto reseed: off", cost: {}, displayCost: { wood: 45 }, shortcut: "A", action: () => this.actions.toggleAutoFarm() });
+        actions.push({ spriteName: building.type, label: "Reseed farm", cost: { wood: 45 }, shortcut: "R", action: () => this.actions.replenishFarm(building.id), forceDisabled: !building.exhausted && (building.amount ?? 0) > 0 });
       }
       if (building.queue?.length) {
         const first = building.queue[0];
@@ -255,6 +255,10 @@ function isUnit(entity: SelectionEntity): entity is Unit {
   return entity.kind === "unit";
 }
 
+function isBuilding(entity: SelectionEntity): entity is Building {
+  return entity.kind === "building";
+}
+
 function canAfford(resources: Record<string, number>, cost: Record<string, number>) {
   return Object.entries(cost).every(([resource, amount]) => (resources[resource] || 0) >= amount);
 }
@@ -263,7 +267,7 @@ function isComplete(entity: Building) {
   return !entity.maxHp || entity.hp >= entity.maxHp;
 }
 
-function idleWorkerCount(snapshot: Snapshot, playerId: string) {
+function idleWorkerCount(snapshot: ClientSnapshot, playerId: string) {
   return Object.values(snapshot.units).filter((unit) => unit.ownerId === playerId && unitBehavior(unit).canGather() && (!unit.command || unit.command.type === "idle")).length;
 }
 
@@ -324,7 +328,7 @@ function resourceDescription(resource: string) {
 }
 
 function unitBehavior(unit: Unit) {
-  return UNIT_DEFS[unit.type];
+  return unitBehaviorFor(unit.type);
 }
 
 function aliveTime(joinedAt: number, now: number) {

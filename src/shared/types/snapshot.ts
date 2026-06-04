@@ -1,4 +1,4 @@
-import type { Building, Player, ResourceNode, Ruin, Unit } from "./entities.js";
+import type { Player, ResourceNode, Ruin, SerializedBuilding, Unit } from "./entities.js";
 import type { BuildingId, MapDef, PlayerId, ResourceId, ResourceType, RuinId, UnitId } from "./core.js";
 import type { VisibilityPayload } from "./visibility.js";
 
@@ -35,7 +35,7 @@ export interface Snapshot {
   map: MapDef;
   players: Record<PlayerId, SnapshotPlayer>;
   units: Record<UnitId, Unit>;
-  buildings: Record<BuildingId, Building>;
+  buildings: Record<BuildingId, SerializedBuilding>;
   resources: Record<ResourceId, ResourceNode>;
   ruins: Record<RuinId, Ruin>;
   visibility: VisibilityPayload | null;

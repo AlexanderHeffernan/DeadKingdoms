@@ -1,10 +1,11 @@
 import { SCALE, TILE_H, TILE_W } from "./constants.js";
+import { BUILDING_DEFS } from "../../src/shared/buildingRegistry.js";
 import { isoToScreen } from "./iso.js";
 import { palette } from "./sprites/palette.js";
 import { sprites } from "./sprites/index.js";
 import { spriteBounds } from "./spriteBounds.js";
-import type { Building, BuildingType, ResourceNode, ResourceType, Ruin, Snapshot, SpriteName, Unit } from "../../src/shared/types.js";
-import type { CameraState, Effect, GameState, ViewState } from "./clientTypes.js";
+import type { Building, BuildingType, ResourceNode, ResourceType, Ruin, SpriteName, Unit } from "../../src/shared/types.js";
+import type { CameraState, ClientSnapshot, Effect, GameState, ViewState } from "./clientTypes.js";
 
 const tileColors = ["#345f3e", "#386846", "#2f5739"];
 const GROUND_TILE = [
@@ -75,7 +76,7 @@ export class Renderer {
     this.drawMinimap(state, view);
   }
 
-  drawTiles(size: number, camera: CameraState, visibility: Snapshot["visibility"]) {
+  drawTiles(size: number, camera: CameraState, visibility: ClientSnapshot["visibility"]) {
     const exploredSet = visibility?.exploredSet;
     const visibleSet = visibility?.visibleSet;
     for (let y = 0; y < size; y += 1) {
@@ -142,7 +143,7 @@ export class Renderer {
       if (entity.carried?.amount) this.drawCarryBadge(center.x, y - 2, entity.carried.resource);
     }
     if ("hp" in entity && entity.hp && entity.maxHp && entity.hp < entity.maxHp) this.drawHealth(center.x, y - 8, entity.hp / entity.maxHp);
-    if (entity.kind === "building" && entity.type === "farm" && entity.maxAmount && entity.amount! < entity.maxAmount) this.drawHealth(center.x, y - 8, (entity.amount || 0) / entity.maxAmount);
+    if (entity.kind === "building" && entity.gatherResource() && entity.maxAmount && entity.amount! < entity.maxAmount) this.drawHealth(center.x, y - 8, (entity.amount || 0) / entity.maxAmount);
     if (entity.kind === "resource" && entity.maxAmount && entity.amount < entity.maxAmount) this.drawHealth(center.x, y - 5, entity.amount / entity.maxAmount);
   }
 
@@ -421,7 +422,7 @@ function targetFlashFor(state: GameState, id: string) {
 }
 
 function buildingSize(type: string) {
-  if (type === "farm") return 4;
+  if (type in BUILDING_DEFS) return BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.size;
   if (type === "townCenter") return 4;
   if (type === "barracks") return 3;
   if (type === "house") return 2;
@@ -448,16 +449,7 @@ function canPlacePreview(state: GameState, buildingType: string, x: number, y: n
 }
 
 function buildingCost(type: string) {
-  const costs: Record<string, { wood?: number; ore?: number }> = {
-    house: { wood: 35 },
-    farm: { wood: 45 },
-    barracks: { wood: 120, ore: 30 },
-    watchTower: { wood: 80, ore: 45 },
-    lumberCamp: { wood: 70 },
-    foodDepot: { wood: 70 },
-    miningCamp: { wood: 70 },
-  };
-  return costs[type] || {};
+  return type in BUILDING_DEFS ? BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.cost : {};
 }
 
 function rectsOverlap(a: { x: number; y: number; size: number }, b: { x: number; y: number; size: number }) {
@@ -514,7 +506,7 @@ function shade(hex: string, factor: number) {
   return `rgb(${r} ${g} ${b})`;
 }
 
-function isExplored(visibility: Snapshot["visibility"], x: number, y: number, size: number, mapSize: number) {
+function isExplored(visibility: ClientSnapshot["visibility"], x: number, y: number, size: number, mapSize: number) {
   const explored = visibility?.exploredSet;
   if (!explored) return false;
   for (let yy = Math.floor(y); yy < Math.ceil(y + size); yy += 1) {

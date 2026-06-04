@@ -1,18 +1,24 @@
 import type {
-  BUILDING_DEFS,
   RESOURCE_DEFS,
   RESOURCE_TYPES,
-  UNIT_DEFS,
 } from "../config.js";
 
 /** Resource identifiers used by player inventories, costs, and gatherable nodes. */
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
 
-/** Unit archetype names from the shared unit definition table. */
-export type UnitType = keyof typeof UNIT_DEFS;
+/** Unit archetype names supported by the shared unit class registry. */
+export type UnitType = "villager" | "soldier";
 
-/** Building archetype names from the shared building definition table. */
-export type BuildingType = keyof typeof BUILDING_DEFS;
+/** Building archetype names supported by the shared building class registry. */
+export type BuildingType =
+  | "townCenter"
+  | "house"
+  | "barracks"
+  | "watchTower"
+  | "farm"
+  | "lumberCamp"
+  | "foodDepot"
+  | "miningCamp";
 
 /** Natural resource node archetype names from the shared resource definition table. */
 export type ResourceNodeType = keyof typeof RESOURCE_DEFS;
