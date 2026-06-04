@@ -135,6 +135,8 @@ function enterGame() {
 async function initMusic() {
   music.audio.volume = 0.45;
   music.audio.muted = music.muted;
+  music.audio.loop = false;
+  music.audio.preload = "auto";
   music.audio.addEventListener("ended", () => playRandomTrack());
   updateMuteButton();
   try {
@@ -156,13 +158,22 @@ function startMusic() {
 function playRandomTrack() {
   if (music.muted || music.tracks.length === 0) return;
   const current = music.audio.dataset.track;
-  const choices = music.tracks.length > 1 ? music.tracks.filter((track) => track !== current) : music.tracks;
+  const currentSong = songName(current);
+  const differentSongs = music.tracks.filter((track) => songName(track) !== currentSong);
+  const differentTracks = music.tracks.filter((track) => track !== current);
+  const choices = differentSongs.length > 0 ? differentSongs : differentTracks.length > 0 ? differentTracks : music.tracks;
   const track = choices[Math.floor(Math.random() * choices.length)];
   music.audio.dataset.track = track;
   music.audio.src = track;
   music.audio.play().catch(() => {
     music.started = false;
   });
+}
+
+function songName(track) {
+  if (!track) return "";
+  const file = decodeURIComponent(track.split("/").pop() || "");
+  return file.replace(/\.mp3$/i, "").replace(/-\d+$/i, "");
 }
 
 function toggleMusicMute() {

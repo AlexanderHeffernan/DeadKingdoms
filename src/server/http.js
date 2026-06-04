@@ -52,12 +52,58 @@ async function serveSoundtrack(req, res, url) {
   try {
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) throw new Error("Not a file");
-    res.writeHead(200, { "Content-Type": MIME[extname(filePath)] || "application/octet-stream" });
+    const type = MIME[extname(filePath)] || "application/octet-stream";
+    const range = parseRange(req.headers.range, stat.size);
+    if (range === false) {
+      res.writeHead(416, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Range": `bytes */${stat.size}`,
+        "Accept-Ranges": "bytes",
+      });
+      res.end("Range not satisfiable");
+      return;
+    }
+    if (range) {
+      res.writeHead(206, {
+        "Content-Type": type,
+        "Content-Length": range.end - range.start + 1,
+        "Content-Range": `bytes ${range.start}-${range.end}/${stat.size}`,
+        "Accept-Ranges": "bytes",
+      });
+      createReadStream(filePath, range).pipe(res);
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": type,
+      "Content-Length": stat.size,
+      "Accept-Ranges": "bytes",
+    });
     createReadStream(filePath).pipe(res);
   } catch {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not found");
   }
+}
+
+function parseRange(header, size) {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header);
+  if (!match) return false;
+  let start;
+  let end;
+  if (match[1] === "") {
+    const suffixLength = Number(match[2]);
+    if (!Number.isInteger(suffixLength) || suffixLength <= 0) return false;
+    start = Math.max(size - suffixLength, 0);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] === "" ? size - 1 : Number(match[2]);
+  }
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || start >= size) {
+    return false;
+  }
+  return { start, end: Math.min(end, size - 1) };
 }
 
 export function broadcast(world, clients) {
