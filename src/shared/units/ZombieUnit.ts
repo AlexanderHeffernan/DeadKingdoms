@@ -42,7 +42,7 @@ export class ZombieUnit extends BaseUnit {
 		zombie.soundTarget = this.extendDirection(zombie, targetPoint, ZOMBIE_MOMENTUM_DISTANCE);
 		zombie.wanderTarget = null;
 		if (context.distance(zombie, targetPoint) > range) {
-			const blocked = context.moveUnit(zombie, targetPoint, this.stats.speed * dt);
+			const blocked = context.moveAroundSmallObstacle(zombie, targetPoint, this.stats.speed * dt);
 			if (blocked && context.distance(zombie, targetPoint) > range) context.attackBlockingBuilding(zombie, targetPoint);
 			return;
 		}
@@ -61,7 +61,13 @@ export class ZombieUnit extends BaseUnit {
 		if (!moveTarget) return;
 		if (!zombie.soundTarget && !zombie.wanderTarget) zombie.wanderTarget = moveTarget;
 		zombie.facing = moveTarget.x < zombie.x ? "left" : "right";
-		const arrived = context.moveUnit(zombie, moveTarget, this.stats.speed * dt);
+		const before = { x: zombie.x, y: zombie.y };
+		const arrived = context.moveAroundSmallObstacle(zombie, moveTarget, this.stats.speed * dt);
+		const moved = context.distance(before, zombie) > 0.01;
+		if (!moved && context.distance(zombie, moveTarget) >= 0.45) {
+			if (zombie.wanderTarget) zombie.wanderTarget = this.chooseWanderTarget(zombie);
+			return;
+		}
 		if (!arrived && context.distance(zombie, moveTarget) >= 0.45) return;
 		const nextTarget = this.extendDirection(zombie, moveTarget, ZOMBIE_MOMENTUM_DISTANCE);
 		if (zombie.soundTarget) zombie.soundTarget = nextTarget;

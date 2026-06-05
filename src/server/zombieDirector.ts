@@ -143,17 +143,24 @@ function makeHorde(idValue: string, members: Unit[], previous: ZombieHorde | nul
 function assignZombieGoals(world: World, horde: ZombieHorde) {
 	const target = horde.target || horde.wanderTarget;
 	if (!target) return;
+	const hasTarget = !!horde.target;
 
 	for (const memberId of horde.memberIds) {
 		const zombie = world.units[memberId];
 		if (!zombie) continue;
 		const offset = zombie.hordeOffset || randomOffset(horde.radius);
 		zombie.hordeOffset = offset;
-		zombie.soundTarget = {
+		const personalTarget = {
 			x: clamp(target.x + offset.x * ZOMBIE_FORMATION_JITTER, 0.5, MAP_SIZE - 0.5),
 			y: clamp(target.y + offset.y * ZOMBIE_FORMATION_JITTER, 0.5, MAP_SIZE - 0.5),
 		};
-		zombie.wanderTarget = null;
+		if (hasTarget) {
+			zombie.soundTarget = personalTarget;
+			zombie.wanderTarget = null;
+		} else {
+			zombie.soundTarget = null;
+			if (!zombie.wanderTarget || distance(zombie, zombie.wanderTarget) < 1.5) zombie.wanderTarget = personalTarget;
+		}
 	}
 }
 

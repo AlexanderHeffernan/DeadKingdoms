@@ -14,7 +14,7 @@ import type { UnitSimulationContext } from "../shared/units/index.js";
 import type { GatherTarget } from "../shared/buildingDefinitions.js";
 import { id } from "./id.js";
 import { clamp, distance, rectsOverlap } from "./math.js";
-import { findPath, isWalkable, moveNearTarget, moveUnit, moveWithPath, resolveUnitSeparation } from "./pathing.js";
+import { findPath, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { stepZombieDirector } from "./zombieDirector.js";
@@ -220,6 +220,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		moveWithPath: (unit, command, maxStep) => moveWithPath(world, unit, command, maxStep),
 		moveNearTarget: (unit, command, target, range, maxStep) => moveNearTarget(world, unit, command, target, range, maxStep),
 		moveUnit: (unit, target, maxStep) => moveUnit(world, unit, target, maxStep),
+		moveAroundSmallObstacle: (unit, target, maxStep) => moveAroundSmallObstacle(world, unit, target, maxStep),
 		centerOf,
 		distance,
 		nearestEnemy: (source, range) => nearestEnemy(world, source, range),
