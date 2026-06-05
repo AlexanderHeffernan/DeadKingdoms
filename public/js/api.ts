@@ -1,5 +1,16 @@
 import type { CommandPayload, CommandResult, PlayerId } from "../../src/shared/types.js";
 
+export type ServerStatus = {
+  activePlayers: number;
+  maxPlayers: number;
+  lastUpdate: string | null;
+};
+
+export async function getStatus(): Promise<ServerStatus> {
+  const res = await fetch("/api/status");
+  return res.json();
+}
+
 export async function join(name: string, color: string) {
   return post("/api/join", { name, color });
 }

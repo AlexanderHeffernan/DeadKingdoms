@@ -164,13 +164,13 @@ export class Renderer {
         const color = visible ? null : "#1e3025";
         const tile = this.tileAt(index++);
         tile.texture = this.tileTexture(visible, (y % 2) + (x % 2) == 1);
-        tile.scale.set(this.currentZoom);
-        tile.x = Math.round(
-          screen.x - (tile.texture.width * this.currentZoom) / 2,
+        const overdraw = 0.75;
+        tile.scale.set(
+          this.currentZoom + overdraw / tile.texture.width,
+          this.currentZoom + overdraw / tile.texture.height,
         );
-        tile.y = Math.round(
-          screen.y - (tile.texture.height * this.currentZoom) / 2,
-        );
+        tile.x = screen.x;
+        tile.y = screen.y;
         tile.visible = true;
       }
     }
@@ -181,7 +181,7 @@ export class Renderer {
     let tile = this.tilePool[index];
     if (!tile) {
       tile = new Sprite();
-      tile.roundPixels = true;
+      tile.anchor.set(0.5);
       this.tilePool[index] = tile;
       this.terrainLayer.addChild(tile);
     }
@@ -201,9 +201,14 @@ export class Renderer {
     const cached = this.tileTextureCache.get(key);
     if (cached) return cached;
 
+    // The canvas must be exactly one tile so that, when drawTiles centres the
+    // texture on isoToScreen(x, y), the grass diamond's centre lands on that
+    // point too. Using an oversized canvas with the diamond in the top-left
+    // quadrant shifted every tile half a tile up-left of where entities,
+    // selection markers, and hit-testing place it.
     const canvas = document.createElement("canvas");
-    canvas.width = TILE_W * 2;
-    canvas.height = TILE_H * 2;
+    canvas.width = TILE_W;
+    canvas.height = TILE_H;
 
     const ctx = canvas.getContext("2d")!;
     ctx.imageSmoothingEnabled = false;
@@ -301,10 +306,8 @@ export class Renderer {
         ? undefined
         : state.snapshot?.players[entity.ownerId]?.color;
     const visualWidth = bounds.width * px;
-    const x = Math.round(center.x - visualWidth / 2 - bounds.minX * px);
-    const y = Math.round(
-      spriteTopY(entity, center.y, bounds, px, view.camera.zoom || 1),
-    );
+    const x = center.x - visualWidth / 2 - bounds.minX * px;
+    const y = spriteTopY(entity, center.y, bounds, px, view.camera.zoom || 1);
     const flip = "facing" in entity && entity.facing === "left";
     const baseZ =
       (entity.x + entity.y) * 100 +
@@ -385,7 +388,8 @@ export class Renderer {
         center.y,
         ownerColor || "#f4efe6",
       );
-    this.drawTeamAccent(entity, center.x, y, visualWidth, ownerColor);
+    if (entity.kind === "unit")
+      this.drawTeamAccent(entity, center.x, y, visualWidth, ownerColor);
     if ("attackFlash" in entity && entity.attackFlash > 0)
       this.drawAttackFlash(center.x, center.y, ownerColor || "#f4efe6");
     if (entity.kind === "unit") {
@@ -433,7 +437,6 @@ export class Renderer {
     let overlay = this.flashSprites.get(fKey);
     if (!overlay) {
       overlay = new Sprite(texture);
-      overlay.roundPixels = true;
       overlay.blendMode = BLEND_MODES.ADD;
       overlay.tint = 0xffffff;
       this.flashSprites.set(fKey, overlay);
@@ -469,7 +472,6 @@ export class Renderer {
     let sprite = this.entitySprites.get(key);
     if (!sprite) {
       sprite = new Sprite(texture);
-      sprite.roundPixels = true;
       this.entitySprites.set(key, sprite);
       this.entityLayer.addChild(sprite);
     }
@@ -689,14 +691,7 @@ export class Renderer {
     if (!color || !entity.ownerId) return;
     const px = worldPixel(this.currentZoom || 1);
     this.overlayLayer.beginFill(hexToNumber(color));
-    if (entity.kind === "building")
-      this.overlayLayer.drawRect(
-        Math.round(centerX - visualWidth * 0.18),
-        Math.round(topY + px * 2),
-        Math.max(px * 3, visualWidth * 0.16),
-        px * 2,
-      );
-    else if (entity.kind === "unit")
+    if (entity.kind === "unit")
       this.overlayLayer.drawRect(
         Math.round(centerX - px * 3),
         Math.round(topY + px * 7),
@@ -778,40 +773,97 @@ export class Renderer {
       view.hoverTile.x,
       view.hoverTile.y,
     );
-    this.drawFootprint(
+    const ownerColor =
+      (state.playerId && state.snapshot?.players[state.playerId]?.color) ||
+      "#f4efe6";
+    this.drawPixelFootprint(
       view.hoverTile.x,
       view.hoverTile.y,
       size,
       view.camera,
-      valid ? "#e9bd59" : "#d84b3e",
-      valid ? "rgb(233 189 89 / 0.28)" : "rgb(216 75 62 / 0.28)",
-      2,
+      valid ? ownerColor : "#d84b3e",
+    );
+    this.drawPlacementPreviewSprite(
+      mode as SpriteName,
+      view.hoverTile.x,
+      view.hoverTile.y,
+      size,
+      view.camera,
+      ownerColor,
+      valid,
     );
   }
 
-  private drawFootprint(
+  private drawPlacementPreviewSprite(
+    spriteName: SpriteName,
     x: number,
     y: number,
     size: number,
     camera: CameraState,
-    stroke: string,
-    fill: string,
-    lineWidth = 2,
+    ownerColor: string,
+    valid: boolean,
   ) {
-    const points = [
-      isoToScreen(x - 0.5, y - 0.5, camera),
-      isoToScreen(x + size - 0.5, y - 0.5, camera),
-      isoToScreen(x + size - 0.5, y + size - 0.5, camera),
-      isoToScreen(x - 0.5, y + size - 0.5, camera),
-    ];
-    this.overlayLayer.lineStyle(lineWidth, hexToNumber(stroke), 1);
-    this.overlayLayer.beginFill(cssColorToNumber(fill), cssAlpha(fill));
-    this.overlayLayer.moveTo(points[0]!.x, points[0]!.y);
-    for (let i = 1; i < points.length; i += 1)
-      this.overlayLayer.lineTo(points[i]!.x, points[i]!.y);
-    this.overlayLayer.closePath();
-    this.overlayLayer.endFill();
-    this.overlayLayer.lineStyle();
+    const png = pngSprites[spriteName];
+    if (!png && !sprites[spriteName]) return;
+    const center = footprintCenter(x, y, size, camera);
+    const px = worldPixel(camera.zoom || 1);
+    const bounds = spriteMetrics(spriteName);
+    const visualWidth = bounds.width * px;
+    const spriteX = center.x - visualWidth / 2 - bounds.minX * px;
+    const topY = spriteTopY(
+      { kind: "building", type: spriteName, x, y, size } as Building,
+      center.y,
+      bounds,
+      px,
+      camera.zoom || 1,
+    );
+    const alpha = valid ? 0.42 : 0.28;
+    const zIndex = (x + y) * 100 + 0.75;
+    const tint = valid ? 0xffffff : 0xffb3aa;
+
+    if (png) {
+      const flagKey = "placementPreview:flag";
+      if (png.flag) {
+        const flag = this.placeSprite(
+          flagKey,
+          this.pngTexture(png.flag),
+          spriteX,
+          topY,
+          px,
+          false,
+          alpha,
+          zIndex - 0.5,
+        );
+        flag.tint = hexToNumber(ownerColor);
+      } else {
+        const existingFlag = this.entitySprites.get(flagKey);
+        if (existingFlag) existingFlag.visible = false;
+      }
+      const sprite = this.placeSprite(
+        "placementPreview",
+        this.pngTexture(png.base),
+        spriteX,
+        topY,
+        px,
+        false,
+        alpha,
+        zIndex,
+      );
+      sprite.tint = tint;
+      return;
+    }
+
+    const sprite = this.placeSprite(
+      "placementPreview",
+      this.spriteTexture(spriteName, sprites[spriteName]!, ownerColor),
+      spriteX,
+      topY,
+      px,
+      false,
+      alpha,
+      zIndex,
+    );
+    sprite.tint = tint;
   }
 
   private drawMinimap(state: GameState, view: ViewState) {
@@ -1001,7 +1053,7 @@ function rectsOverlap(
 }
 
 function entityCenter(entity: RenderEntity, camera: CameraState) {
-  if (entity.kind === "building" || entity.kind === "ruin")
+  if (entity.kind === "building" || entity.kind === "ruin" || entity.kind === "resource")
     return footprintCenter(entity.x, entity.y, entity.size || 1, camera);
   return isoToScreen(
     entity.x + (entity.size || 0) / 2,
@@ -1012,7 +1064,9 @@ function entityCenter(entity: RenderEntity, camera: CameraState) {
 
 function isEntityNearViewport(entity: RenderEntity, camera: CameraState) {
   const size = entity.size || 1;
-  const p = isoToScreen(entity.x + size / 2, entity.y + size / 2, camera);
+  const p = entity.kind === "unit"
+    ? isoToScreen(entity.x + size / 2, entity.y + size / 2, camera)
+    : footprintCenter(entity.x, entity.y, size, camera);
   const margin = 260;
   return (
     p.x >= -margin &&
@@ -1038,16 +1092,13 @@ function spriteTopY(
   scale: number,
   zoom: number,
 ) {
-  const footprintBottom = centerY + ((entity.size || 0) * TILE_H * zoom) / 2;
+  // Units stand at a point (their feet rest on the tile centre), while
+  // resources occupy a 1-tile footprint like buildings, so their base should
+  // sit at the bottom of the tile rather than the centre.
+  const footprintSize =
+    entity.kind === "unit" ? entity.size || 0 : entity.size || 1;
+  const footprintBottom = centerY + (footprintSize * TILE_H * zoom) / 2;
   return footprintBottom - (bounds.maxY + 1) * scale;
-}
-
-function shade(hex: string, factor: number) {
-  const n = Number.parseInt(hex.slice(1), 16);
-  const r = Math.max(0, Math.min(255, Math.round(((n >> 16) & 255) * factor)));
-  const g = Math.max(0, Math.min(255, Math.round(((n >> 8) & 255) * factor)));
-  const b = Math.max(0, Math.min(255, Math.round((n & 255) * factor)));
-  return `rgb(${r} ${g} ${b})`;
 }
 
 function isExplored(
@@ -1133,7 +1184,7 @@ function minimapIsoToScreen(
 }
 
 function worldPixel(zoom: number) {
-  return Math.max(2, Math.round(SCALE * zoom));
+  return SCALE * zoom;
 }
 
 function soundColor(source: SoundDebugSource) {
@@ -1146,16 +1197,4 @@ function soundColor(source: SoundDebugSource) {
 function hexToNumber(color = "#ffffff") {
   if (!color.startsWith("#")) return 0xffffff;
   return Number.parseInt(color.slice(1), 16);
-}
-
-function cssColorToNumber(color: string) {
-  if (color.startsWith("#")) return hexToNumber(color);
-  if (color.includes("216 75 62")) return 0xd84b3e;
-  if (color.includes("233 189 89")) return 0xe9bd59;
-  return 0x111813;
-}
-
-function cssAlpha(color: string) {
-  const match = /\/\s*([0-9.]+)/.exec(color);
-  return match ? Number(match[1]) : 1;
 }

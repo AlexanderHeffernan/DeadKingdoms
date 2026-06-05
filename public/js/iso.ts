@@ -3,8 +3,8 @@ import { TILE_H, TILE_W } from "./constants.js";
 export function isoToScreen(x: number, y: number, camera: { x: number; y: number; zoom?: number }) {
   const zoom = camera.zoom || 1;
   return {
-    x: Math.round(camera.x + (x - y) * TILE_W / 2 * zoom),
-    y: Math.round(camera.y + (x + y) * TILE_H / 2 * zoom),
+    x: camera.x + (x - y) * TILE_W / 2 * zoom,
+    y: camera.y + (x + y) * TILE_H / 2 * zoom,
   };
 }
 

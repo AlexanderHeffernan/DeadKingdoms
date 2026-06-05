@@ -1,4 +1,4 @@
-import { enableGodMode, enableSoundDebug, join, leave, sendCommand, spawnZombieHorde } from "./api.js";
+import { enableGodMode, enableSoundDebug, getStatus, join, leave, sendCommand, spawnZombieHorde } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
@@ -47,7 +47,7 @@ const view: ViewState = {
   mouse: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
 };
 
-const ZOOM_STEPS = [0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const DEV_COMMAND_BUFFER_LENGTH = 40;
 
 const canvas = document.getElementById("world") as HTMLCanvasElement | null;
@@ -130,8 +130,8 @@ canvas.addEventListener("wheel", (event) => {
   const before = screenToIso(event.clientX, event.clientY, view.camera);
   view.camera.zoom = nextZoom(view.camera.zoom!, event.deltaY < 0 ? 1 : -1);
   const after = isoToScreen(before.x, before.y, view.camera);
-  view.camera.x = Math.round(view.camera.x + event.clientX - after.x);
-  view.camera.y = Math.round(view.camera.y + event.clientY - after.y);
+  view.camera.x += event.clientX - after.x;
+  view.camera.y += event.clientY - after.y;
   clampCamera();
 });
 window.addEventListener("keydown", onKeyDown);
@@ -146,6 +146,8 @@ minimap.addEventListener("mousedown", onMinimapMouseDown);
 renderer.resize();
 drawLoop();
 initMusic();
+updateHomeStatus();
+setInterval(updateHomeStatus, 15000);
 if (state.playerId) enterGame();
 
 function enterGame() {
@@ -153,6 +155,24 @@ function enterGame() {
   document.getElementById("game")?.classList.remove("hidden");
   startMusic();
   connectEvents();
+}
+
+async function updateHomeStatus() {
+  const onlinePlayers = document.getElementById("onlinePlayers");
+  const lastUpdateDate = document.getElementById("lastUpdateDate");
+  const lastUpdateTime = document.getElementById("lastUpdateTime");
+  if (!onlinePlayers && !lastUpdateDate && !lastUpdateTime) return;
+  try {
+    const status = await getStatus();
+    if (onlinePlayers) onlinePlayers.textContent = `Players online: ${status.activePlayers}/${status.maxPlayers}`;
+    const updatedAt = status.lastUpdate ? new Date(status.lastUpdate) : null;
+    if (lastUpdateDate) lastUpdateDate.textContent = updatedAt ? updatedAt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "--";
+    if (lastUpdateTime) lastUpdateTime.textContent = updatedAt ? updatedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "--";
+  } catch {
+    if (onlinePlayers) onlinePlayers.textContent = "Players online: --";
+    if (lastUpdateDate) lastUpdateDate.textContent = "--";
+    if (lastUpdateTime) lastUpdateTime.textContent = "--";
+  }
 }
 
 async function initMusic() {
@@ -743,8 +763,6 @@ function clampCamera() {
   const margin = 160;
   view.camera.x = clampAxis(view.camera.x, minX, maxX, mapW, window.innerWidth, margin);
   view.camera.y = clampAxis(view.camera.y, minY, maxY, mapH, window.innerHeight, margin);
-  view.camera.x = Math.round(view.camera.x);
-  view.camera.y = Math.round(view.camera.y);
 }
 
 function clampAxis(cameraValue: number, mapMin: number, mapMax: number, mapSpan: number, viewSpan: number, margin: number) {
@@ -826,7 +844,7 @@ function hitTest(x: number, y: number) {
 function renderedEntityRect(entity: Unit | Building | ResourceNode) {
   const bounds = spriteMetrics(entity.type);
   const scale = entityPixel(entity, view.camera.zoom || 1);
-  const center = entity.kind === "building"
+  const center = entity.kind === "building" || entity.kind === "resource"
     ? isoToScreen(entity.x + ((entity.size || 1) - 1) / 2, entity.y + ((entity.size || 1) - 1) / 2, view.camera)
     : isoToScreen(entity.x + (entity.size || 0) / 2, entity.y + (entity.size || 0) / 2, view.camera);
   const visualWidth = bounds.width * scale;
@@ -854,7 +872,7 @@ function hitPadding(entity: { kind: string }) {
 }
 
 function worldPixel(zoom: number) {
-  return Math.max(2, Math.round(SCALE * zoom));
+  return SCALE * zoom;
 }
 
 function entityPixel(entity: Unit | Building | ResourceNode, zoom: number) {
