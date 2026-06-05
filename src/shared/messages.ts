@@ -1,5 +1,10 @@
-import type { PlayerId, Snapshot, Unit, VisibilityCache, World } from "./types.js";
+import { SOUND_HEARING_BASE_RANGE, SOUND_HEARING_RANGE_PER_SOUND } from "./config.js";
+import { unitBehaviorFor } from "./unitRegistry.js";
+import type { PlayerId, Snapshot, SoundDebugSource, Unit, VisibilityCache, World } from "./types.js";
 import { isVisible } from "./visibility.js";
+
+const ZOMBIE_OWNER_ID = "zombies" as PlayerId;
+const ZOMBIE_GROUP_SOUND_RADIUS = 5;
 
 export function makeSnapshot(
   world: World,
@@ -74,6 +79,7 @@ export function makeSnapshot(
       : null,
     leaderboard: world.leaderboard,
     notices: world.notices.slice(-8),
+    soundDebug: player?.soundDebug ? buildSoundDebugSources(world) : null,
   };
 }
 
@@ -96,6 +102,63 @@ function serializeUnit(unit: Unit): Unit {
     selected: unit.selected,
     ...(unit.vision !== undefined ? { vision: unit.vision } : {}),
   };
+}
+
+function buildSoundDebugSources(world: World): SoundDebugSource[] {
+  const sources: SoundDebugSource[] = [];
+  const add = (
+    id: string,
+    kind: SoundDebugSource["kind"],
+    soundKind: SoundDebugSource["soundKind"],
+    label: string,
+    point: { x: number; y: number },
+    strength: number,
+  ) => {
+    if (strength <= 0) return;
+    sources.push({
+      id,
+      kind,
+      soundKind,
+      label,
+      x: point.x,
+      y: point.y,
+      strength,
+      range: SOUND_HEARING_BASE_RANGE + strength * SOUND_HEARING_RANGE_PER_SOUND,
+    });
+  };
+  for (const unit of Object.values(world.units)) {
+    const behavior = unitBehaviorFor(unit.type);
+    const soundKind = unit.ownerId === ZOMBIE_OWNER_ID ? "zombie" : "civilization";
+    const strength = soundKind === "zombie" ? zombieGroupSound(world, unit) : behavior.soundLevel();
+    add(unit.id, "unit", soundKind, unit.type, unit, strength);
+  }
+  for (const building of Object.values(world.buildings)) {
+    add(building.id, "building", "civilization", building.type, centerOf(building), building.soundLevel());
+  }
+  for (const noise of world.actionNoises) {
+    add(noise.id, "action", "civilization", noise.action, noise, noise.sound);
+  }
+  return sources;
+}
+
+function zombieGroupSound(world: World, source: Unit) {
+  const base = unitBehaviorFor(source.type).soundLevel();
+  if (base <= 0) return 0;
+  let nearbyZombies = 0;
+  for (const unit of Object.values(world.units)) {
+    if (unit.ownerId !== ZOMBIE_OWNER_ID) continue;
+    if (dist(source, unit) <= ZOMBIE_GROUP_SOUND_RADIUS) nearbyZombies += 1;
+  }
+  return Math.max(base, nearbyZombies * base);
+}
+
+function centerOf(entity: { x: number; y: number; size?: number }) {
+  const size = entity.size || 1;
+  return { x: entity.x + (size - 1) / 2, y: entity.y + (size - 1) / 2 };
+}
+
+function dist(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function cachedVisibility(world: World, playerId: PlayerId): VisibilityCache | null {

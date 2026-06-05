@@ -16,6 +16,10 @@ export async function enableGodMode(playerId: PlayerId, secret: string) {
   return post("/api/dev/god-mode", { playerId, secret });
 }
 
+export async function enableSoundDebug(playerId: PlayerId, secret: string) {
+  return post("/api/dev/sound-debug", { playerId, secret });
+}
+
 async function post(url: string, payload: Record<string, unknown>) {
   const res = await fetch(url, {
     method: "POST",

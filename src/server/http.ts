@@ -28,6 +28,7 @@ export function createHandler(world: World, clients: Set<Client>) {
     const url = new URL(req.url ?? "/", `http://${host}`);
     if (req.method === "POST" && url.pathname === "/api/join") return joinGame(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/dev/god-mode") return enableGodMode(req, res, world);
+    if (req.method === "POST" && url.pathname === "/api/dev/sound-debug") return enableSoundDebug(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/command") return receiveCommand(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/leave") return leaveGame(req, res, world);
     if (req.method === "GET" && url.pathname === "/events") return streamEvents(req, res, world, clients, url);
@@ -146,6 +147,18 @@ async function enableGodMode(req: import("node:http").IncomingMessage, res: impo
   if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
   player.godMode = true;
   delete player._visCache;
+  json(res, { ok: true });
+}
+
+async function enableSoundDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+  const secret = process.env.DEV_SOUND_DEBUG_SECRET || "revealsound";
+  const body = (await readJson(req)) as { playerId?: unknown; secret?: unknown };
+  if (typeof body.playerId !== "string" || typeof body.secret !== "string" || !body.secret.endsWith(secret)) {
+    return json(res, { ok: false, error: "Invalid sound debug secret." }, 403);
+  }
+  const player = world.players[body.playerId];
+  if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+  player.soundDebug = true;
   json(res, { ok: true });
 }
 

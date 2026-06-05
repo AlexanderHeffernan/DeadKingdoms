@@ -19,6 +19,18 @@ export interface LeaderboardEntry {
   joinedAt: number;
 }
 
+/** Debug-only sound source sent to clients that enable the sound overlay. */
+export interface SoundDebugSource {
+  id: string;
+  kind: "unit" | "building" | "action";
+  soundKind: "civilization" | "zombie";
+  label: string;
+  x: number;
+  y: number;
+  strength: number;
+  range: number;
+}
+
 /** Sanitized player state sent to clients in snapshots. */
 export type SnapshotPlayer = Pick<
   Player,
@@ -41,4 +53,5 @@ export interface Snapshot {
   visibility: VisibilityPayload | null;
   leaderboard: LeaderboardEntry[];
   notices: Notice[];
+  soundDebug: SoundDebugSource[] | null;
 }

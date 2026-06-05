@@ -30,6 +30,7 @@ export interface Player {
   score: number;
   joinedAt: number;
   godMode?: boolean;
+  soundDebug?: boolean;
   _visCache?: VisibilityCache;
 }
 

@@ -1,4 +1,4 @@
-import { enableGodMode, join, leave, sendCommand } from "./api.js";
+import { enableGodMode, enableSoundDebug, join, leave, sendCommand } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
@@ -49,16 +49,18 @@ const view: ViewState = {
 };
 
 const ZOOM_STEPS = [0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
-const GOD_MODE_BUFFER_LENGTH = 40;
+const DEV_COMMAND_BUFFER_LENGTH = 40;
 
 const canvas = document.getElementById("world") as HTMLCanvasElement | null;
 const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
 if (!canvas || !minimap) throw new Error("Missing canvas elements");
 const renderer = new Renderer(canvas);
 let eventStream: EventSource | null = null;
-let godModeInput = "";
+let devCommandInput = "";
 let godModeEnabled = false;
 let godModeCheckPending = false;
+let soundDebugEnabled = false;
+let soundDebugCheckPending = false;
 let lastFrameAt = performance.now();
 let smoothedFps = 60;
 const ui = new UI(state, {
@@ -133,7 +135,7 @@ canvas.addEventListener("wheel", (event) => {
   clampCamera();
 });
 window.addEventListener("keydown", onKeyDown);
-window.addEventListener("keydown", onGodModeKeyDown);
+window.addEventListener("keydown", onDevShortcutKeyDown);
 minimap.addEventListener("mousedown", (event) => moveCameraFromMinimap(event));
 minimap.addEventListener("mousemove", (event) => {
   if (event.buttons === 1) moveCameraFromMinimap(event);
@@ -224,23 +226,22 @@ function updateMuteButton() {
   button.title = music.muted ? "Unmute music" : "Mute music";
 }
 
-function onGodModeKeyDown(event: KeyboardEvent) {
-  if (godModeEnabled || !state.playerId) return;
+function onDevShortcutKeyDown(event: KeyboardEvent) {
+  if (!state.playerId) return;
   if (event.key.length !== 1) return;
-  godModeInput = `${godModeInput}${event.key}`.slice(-GOD_MODE_BUFFER_LENGTH);
-  if (godModeCheckPending) return;
+  devCommandInput = `${devCommandInput}${event.key}`.slice(-DEV_COMMAND_BUFFER_LENGTH);
   void maybeEnableGodMode();
+  void maybeEnableSoundDebug();
 }
 
 async function maybeEnableGodMode() {
-  if (!state.playerId || godModeInput.length < 3) return;
-  const checkedInput = godModeInput;
+  if (godModeEnabled || godModeCheckPending || !state.playerId || devCommandInput.length < 3) return;
+  const checkedInput = devCommandInput;
   godModeCheckPending = true;
   try {
     const result = await enableGodMode(state.playerId, checkedInput);
     if (result.ok) {
       godModeEnabled = true;
-      godModeInput = "";
       state.exploredSet.clear();
       ui.showToast("God mode enabled: full map revealed.");
       connectEvents();
@@ -249,7 +250,26 @@ async function maybeEnableGodMode() {
     // Keep this shortcut silent unless it succeeds.
   } finally {
     godModeCheckPending = false;
-    if (!godModeEnabled && checkedInput !== godModeInput) void maybeEnableGodMode();
+    if (!godModeEnabled && checkedInput !== devCommandInput) void maybeEnableGodMode();
+  }
+}
+
+async function maybeEnableSoundDebug() {
+  if (soundDebugEnabled || soundDebugCheckPending || !state.playerId || devCommandInput.length < 3) return;
+  const checkedInput = devCommandInput;
+  soundDebugCheckPending = true;
+  try {
+    const result = await enableSoundDebug(state.playerId, checkedInput);
+    if (result.ok) {
+      soundDebugEnabled = true;
+      ui.showToast("Sound debug enabled: sound ranges visible.");
+      connectEvents();
+    }
+  } catch {
+    // Keep this shortcut silent unless it succeeds.
+  } finally {
+    soundDebugCheckPending = false;
+    if (!soundDebugEnabled && checkedInput !== devCommandInput) void maybeEnableSoundDebug();
   }
 }
 

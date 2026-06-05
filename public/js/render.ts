@@ -5,7 +5,7 @@ import { isoToScreen } from "./iso.js";
 import { palette } from "./sprites/palette.js";
 import { sprites } from "./sprites/index.js";
 import { spriteBounds } from "./spriteBounds.js";
-import type { Building, BuildingType, ResourceNode, ResourceType, Ruin, SpriteName, Unit } from "../../src/shared/types.js";
+import type { Building, BuildingType, ResourceNode, ResourceType, Ruin, SoundDebugSource, SpriteName, Unit } from "../../src/shared/types.js";
 import type { CameraState, ClientSnapshot, Effect, GameState, ViewState } from "./clientTypes.js";
 
 const tileColors = ["#345f3e", "#386846", "#2f5739"];
@@ -80,6 +80,7 @@ export class Renderer {
     this.drawLastSeen(state, view, active);
     this.drawEntities(state, view, active);
     this.hideAllEntitySprites(active);
+    this.drawSoundDebug(state, view);
     this.drawEffects(state, view);
     this.drawPlacement(view, state);
     this.drawSelectionBox(view);
@@ -283,6 +284,29 @@ export class Renderer {
       this.overlayLayer.drawRect(Math.round(p.x - px * 5), Math.round(p.y - s / 2), px * 10, s);
       this.overlayLayer.beginFill(0xffd2c9, alpha);
       this.overlayLayer.drawRect(Math.round(p.x - px / 2), Math.round(p.y - px / 2), px, px);
+      this.overlayLayer.endFill();
+    }
+  }
+
+  private drawSoundDebug(state: GameState, view: ViewState) {
+    const sources = state.snapshot?.soundDebug;
+    if (!sources?.length) return;
+    for (const source of sources) {
+      const center = isoToScreen(source.x, source.y, view.camera);
+      const zoom = view.camera.zoom || 1;
+      const rx = (source.range * TILE_W * zoom) / 2;
+      const ry = (source.range * TILE_H * zoom) / 2;
+      if (center.x + rx < -80 || center.x - rx > window.innerWidth + 80 || center.y + ry < -80 || center.y - ry > window.innerHeight + 80) continue;
+      const color = soundColor(source);
+      const alpha = Math.min(0.24, 0.06 + source.strength * 0.025);
+      this.overlayLayer.lineStyle(Math.max(1, Math.round(2 * zoom)), color, Math.min(0.9, alpha * 3));
+      this.overlayLayer.beginFill(color, alpha);
+      this.overlayLayer.drawEllipse(center.x, center.y, rx, ry);
+      this.overlayLayer.endFill();
+      this.overlayLayer.lineStyle();
+      this.overlayLayer.beginFill(color, 0.95);
+      const dot = Math.max(3, Math.min(12, source.strength * 1.8)) * zoom;
+      this.overlayLayer.drawCircle(center.x, center.y, dot);
       this.overlayLayer.endFill();
     }
   }
@@ -586,6 +610,13 @@ function minimapIsoToScreen(x: number, y: number, size: number, width: number, h
 
 function worldPixel(zoom: number) {
   return Math.max(2, Math.round(SCALE * zoom));
+}
+
+function soundColor(source: SoundDebugSource) {
+  if (source.soundKind === "zombie") return 0x8a71d6;
+  if (source.kind === "action") return 0xe9bd59;
+  if (source.kind === "building") return 0x4da3ff;
+  return 0x73d879;
 }
 
 function hexToNumber(color = "#ffffff") {
