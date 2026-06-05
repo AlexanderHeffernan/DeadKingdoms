@@ -47,7 +47,7 @@ const view: ViewState = {
   mouse: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
 };
 
-const ZOOM_STEPS = [0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const DEV_COMMAND_BUFFER_LENGTH = 40;
 
 const canvas = document.getElementById("world") as HTMLCanvasElement | null;
@@ -129,8 +129,8 @@ canvas.addEventListener("wheel", (event) => {
   const before = screenToIso(event.clientX, event.clientY, view.camera);
   view.camera.zoom = nextZoom(view.camera.zoom!, event.deltaY < 0 ? 1 : -1);
   const after = isoToScreen(before.x, before.y, view.camera);
-  view.camera.x = Math.round(view.camera.x + event.clientX - after.x);
-  view.camera.y = Math.round(view.camera.y + event.clientY - after.y);
+  view.camera.x += event.clientX - after.x;
+  view.camera.y += event.clientY - after.y;
   clampCamera();
 });
 window.addEventListener("keydown", onKeyDown);
@@ -728,8 +728,6 @@ function clampCamera() {
   const margin = 160;
   view.camera.x = clampAxis(view.camera.x, minX, maxX, mapW, window.innerWidth, margin);
   view.camera.y = clampAxis(view.camera.y, minY, maxY, mapH, window.innerHeight, margin);
-  view.camera.x = Math.round(view.camera.x);
-  view.camera.y = Math.round(view.camera.y);
 }
 
 function clampAxis(cameraValue: number, mapMin: number, mapMax: number, mapSpan: number, viewSpan: number, margin: number) {
@@ -839,7 +837,7 @@ function hitPadding(entity: { kind: string }) {
 }
 
 function worldPixel(zoom: number) {
-  return Math.max(2, Math.round(SCALE * zoom));
+  return SCALE * zoom;
 }
 
 function entityPixel(entity: Unit | Building | ResourceNode, zoom: number) {

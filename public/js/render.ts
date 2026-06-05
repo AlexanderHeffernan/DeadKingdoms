@@ -164,13 +164,13 @@ export class Renderer {
         const color = visible ? null : "#1e3025";
         const tile = this.tileAt(index++);
         tile.texture = this.tileTexture(visible, (y % 2) + (x % 2) == 1);
-        tile.scale.set(this.currentZoom);
-        tile.x = Math.round(
-          screen.x - (tile.texture.width * this.currentZoom) / 2,
+        const overdraw = 0.75;
+        tile.scale.set(
+          this.currentZoom + overdraw / tile.texture.width,
+          this.currentZoom + overdraw / tile.texture.height,
         );
-        tile.y = Math.round(
-          screen.y - (tile.texture.height * this.currentZoom) / 2,
-        );
+        tile.x = screen.x;
+        tile.y = screen.y;
         tile.visible = true;
       }
     }
@@ -181,7 +181,7 @@ export class Renderer {
     let tile = this.tilePool[index];
     if (!tile) {
       tile = new Sprite();
-      tile.roundPixels = true;
+      tile.anchor.set(0.5);
       this.tilePool[index] = tile;
       this.terrainLayer.addChild(tile);
     }
@@ -306,10 +306,8 @@ export class Renderer {
         ? undefined
         : state.snapshot?.players[entity.ownerId]?.color;
     const visualWidth = bounds.width * px;
-    const x = Math.round(center.x - visualWidth / 2 - bounds.minX * px);
-    const y = Math.round(
-      spriteTopY(entity, center.y, bounds, px, view.camera.zoom || 1),
-    );
+    const x = center.x - visualWidth / 2 - bounds.minX * px;
+    const y = spriteTopY(entity, center.y, bounds, px, view.camera.zoom || 1);
     const flip = "facing" in entity && entity.facing === "left";
     const baseZ =
       (entity.x + entity.y) * 100 +
@@ -438,7 +436,6 @@ export class Renderer {
     let overlay = this.flashSprites.get(fKey);
     if (!overlay) {
       overlay = new Sprite(texture);
-      overlay.roundPixels = true;
       overlay.blendMode = BLEND_MODES.ADD;
       overlay.tint = 0xffffff;
       this.flashSprites.set(fKey, overlay);
@@ -474,7 +471,6 @@ export class Renderer {
     let sprite = this.entitySprites.get(key);
     if (!sprite) {
       sprite = new Sprite(texture);
-      sprite.roundPixels = true;
       this.entitySprites.set(key, sprite);
       this.entityLayer.addChild(sprite);
     }
@@ -1145,7 +1141,7 @@ function minimapIsoToScreen(
 }
 
 function worldPixel(zoom: number) {
-  return Math.max(2, Math.round(SCALE * zoom));
+  return SCALE * zoom;
 }
 
 function soundColor(source: SoundDebugSource) {
