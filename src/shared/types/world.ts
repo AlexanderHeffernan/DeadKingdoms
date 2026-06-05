@@ -21,6 +21,6 @@ export interface World {
   actionNoises: ActionNoise[];
   leaderboard: LeaderboardEntry[];
   tick: number;
-  zombieSpawnIn?: number;
+  spawnTimers: Record<string, number>;
   _occupancy?: Uint8Array;
 }

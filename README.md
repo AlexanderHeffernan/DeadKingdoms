@@ -6,11 +6,11 @@ Play the live version at <https://rts.alexheffernan.dev>.
 
 ## Run with Node.js
 
-Requires Node.js 20 or newer. No install step is required; the app currently has
-no runtime npm dependencies.
+Requires Node.js 20 or newer.
 
 ```sh
-node src/server/index.js
+npm install
+npm run dev
 ```
 
 Open `http://127.0.0.1:3000`.

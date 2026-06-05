@@ -1,9 +1,12 @@
 import { ACTION_SOUND_DEFS, COLORS, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, STARTING_UNITS } from "../shared/config.js";
 import { BUILDING_DEFS, createBuildingEntity } from "../shared/buildingRegistry.js";
 import { unitBehaviorFor } from "../shared/unitRegistry.js";
+import type { UnitSimulationContext } from "../shared/units/index.js";
 import type { GatherTarget } from "../shared/buildingDefinitions.js";
 import { id } from "./id.js";
 import { clamp, distance, moveToward, rectsOverlap } from "./math.js";
+import { stepSpawner } from "./spawning.js";
+import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
 import type {
   BuildQueueItem,
   Building,
@@ -25,30 +28,12 @@ import type {
   World,
 } from "../shared/types.js";
 
-const ZOMBIE_OWNER_ID = "zombies" as PlayerId;
 const PLAYER_SPAWN_MARGIN = 34;
 const MIN_PLAYER_SPAWN_DISTANCE = 54;
 const PLAYER_SPAWN_ATTEMPTS = 220;
-const TREE_STUMP_THRESHOLD = 36;
 const STUMP_DECAY_SECONDS = 60;
 const RUIN_DECAY_SECONDS = 60;
-const ZOMBIE_BASE_CAP = 140;
-const ZOMBIES_PER_ACTIVE_PLAYER = 80;
-const ZOMBIES_PER_ACTIVE_POPULATION = 2;
-const ZOMBIE_SPAWN_INTERVAL_SECONDS = 10;
-const ZOMBIE_SPAWN_BATCH_MIN = 2;
-const ZOMBIE_SPAWN_BATCH_MAX = 5;
-const ZOMBIE_SAFE_RADIUS = 44;
-const ZOMBIE_SPAWN_SIGHT_BUFFER = 4;
-const ZOMBIE_HEARING_BASE_RANGE = 12;
-const ZOMBIE_HEARING_RANGE_PER_SOUND = 4.5;
-const ZOMBIE_RETARGET_SECONDS = 1.2;
-const ZOMBIE_TARGET_SIGHT_RANGE = 5.5;
-const ZOMBIE_INVESTIGATE_SECONDS = 8;
-const ZOMBIE_WANDER_RADIUS = 7;
-const ZOMBIE_MOMENTUM_DISTANCE = 18;
-const ZOMBIE_GROUP_REDIRECT_SCORE = 0.12;
-const ZOMBIE_GROUP_SOUND_RADIUS = 5;
+const ZOMBIE_INITIAL_RETARGET_SECONDS = 1.2;
 const MAX_ACTION_NOISES = 240;
 
 export function createWorld(): World {
@@ -63,7 +48,7 @@ export function createWorld(): World {
     actionNoises: [],
     leaderboard: [],
     tick: 0,
-    zombieSpawnIn: ZOMBIE_SPAWN_INTERVAL_SECONDS,
+    spawnTimers: {},
   };
   seedResources(world);
   rebuildOccupancy(world);
@@ -128,11 +113,12 @@ export function command(world: World, playerId: PlayerId, body: CommandPayload):
 export function stepWorld(world: World, dt: number) {
   world.tick += 1;
   rebuildOccupancy(world);
+  const context = createSimulationContext(world);
   stepActionNoises(world, dt);
-  stepZombieSpawning(world, dt);
+  stepSpawner(context, zombieSpawnPolicy, dt);
   stepResourceDecay(world, dt);
   stepRuinDecay(world, dt);
-  for (const unit of Object.values(world.units)) stepUnit(world, unit, dt);
+  for (const unit of Object.values(world.units)) unitBehavior(unit).step(context, unit, dt);
   resolveUnitSeparation(world);
   for (const building of Object.values(world.buildings)) stepBuilding(world, building, dt);
   for (const playerId of Object.keys(world.players)) recalcPlayer(world, playerId);
@@ -158,23 +144,46 @@ const COMMAND_HANDLERS: { [K in CommandPayload["type"]]: CommandHandler<K> } = {
   replenishFarm: commandReplenishFarm,
 };
 
-type UnitCommandHandler<T extends UnitCommand["type"]> = (
-  world: World,
-  unit: Unit,
-  command: Extract<UnitCommand, { type: T }>,
-  dt: number,
-) => void;
-
-const UNIT_COMMANDS: { [K in UnitCommand["type"]]: UnitCommandHandler<K> } = {
-  idle: (world, unit) => autoAcquire(world, unit),
-  move: (world, unit, command, dt) => {
-    unit.facing = command.x < unit.x ? "left" : "right";
-    if (moveWithPath(world, unit, command, unitBehavior(unit).stats.speed * dt)) unit.command = { type: "idle" };
-  },
-  attack: stepAttack,
-  gather: stepGather,
-  build: stepBuild,
-};
+function createSimulationContext(world: World): UnitSimulationContext & import("./zombieSpawning.js").ZombieSpawnContext {
+  return {
+    world,
+    targetById: (targetId) => world.units[targetId as UnitId] || world.buildings[targetId as BuildingId] || null,
+    buildingById: (buildingId) => world.buildings[buildingId as BuildingId] || null,
+    isComplete,
+    unitSoundLevel: (unit) => unitBehavior(unit).soundLevel(),
+    moveWithPath: (unit, command, maxStep) => moveWithPath(world, unit, command, maxStep),
+    moveNearTarget: (unit, command, target, range, maxStep) => moveNearTarget(world, unit, command, target, range, maxStep),
+    moveUnit: (unit, target, maxStep) => moveUnit(world, unit, target, maxStep),
+    centerOf,
+    distance,
+    nearestEnemy: (source, range) => nearestEnemy(world, source, range),
+    damage: (target, amount, attackerId) => damage(world, target, amount, attackerId),
+    emitActionSound: (action, point) => emitActionSound(world, action, point),
+    gatherTarget: (targetId, playerId) => world.resources[targetId as keyof typeof world.resources] || gatherableBuilding(world.buildings[targetId as BuildingId], playerId),
+    gatherResource,
+    gatherTargetFor,
+    gatherRange: (entity) => (isBuilding(entity) ? entity.gatherRange() : 1.1),
+    isBuilding,
+    nearestDepot: (ownerId, resource, source) => nearestDepot(world, ownerId, resource, source),
+    findNextResource: (unit, resourceKind) => findNextResource(world, unit, resourceKind),
+    maybeAutoReplenishBuilding: (building) => maybeAutoReplenishBuilding(world, building),
+    deleteResource: (resource) => {
+      delete world.resources[resource.id];
+    },
+    makeStump,
+    depositResource: (ownerId, resource, amount) => {
+      world.players[ownerId]!.resources[resource] += amount;
+    },
+    findNextBuildSite: (unit) => findNextBuildSite(world, unit),
+    assignPostBuildGather: (unit, resourceKind, builtFarm = null) => assignPostBuildGather(world, unit, resourceKind, builtFarm),
+    attackBlockingBuilding: (unit, targetPoint) => attackBlockingBuilding(world, unit, targetPoint),
+    createZombie: (point) => createZombie(world, point.x, point.y),
+    isWalkable: (x, y) => isWalkable(world, x, y),
+    weightedWorldSound: () => weightedWorldSound(world),
+    unitVision: (unit) => unit.vision || unitBehavior(unit).stats.vision || 5,
+    randomInt,
+  };
+}
 
 function rebuildOccupancy(world: World) {
   const size = MAP_SIZE;
@@ -311,7 +320,7 @@ function createUnit(world: World, ownerId: PlayerId, type: UnitType, x: number, 
 
 function createZombie(world: World, x: number, y: number): Unit {
   const zombie = createUnit(world, ZOMBIE_OWNER_ID, "zombie", x, y);
-  zombie.retargetIn = Math.random() * ZOMBIE_RETARGET_SECONDS;
+  zombie.retargetIn = Math.random() * ZOMBIE_INITIAL_RETARGET_SECONDS;
   return zombie;
 }
 
@@ -503,20 +512,6 @@ function forOwnUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undef
   });
 }
 
-function stepUnit(world: World, unit: Unit, dt: number) {
-  unit.cooldown = Math.max(0, unit.cooldown - dt);
-  unit.attackFlash = Math.max(0, (unit.attackFlash || 0) - dt);
-  unit.workFlash = Math.max(0, (unit.workFlash || 0) - dt);
-  unit.vision = unitBehavior(unit).stats.vision || 5;
-  if (unit.type === "zombie") {
-    stepZombie(world, unit, dt);
-    return;
-  }
-  const command = unit.command || { type: "idle" };
-  const handler = UNIT_COMMANDS[command.type];
-  if (handler) handler(world, unit, command as never, dt);
-}
-
 function stepBuilding(world: World, building: Building, dt: number) {
   building.cooldown = Math.max(0, building.cooldown - dt);
   building.attackFlash = Math.max(0, (building.attackFlash || 0) - dt);
@@ -546,102 +541,8 @@ function stepBuilding(world: World, building: Building, dt: number) {
   }
 }
 
-function stepZombie(world: World, zombie: Unit, dt: number) {
+function attackBlockingBuilding(world: World, zombie: Unit, targetPoint: { x: number; y: number }) {
   const behavior = unitBehavior(zombie);
-  const target = nearestZombieTarget(world, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
-  if (target) {
-    const targetPoint = centerOf(target);
-    const range = behavior.stats.range + (target.size || 0.6);
-    zombie.facing = targetPoint.x < zombie.x ? "left" : "right";
-    zombie.soundTarget = extendZombieDirection(zombie, targetPoint, ZOMBIE_MOMENTUM_DISTANCE);
-    zombie.investigateTarget = targetPoint;
-    zombie.investigateTime = ZOMBIE_INVESTIGATE_SECONDS;
-    zombie.wanderTarget = null;
-    if (distance(zombie, targetPoint) > range) {
-      const blocked = moveUnit(world, zombie, targetPoint, behavior.stats.speed * dt);
-      if (blocked && distance(zombie, targetPoint) > range) attackBlockingBuilding(world, zombie, targetPoint, behavior);
-      return;
-    }
-    if (zombie.cooldown <= 0) {
-      damage(world, target, behavior.stats.attack, ZOMBIE_OWNER_ID);
-      zombie.cooldown = behavior.stats.cooldown;
-      zombie.attackFlash = 0.22;
-    }
-    return;
-  }
-
-  zombie.investigateTime = Math.max(0, (zombie.investigateTime || 0) - dt);
-  zombie.retargetIn = (zombie.retargetIn ?? 0) - dt;
-  if (zombie.retargetIn <= 0) {
-    const sound = loudestSoundNear(world, zombie);
-    if (sound?.kind === "civilization") {
-      zombie.soundTarget = sound.point;
-      zombie.investigateTarget = sound.point;
-      zombie.investigateTime = ZOMBIE_INVESTIGATE_SECONDS;
-      zombie.wanderTarget = null;
-    } else if (!zombie.soundTarget && zombie.investigateTime! > 0 && zombie.investigateTarget) {
-      zombie.soundTarget = extendZombieDirection(zombie, zombie.investigateTarget, ZOMBIE_MOMENTUM_DISTANCE);
-      zombie.wanderTarget = null;
-    } else if (sound?.kind === "zombie" && (!zombie.soundTarget || sound.score >= ZOMBIE_GROUP_REDIRECT_SCORE)) {
-      zombie.soundTarget = sound.point;
-      zombie.wanderTarget = null;
-    } else if (!zombie.soundTarget) {
-      zombie.wanderTarget = chooseZombieWanderTarget(zombie);
-    }
-    zombie.retargetIn = ZOMBIE_RETARGET_SECONDS + Math.random() * 0.6;
-  }
-  const moveTarget = zombie.soundTarget || zombie.wanderTarget;
-  if (!moveTarget) return;
-  zombie.facing = moveTarget.x < zombie.x ? "left" : "right";
-  const arrived = moveUnit(world, zombie, moveTarget, behavior.stats.speed * dt);
-  if (arrived || distance(zombie, moveTarget) < 0.45) {
-    const nextTarget = extendZombieDirection(zombie, moveTarget, ZOMBIE_MOMENTUM_DISTANCE);
-    if (zombie.soundTarget) zombie.soundTarget = nextTarget;
-    else zombie.wanderTarget = nextTarget;
-    zombie.retargetIn = 0;
-  }
-}
-
-function nearestZombieTarget(world: World, zombie: Unit, range: number): Unit | Building | null {
-  let bestUnit: Unit | null = null;
-  let bestUnitDist = range;
-  let bestTownCenter: Building | null = null;
-  let bestTownCenterDist = range;
-  for (const unit of Object.values(world.units)) {
-    if (unit.ownerId === ZOMBIE_OWNER_ID || unit.hp <= 0) continue;
-    const d = distance(centerOf(zombie), centerOf(unit));
-    if (d < bestUnitDist) {
-      bestUnit = unit;
-      bestUnitDist = d;
-    }
-  }
-  if (bestUnit) return bestUnit;
-  for (const building of Object.values(world.buildings)) {
-    if (!building.isTownCenter() || building.hp <= 0) continue;
-    const d = distance(centerOf(zombie), centerOf(building));
-    if (d < bestTownCenterDist) {
-      bestTownCenter = building;
-      bestTownCenterDist = d;
-    }
-  }
-  return bestTownCenter;
-}
-
-function nearestZombieUnitTarget(world: World, zombie: Unit, range: number): Unit | null {
-  let best: Unit | null = null;
-  let bestDist = range;
-  for (const unit of Object.values(world.units)) {
-    if (unit.ownerId === ZOMBIE_OWNER_ID || unit.hp <= 0) continue;
-    const d = distance(centerOf(zombie), centerOf(unit));
-    if (d < bestDist) {
-      best = unit;
-      bestDist = d;
-    }
-  }
-  return best;
-}
-
-function attackBlockingBuilding(world: World, zombie: Unit, targetPoint: { x: number; y: number }, behavior: ReturnType<typeof unitBehavior>) {
   const building = blockingBuildingToward(world, zombie, targetPoint);
   if (!building || zombie.cooldown > 0) return;
   damage(world, building, behavior.stats.attack, ZOMBIE_OWNER_ID);
@@ -656,146 +557,6 @@ function blockingBuildingToward(world: World, zombie: Unit, targetPoint: { x: nu
   const x = zombie.x + (dx / length) * 0.65;
   const y = zombie.y + (dy / length) * 0.65;
   return Object.values(world.buildings).find((building) => pointInsideEntity(Math.floor(x), Math.floor(y), building)) || null;
-}
-
-function loudestSoundNear(world: World, listener: Unit): { point: { x: number; y: number }; score: number; kind: "civilization" | "zombie" } | null {
-  let bestCivilization: { point: { x: number; y: number }; score: number; kind: "civilization" } | null = null;
-  let bestZombie: { point: { x: number; y: number }; score: number; kind: "zombie" } | null = null;
-  const consider = (point: { x: number; y: number }, strength: number, kind: "civilization" | "zombie") => {
-    if (strength <= 0) return;
-    const d = distance(listener, point);
-    const range = ZOMBIE_HEARING_BASE_RANGE + strength * ZOMBIE_HEARING_RANGE_PER_SOUND;
-    if (d > range) return;
-    const score = strength / Math.max(4, d * d);
-    if (kind === "civilization") {
-      if (!bestCivilization || score > bestCivilization.score) bestCivilization = { point, score, kind };
-    } else if (!bestZombie || score > bestZombie.score) {
-      bestZombie = { point, score, kind };
-    }
-  };
-  for (const unit of Object.values(world.units)) {
-    if (unit.id === listener.id) continue;
-    const kind = unit.ownerId === ZOMBIE_OWNER_ID ? "zombie" : "civilization";
-    const strength = kind === "zombie" ? zombieGroupSound(world, unit) : unitBehavior(unit).soundLevel();
-    consider(unit, strength, kind);
-  }
-  for (const building of Object.values(world.buildings)) {
-    consider(centerOf(building), building.soundLevel(), "civilization");
-  }
-  for (const noise of world.actionNoises) {
-    consider(noise, noise.sound, "civilization");
-  }
-  return bestCivilization || bestZombie;
-}
-
-function zombieGroupSound(world: World, source: Unit) {
-  let nearbyZombies = 0;
-  for (const unit of Object.values(world.units)) {
-    if (unit.ownerId !== ZOMBIE_OWNER_ID) continue;
-    if (distance(source, unit) <= ZOMBIE_GROUP_SOUND_RADIUS) nearbyZombies += 1;
-  }
-  return Math.max(unitBehavior(source).soundLevel(), nearbyZombies * unitBehavior(source).soundLevel());
-}
-
-function chooseZombieWanderTarget(zombie: Unit) {
-  const angle = Math.random() * Math.PI * 2;
-  const radius = 2 + Math.random() * ZOMBIE_WANDER_RADIUS;
-  return {
-    x: clamp(zombie.x + Math.cos(angle) * radius, 0.5, MAP_SIZE - 0.5),
-    y: clamp(zombie.y + Math.sin(angle) * radius, 0.5, MAP_SIZE - 0.5),
-  };
-}
-
-function extendZombieDirection(from: { x: number; y: number }, toward: { x: number; y: number }, distanceAhead: number) {
-  const dx = toward.x - from.x;
-  const dy = toward.y - from.y;
-  const length = Math.hypot(dx, dy) || 1;
-  return {
-    x: clamp(toward.x + (dx / length) * distanceAhead, 0.5, MAP_SIZE - 0.5),
-    y: clamp(toward.y + (dy / length) * distanceAhead, 0.5, MAP_SIZE - 0.5),
-  };
-}
-
-function stepAttack(world: World, unit: Unit, command: Extract<UnitCommand, { type: "attack" }>, dt: number) {
-  const target = world.units[command.targetId] || world.buildings[command.targetId];
-  if (!target || target.ownerId === unit.ownerId) {
-    const nextTarget = nearestEnemy(world, unit, 5.5);
-    unit.command = nextTarget ? { type: "attack", targetId: nextTarget.id } : { type: "idle" };
-    return;
-  }
-  const def = unitBehavior(unit);
-  const range = def.stats.range + (target.size || 0.6);
-  if (distance(unit, centerOf(target)) > range) {
-    unit.facing = centerOf(target).x < unit.x ? "left" : "right";
-    moveNearTarget(world, unit, command, centerOf(target), range, def.stats.speed * dt);
-    return;
-  }
-  if (unit.cooldown <= 0) {
-    damage(world, target, def.stats.attack, unit.ownerId);
-    emitActionSound(world, "unitAttack", unit);
-    unit.cooldown = def.stats.cooldown;
-    unit.attackFlash = 0.22;
-    const nextTarget = nearestEnemy(world, unit, 5.5);
-    if (nextTarget && !world.units[command.targetId] && !world.buildings[command.targetId]) {
-      unit.command = { type: "attack", targetId: nextTarget.id };
-    }
-  }
-}
-
-function stepGather(world: World, unit: Unit, command: Extract<UnitCommand, { type: "gather" }>, dt: number) {
-  let resource: ResourceNode | Building | null | undefined = world.resources[command.targetId] || gatherableBuilding(world.buildings[command.targetId], unit.ownerId);
-  if (unit.carried && unit.carried.amount > 0) {
-    const depot = nearestDepot(world, unit.ownerId, unit.carried.resource, unit);
-    if (!depot) return;
-    if (distance(unit, centerOf(depot)) > depot.size + 0.7) {
-      moveNearTarget(world, unit, command, centerOf(depot), depot.size + 0.7, unitBehavior(unit).stats.speed * dt);
-      return;
-    }
-    world.players[unit.ownerId]!.resources[unit.carried.resource] += unit.carried.amount;
-    unit.carried = null;
-    return;
-  }
-  const behavior = unitBehavior(unit);
-  if (!resource || resource.amount! <= 0 || !behavior.canGather()) {
-    if (isBuilding(resource)) {
-      maybeAutoReplenishBuilding(world, resource);
-      if (resource.amount! > 0) return;
-    }
-    const next = findNextResource(world, unit, command.resourceKind);
-    if (next) {
-      command.targetId = next.id;
-      command.path = null;
-      command.progress = 0;
-      return;
-    }
-    unit.command = { type: "idle" };
-    return;
-  }
-  const targetPoint = isBuilding(resource) ? centerOf(resource) : resource;
-  const gatherRange = isBuilding(resource) ? resource.gatherRange() : 1.1;
-  if (distance(unit, targetPoint) > gatherRange) {
-    moveNearTarget(world, unit, command, targetPoint, gatherRange, behavior.stats.speed * dt);
-    return;
-  }
-  unit.workFlash = 0.25;
-  emitGatherSound(world, resource, targetPoint);
-  command.progress = (command.progress || 0) + dt;
-  const gatherTarget = gatherTargetFor(resource);
-  const gatherSeconds = behavior.gatherSeconds(gatherTarget);
-  if (command.progress >= gatherSeconds) {
-    const amount = Math.min(behavior.gatherAmount(gatherTarget), resource.amount!);
-    resource.amount! -= amount;
-    unit.carried = { resource: gatherResource(resource), amount };
-    command.progress = 0;
-    if (isBuilding(resource)) {
-      resource.onGatheredOut();
-      maybeAutoReplenishBuilding(world, resource);
-    } else if (resource.amount! <= 0) {
-      delete world.resources[resource.id];
-    } else if (resource.type === "tree" && resource.amount! <= TREE_STUMP_THRESHOLD) {
-      makeStump(resource as ResourceNode);
-    }
-  }
 }
 
 function stepResourceDecay(world: World, dt: number) {
@@ -829,83 +590,11 @@ function emitActionSound(world: World, action: ActionSoundKey, point: { x: numbe
   while (world.actionNoises.length > MAX_ACTION_NOISES) world.actionNoises.shift();
 }
 
-function emitGatherSound(world: World, resource: ResourceNode | Building, point: { x: number; y: number }) {
-  const kind = gatherResource(resource);
-  if (kind === "wood") emitActionSound(world, "chopWood", point);
-  else if (kind === "ore") emitActionSound(world, "mineOre", point);
-  else emitActionSound(world, "gatherFood", point);
-}
-
 function stepRuinDecay(world: World, dt: number) {
   for (const ruin of Object.values(world.ruins)) {
     ruin.age = (ruin.age || 0) + dt;
     if (ruin.age >= RUIN_DECAY_SECONDS) delete world.ruins[ruin.id];
   }
-}
-
-function stepZombieSpawning(world: World, dt: number) {
-  const activePlayers = Object.values(world.players).filter((player) => !player.defeated).length;
-  if (activePlayers === 0) return;
-  const zombieCount = Object.values(world.units).filter((unit) => unit.type === "zombie").length;
-  const activePopulation = Object.values(world.players).filter((player) => !player.defeated).reduce((sum, player) => sum + player.population, 0);
-  const zombieCap = ZOMBIE_BASE_CAP + activePlayers * ZOMBIES_PER_ACTIVE_PLAYER + activePopulation * ZOMBIES_PER_ACTIVE_POPULATION;
-  if (zombieCount >= zombieCap) return;
-  world.zombieSpawnIn = (world.zombieSpawnIn ?? ZOMBIE_SPAWN_INTERVAL_SECONDS) - dt;
-  if (world.zombieSpawnIn > 0) return;
-  world.zombieSpawnIn = ZOMBIE_SPAWN_INTERVAL_SECONDS + Math.random() * 4;
-  const batch = Math.min(randomInt(ZOMBIE_SPAWN_BATCH_MIN, ZOMBIE_SPAWN_BATCH_MAX), zombieCap - zombieCount);
-  for (let i = 0; i < batch; i += 1) {
-    const spawn = chooseZombieSpawn(world);
-    if (spawn) createZombie(world, spawn.x, spawn.y);
-  }
-}
-
-function chooseZombieSpawn(world: World): { x: number; y: number } | null {
-  const noiseTarget = weightedWorldSound(world);
-  for (let attempt = 0; attempt < 180; attempt += 1) {
-    const candidate = randomZombieSpawnPoint(noiseTarget?.point || null);
-    if (canSpawnZombieAt(world, candidate.x, candidate.y)) return candidate;
-  }
-  return null;
-}
-
-function randomZombieSpawnPoint(target: { x: number; y: number } | null) {
-  if (target && Math.random() < 0.2) {
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 30 + Math.random() * 120;
-    return {
-      x: clamp(target.x + Math.cos(angle) * radius, 1, MAP_SIZE - 2),
-      y: clamp(target.y + Math.sin(angle) * radius, 1, MAP_SIZE - 2),
-    };
-  }
-  return {
-    x: randomInt(1, MAP_SIZE - 2),
-    y: randomInt(1, MAP_SIZE - 2),
-  };
-}
-
-function canSpawnZombieAt(world: World, x: number, y: number): boolean {
-  if (!isWalkable(world, Math.floor(x), Math.floor(y))) return false;
-  for (const building of Object.values(world.buildings)) {
-    if (!building.isTownCenter()) continue;
-    if (distance({ x, y }, centerOf(building)) < ZOMBIE_SAFE_RADIUS) return false;
-  }
-  return !isInAnyPlayerSight(world, x, y);
-}
-
-function isInAnyPlayerSight(world: World, x: number, y: number): boolean {
-  for (const player of Object.values(world.players)) {
-    if (player.defeated) continue;
-    for (const unit of Object.values(world.units)) {
-      if (unit.ownerId !== player.id) continue;
-      if (distance({ x, y }, unit) <= (unit.vision || unitBehavior(unit).stats.vision || 5) + ZOMBIE_SPAWN_SIGHT_BUFFER) return true;
-    }
-    for (const building of Object.values(world.buildings)) {
-      if (building.ownerId !== player.id) continue;
-      if (distance({ x, y }, centerOf(building)) <= (building.vision || 5) + ZOMBIE_SPAWN_SIGHT_BUFFER) return true;
-    }
-  }
-  return false;
 }
 
 function weightedWorldSound(world: World): { point: { x: number; y: number }; strength: number } | null {
@@ -945,26 +634,6 @@ function makeStump(resource: ResourceNode) {
   resource.type = "stump";
   resource.sprite = "stump";
   resource.decay = 0;
-}
-
-function stepBuild(world: World, unit: Unit, command: Extract<UnitCommand, { type: "build" }>, dt: number) {
-  const building = world.buildings[command.targetId];
-  if (!building || building.ownerId !== unit.ownerId) {
-    unit.command = { type: "idle" };
-    return;
-  }
-  if (isComplete(building)) {
-    assignPostBuildGather(world, unit, command.resourceKind, command.gatherBuiltFarm ? building : null);
-    return;
-  }
-  if (distance(unit, centerOf(building)) > building.size + 0.7) {
-    moveNearTarget(world, unit, command, centerOf(building), building.size + 0.7, unitBehavior(unit).stats.speed * dt);
-    return;
-  }
-  unit.workFlash = 0.2;
-  emitActionSound(world, "build", centerOf(building));
-  building.hp = Math.min(building.maxHp, building.hp + 38 * dt);
-  if (building.hp >= building.maxHp) assignPostBuildGather(world, unit, command.resourceKind, command.gatherBuiltFarm ? building : null);
 }
 
 function assignPostBuildGather(world: World, unit: Unit, resourceKind: ResourceType | null, builtFarm: Building | null = null) {
@@ -1007,12 +676,6 @@ function findNextBuildSite(world: World, unit: Unit): Building | null {
     }
   }
   return bestInitiated || bestNearby;
-}
-
-function autoAcquire(world: World, unit: Unit) {
-  if (!unitBehavior(unit).canAutoAcquireTargets()) return;
-  const target = nearestEnemy(world, unit, 5.5);
-  if (target) unit.command = { type: "attack", targetId: target.id };
 }
 
 function findNextResource(world: World, unit: Unit, resourceKind: ResourceType | null): ResourceNode | Building | null {

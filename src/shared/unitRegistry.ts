@@ -1,5 +1,5 @@
-import { SoldierUnit, VillagerUnit, ZombieUnit } from "./unitDefinitions.js";
-import type { UnitBehavior, UnitClass } from "./unitDefinitions.js";
+import { SoldierUnit, VillagerUnit, ZombieUnit } from "./units/index.js";
+import type { UnitBehavior, UnitClass } from "./units/index.js";
 import type { UnitType } from "./types.js";
 
 export const UNIT_CLASSES = [

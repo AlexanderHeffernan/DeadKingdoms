@@ -1,7 +1,7 @@
 import type { BuildQueueItem, BuildingId, BuildingType, PlayerId, ResourceCost, ResourceType, UnitId, UnitType, Vec2 } from "./types.js";
-import { SoldierUnit, VillagerUnit } from "./unitDefinitions.js";
-import type { UnitBehavior } from "./unitDefinitions.js";
-import type { UnitClass } from "./unitDefinitions.js";
+import { SoldierUnit, VillagerUnit } from "./units/index.js";
+import type { UnitBehavior } from "./units/index.js";
+import type { UnitClass } from "./units/index.js";
 
 export interface GatherTarget {
   /** Returns how many resources the supplied unit behavior gathers from this target per cycle. */
