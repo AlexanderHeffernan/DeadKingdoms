@@ -201,9 +201,14 @@ export class Renderer {
     const cached = this.tileTextureCache.get(key);
     if (cached) return cached;
 
+    // The canvas must be exactly one tile so that, when drawTiles centres the
+    // texture on isoToScreen(x, y), the grass diamond's centre lands on that
+    // point too. Using an oversized canvas with the diamond in the top-left
+    // quadrant shifted every tile half a tile up-left of where entities,
+    // selection markers, and hit-testing place it.
     const canvas = document.createElement("canvas");
-    canvas.width = TILE_W * 2;
-    canvas.height = TILE_H * 2;
+    canvas.width = TILE_W;
+    canvas.height = TILE_H;
 
     const ctx = canvas.getContext("2d")!;
     ctx.imageSmoothingEnabled = false;
@@ -1001,7 +1006,7 @@ function rectsOverlap(
 }
 
 function entityCenter(entity: RenderEntity, camera: CameraState) {
-  if (entity.kind === "building" || entity.kind === "ruin")
+  if (entity.kind === "building" || entity.kind === "ruin" || entity.kind === "resource")
     return footprintCenter(entity.x, entity.y, entity.size || 1, camera);
   return isoToScreen(
     entity.x + (entity.size || 0) / 2,
@@ -1012,7 +1017,9 @@ function entityCenter(entity: RenderEntity, camera: CameraState) {
 
 function isEntityNearViewport(entity: RenderEntity, camera: CameraState) {
   const size = entity.size || 1;
-  const p = isoToScreen(entity.x + size / 2, entity.y + size / 2, camera);
+  const p = entity.kind === "unit"
+    ? isoToScreen(entity.x + size / 2, entity.y + size / 2, camera)
+    : footprintCenter(entity.x, entity.y, size, camera);
   const margin = 260;
   return (
     p.x >= -margin &&
@@ -1038,7 +1045,12 @@ function spriteTopY(
   scale: number,
   zoom: number,
 ) {
-  const footprintBottom = centerY + ((entity.size || 0) * TILE_H * zoom) / 2;
+  // Units stand at a point (their feet rest on the tile centre), while
+  // resources occupy a 1-tile footprint like buildings, so their base should
+  // sit at the bottom of the tile rather than the centre.
+  const footprintSize =
+    entity.kind === "unit" ? entity.size || 0 : entity.size || 1;
+  const footprintBottom = centerY + (footprintSize * TILE_H * zoom) / 2;
   return footprintBottom - (bounds.maxY + 1) * scale;
 }
 

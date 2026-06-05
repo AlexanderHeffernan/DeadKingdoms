@@ -1,6 +1,8 @@
 import houseBase from "./house_base.png";
 import houseFlag from "./house_flag.png";
 
+import rock from "./rock.png";
+
 import type { SpriteName } from "../../../src/shared/types.js";
 
 // PNG-based sprites. Each sprite is composited from up to two layers:
@@ -18,4 +20,5 @@ export type PngSprite = {
 
 export const pngSprites: Partial<Record<SpriteName, PngSprite>> = {
   house: { base: houseBase, flag: houseFlag, width: 32, height: 32 },
+  ore: { base: rock, width: 16, height: 16 },
 };

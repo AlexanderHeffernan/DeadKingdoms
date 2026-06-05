@@ -811,7 +811,7 @@ function hitTest(x: number, y: number) {
 function renderedEntityRect(entity: Unit | Building | ResourceNode) {
   const bounds = spriteMetrics(entity.type);
   const scale = entityPixel(entity, view.camera.zoom || 1);
-  const center = entity.kind === "building"
+  const center = entity.kind === "building" || entity.kind === "resource"
     ? isoToScreen(entity.x + ((entity.size || 1) - 1) / 2, entity.y + ((entity.size || 1) - 1) / 2, view.camera)
     : isoToScreen(entity.x + (entity.size || 0) / 2, entity.y + (entity.size || 0) / 2, view.camera);
   const visualWidth = bounds.width * scale;
