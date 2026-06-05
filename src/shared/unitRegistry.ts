@@ -1,10 +1,11 @@
-import { SoldierUnit, VillagerUnit } from "./unitDefinitions.js";
-import type { UnitBehavior, UnitClass } from "./unitDefinitions.js";
+import { SoldierUnit, VillagerUnit, ZombieUnit } from "./units/index.js";
+import type { UnitBehavior, UnitClass } from "./units/index.js";
 import type { UnitType } from "./types.js";
 
 export const UNIT_CLASSES = [
   VillagerUnit,
   SoldierUnit,
+  ZombieUnit,
 ] as const;
 
 const UNIT_CLASS_BY_TYPE = Object.fromEntries(UNIT_CLASSES.map((Unit) => [Unit.type, Unit])) as Record<UnitType, UnitClass>;

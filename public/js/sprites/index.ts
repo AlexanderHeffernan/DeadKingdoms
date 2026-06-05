@@ -13,6 +13,7 @@ import townCenter from "./townCenter.js";
 import tree from "./tree.js";
 import villager from "./villager.js";
 import watchTower from "./watchTower.js";
+import zombie from "./zombie.js";
 
 import type { SpriteName } from "../../../src/shared/types.js";
 
@@ -32,4 +33,5 @@ export const sprites: Record<SpriteName, readonly string[]> = {
   tree,
   villager,
   watchTower,
+  zombie,
 } as const;

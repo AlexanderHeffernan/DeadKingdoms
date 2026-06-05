@@ -29,6 +29,7 @@ export interface Player {
   defeated: boolean;
   score: number;
   joinedAt: number;
+  godMode?: boolean;
   _visCache?: VisibilityCache;
 }
 
@@ -57,6 +58,11 @@ export interface Unit extends BaseEntity {
   carried: null | { resource: ResourceType; amount: number };
   selected: boolean;
   vision?: number;
+  soundTarget?: Vec2 | null;
+  wanderTarget?: Vec2 | null;
+  investigateTarget?: Vec2 | null;
+  investigateTime?: number;
+  retargetIn?: number;
 }
 
 /** Pending unit-production entry for train-capable buildings. */

@@ -12,6 +12,10 @@ export async function leave(playerId: PlayerId) {
   return post("/api/leave", { playerId });
 }
 
+export async function enableGodMode(playerId: PlayerId, secret: string) {
+  return post("/api/dev/god-mode", { playerId, secret });
+}
+
 async function post(url: string, payload: Record<string, unknown>) {
   const res = await fetch(url, {
     method: "POST",

@@ -1,4 +1,4 @@
-import type { PlayerId, Snapshot, VisibilityCache, World } from "./types.js";
+import type { PlayerId, Snapshot, Unit, VisibilityCache, World } from "./types.js";
 import { isVisible } from "./visibility.js";
 
 export function makeSnapshot(
@@ -6,14 +6,16 @@ export function makeSnapshot(
   playerId: PlayerId | null = null,
   sentExplored: Set<number> | null = null,
 ): Snapshot {
-  const visible = playerId ? cachedVisibility(world, playerId) : null;
+  const player = playerId ? world.players[playerId] : null;
+  const normalVisible = playerId ? cachedVisibility(world, playerId) : null;
+  const visible = player?.godMode ? null : normalVisible;
   const visibleSet = visible ? visible.visible : null;
-  const filterVisible = <T extends { x: number; y: number; size?: number }>(entities: Record<string, T>): Record<string, T> => {
-    if (!visibleSet) return entities;
+  const filterVisible = <T extends { x: number; y: number; size?: number }>(entities: Record<string, T>, set = visibleSet): Record<string, T> => {
+    if (!set) return entities;
     const out: Record<string, T> = {};
     for (const id in entities) {
       const entity = entities[id]!;
-      if (isVisible(visibleSet, entity.x, entity.y, entity.size || 1, world.map.size)) out[id] = entity;
+      if (isVisible(set, entity.x, entity.y, entity.size || 1, world.map.size)) out[id] = entity;
     }
     return out;
   };
@@ -56,11 +58,14 @@ export function makeSnapshot(
         },
       ]),
     ),
-    units: filterVisible(world.units),
+    units: Object.fromEntries(Object.entries(filterVisible(world.units)).map(([id, unit]) => [id, serializeUnit(unit)])),
     buildings: Object.fromEntries(
       Object.entries(filterVisible(world.buildings)).map(([id, building]) => [id, building.serialize()]),
     ),
-    resources: filterVisible(world.resources),
+    // In god mode we reveal units/buildings globally, but keep resources scoped
+    // to normal player vision to avoid sending thousands of tree/ore/berry
+    // records every tick while debugging zombie movement.
+    resources: filterVisible(world.resources, player?.godMode ? normalVisible?.visible || null : visibleSet),
     ruins: filterVisible(world.ruins),
     visibility: visible
       ? {
@@ -73,6 +78,27 @@ export function makeSnapshot(
       : null,
     leaderboard: world.leaderboard,
     notices: world.notices.slice(-8),
+  };
+}
+
+function serializeUnit(unit: Unit): Unit {
+  return {
+    id: unit.id,
+    kind: unit.kind,
+    ownerId: unit.ownerId,
+    type: unit.type,
+    x: unit.x,
+    y: unit.y,
+    hp: unit.hp,
+    maxHp: unit.maxHp,
+    command: unit.command,
+    cooldown: unit.cooldown,
+    attackFlash: unit.attackFlash,
+    workFlash: unit.workFlash,
+    facing: unit.facing,
+    carried: unit.carried,
+    selected: unit.selected,
+    ...(unit.vision !== undefined ? { vision: unit.vision } : {}),
   };
 }
 

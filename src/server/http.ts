@@ -27,6 +27,7 @@ export function createHandler(world: World, clients: Set<Client>) {
     const host = req.headers.host || "localhost";
     const url = new URL(req.url ?? "/", `http://${host}`);
     if (req.method === "POST" && url.pathname === "/api/join") return joinGame(req, res, world);
+    if (req.method === "POST" && url.pathname === "/api/dev/god-mode") return enableGodMode(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/command") return receiveCommand(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/leave") return leaveGame(req, res, world);
     if (req.method === "GET" && url.pathname === "/events") return streamEvents(req, res, world, clients, url);
@@ -132,6 +133,20 @@ async function joinGame(req: import("node:http").IncomingMessage, res: import("n
   const color = typeof body.color === "string" ? body.color : null;
   const playerId = addPlayer(world, name, color);
   json(res, { ok: true, playerId });
+}
+
+async function enableGodMode(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+  const secret = process.env.DEV_GOD_MODE_SECRET;
+  if (!secret) return json(res, { ok: false, error: "God mode secret is not configured." }, 403);
+  const body = (await readJson(req)) as { playerId?: unknown; secret?: unknown };
+  if (typeof body.playerId !== "string" || typeof body.secret !== "string" || !body.secret.endsWith(secret)) {
+    return json(res, { ok: false, error: "Invalid god mode secret." }, 403);
+  }
+  const player = world.players[body.playerId];
+  if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+  player.godMode = true;
+  delete player._visCache;
+  json(res, { ok: true });
 }
 
 async function receiveCommand(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
