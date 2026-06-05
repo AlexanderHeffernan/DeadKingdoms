@@ -23,7 +23,7 @@ export interface LeaderboardEntry {
 export interface SoundDebugSource {
 	id: string;
 	kind: "unit" | "building" | "action";
-	soundKind: "civilization" | "zombie";
+	soundKind: "world" | "zombie";
 	label: string;
 	x: number;
 	y: number;

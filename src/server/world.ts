@@ -17,6 +17,7 @@ import { clamp, distance, rectsOverlap } from "./math.js";
 import { findPath, isWalkable, moveNearTarget, moveUnit, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
+import { stepZombieDirector } from "./zombieDirector.js";
 import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
 import type {
 	BuildQueueItem,
@@ -156,6 +157,7 @@ export function stepWorld(world: World, dt: number) {
 		const context = createSimulationContext(world);
 		stepActionNoises(world, dt);
 		stepSpawner(context, zombieSpawnPolicy, dt);
+		stepZombieDirector(world, dt);
 		stepResourceDecay(world, dt);
 		stepRuinDecay(world, dt);
 		for (const unit of Object.values(world.units)) unitBehavior(unit).step(context, unit, dt);

@@ -9,6 +9,16 @@ export interface ActionNoise extends Vec2 {
 	remaining: number;
 }
 
+export interface ZombieHorde {
+	id: string;
+	memberIds: UnitId[];
+	center: Vec2;
+	radius: number;
+	target: Vec2 | null;
+	targetMemory: number;
+	wanderTarget: Vec2 | null;
+}
+
 /** Authoritative server-side simulation state for one running arena. */
 export interface World {
 	map: MapDef;
@@ -24,4 +34,5 @@ export interface World {
 	spawnTimers: Record<string, number>;
 	serverPerf: ServerPerfStats & { lastTickAt?: number };
 	_occupancy?: Uint8Array;
+	_zombieHordes?: Record<string, ZombieHorde>;
 }
