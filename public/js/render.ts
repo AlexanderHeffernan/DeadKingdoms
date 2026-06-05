@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, SCALE_MODES, Sprite, Texture } from "pixi.js";
+import { Application, BLEND_MODES, Container, Graphics, SCALE_MODES, Sprite, Texture } from "pixi.js";
 import { SCALE, TILE_H, TILE_W } from "./constants.js";
 import { BUILDING_DEFS } from "../../src/shared/buildingRegistry.js";
 import { isoToScreen } from "./iso.js";
@@ -27,12 +27,14 @@ export class Renderer {
   app: Application;
   background: Graphics;
   terrainLayer: Container;
+  selectionLayer: Graphics;
   entityLayer: Container;
   overlayLayer: Graphics;
   currentZoom: number;
 
   private tilePool: Sprite[] = [];
   private entitySprites = new Map<string, Sprite>();
+  private flashSprites = new Map<string, Sprite>();
   private textureCache = new Map<string, Texture>();
   private tileTextureCache = new Map<string, Texture>();
   private lastMinimapDraw = 0;
@@ -52,10 +54,11 @@ export class Renderer {
     this.app.renderer.background.color = 0x315f3c;
     this.background = new Graphics();
     this.terrainLayer = new Container();
+    this.selectionLayer = new Graphics();
     this.entityLayer = new Container();
     this.entityLayer.sortableChildren = true;
     this.overlayLayer = new Graphics();
-    this.app.stage.addChild(this.background, this.terrainLayer, this.entityLayer, this.overlayLayer);
+    this.app.stage.addChild(this.background, this.terrainLayer, this.selectionLayer, this.entityLayer, this.overlayLayer);
     this.currentZoom = 1;
   }
 
@@ -68,6 +71,7 @@ export class Renderer {
     this.currentZoom = view.camera.zoom || 1;
     this.drawBackground(state);
     this.overlayLayer.clear();
+    this.selectionLayer.clear();
     if (!state.snapshot) {
       this.hideAllEntitySprites(new Set());
       this.hideUnusedTiles(0);
@@ -225,8 +229,10 @@ export class Renderer {
     sprite.alpha = alpha;
     sprite.visible = true;
     sprite.zIndex = (entity.x + entity.y) * 100 + (entity.kind === "unit" ? 2 : entity.kind === "building" ? 1 : 0);
-    sprite.tint = tintForFlash(targetFlashFor(state, entity.id));
+    const flash = targetFlashFor(state, entity.id);
+    sprite.tint = flash.amount > 0 && flash.color === "red" ? redTint(flash.amount) : 0xffffff;
     active.add(key);
+    this.updateFlashOverlay(key, sprite, texture, flash, active);
 
     const ownerColor = entity.ownerId == null ? undefined : state.snapshot?.players[entity.ownerId]?.color;
     if (view.selectedIds.has(entity.id)) this.drawSelectionMarker(entity, view.camera, center.x, center.y, ownerColor || "#f4efe6");
@@ -242,8 +248,35 @@ export class Renderer {
     if (entity.kind === "resource" && entity.maxAmount && entity.amount < entity.maxAmount) this.drawHealth(center.x, y - 5, entity.amount / entity.maxAmount);
   }
 
+  private updateFlashOverlay(key: string, base: Sprite, texture: Texture, flash: { amount: number; color: string }, active: Set<string>) {
+    const fKey = `flash:${key}`;
+    if (flash.amount <= 0 || flash.color === "red") {
+      const existing = this.flashSprites.get(fKey);
+      if (existing) existing.visible = false;
+      return;
+    }
+    let overlay = this.flashSprites.get(fKey);
+    if (!overlay) {
+      overlay = new Sprite(texture);
+      overlay.roundPixels = true;
+      overlay.blendMode = BLEND_MODES.ADD;
+      overlay.tint = 0xffffff;
+      this.flashSprites.set(fKey, overlay);
+      this.entityLayer.addChild(overlay);
+    }
+    overlay.texture = texture;
+    overlay.scale.copyFrom(base.scale);
+    overlay.x = base.x;
+    overlay.y = base.y;
+    overlay.alpha = base.alpha * Math.min(1, flash.amount);
+    overlay.zIndex = base.zIndex + 0.5;
+    overlay.visible = true;
+    active.add(fKey);
+  }
+
   private hideAllEntitySprites(active: Set<string>) {
     for (const [key, sprite] of this.entitySprites) sprite.visible = active.has(key);
+    for (const [key, sprite] of this.flashSprites) sprite.visible = active.has(key);
   }
 
   private spriteTexture(spriteName: SpriteName, rows: readonly string[], playerColor: string | undefined) {
@@ -321,18 +354,48 @@ export class Renderer {
 
   private drawSelectionMarker(entity: RenderEntity, camera: CameraState, x: number, y: number, color: string) {
     if (entity.kind === "building" || entity.kind === "ruin") {
-      this.drawFootprint(entity.x, entity.y, entity.size || 1, camera, color, "rgb(17 24 19 / 0.82)", 3);
+      this.drawPixelFootprint(entity.x, entity.y, entity.size || 1, camera, color);
       return;
     }
     const px = worldPixel(this.currentZoom || 1);
     const rx = Math.max(5, Math.round((entity.size || 0.8) * 8));
     const ry = Math.max(3, Math.round((entity.size || 0.8) * 4));
-    this.overlayLayer.beginFill(0x111813, 0.9);
-    this.overlayLayer.drawEllipse(x, y, rx * px, ry * px);
-    this.overlayLayer.endFill();
-    this.overlayLayer.lineStyle(Math.max(1, px), hexToNumber(color), 1);
-    this.overlayLayer.drawEllipse(x, y, rx * px, ry * px);
-    this.overlayLayer.lineStyle();
+    this.drawPixelDiamond(x, y, rx, ry, px, hexToNumber(color));
+  }
+
+  private drawPixelFootprint(tileX: number, tileY: number, size: number, camera: CameraState, color: string) {
+    const top = isoToScreen(tileX - 0.5, tileY - 0.5, camera);
+    const right = isoToScreen(tileX + size - 0.5, tileY - 0.5, camera);
+    const bottom = isoToScreen(tileX + size - 0.5, tileY + size - 0.5, camera);
+    const left = isoToScreen(tileX - 0.5, tileY + size - 0.5, camera);
+    const cx = (left.x + right.x) / 2;
+    const cy = (top.y + bottom.y) / 2;
+    const px = worldPixel(this.currentZoom || 1);
+    const rx = Math.max(2, Math.round((right.x - left.x) / 2 / px));
+    const ry = Math.max(1, Math.round((bottom.y - top.y) / 2 / px));
+    this.drawPixelDiamond(cx, cy, rx, ry, px, hexToNumber(color));
+  }
+
+  private drawPixelDiamond(x: number, y: number, rx: number, ry: number, px: number, edge: number) {
+    const g = this.selectionLayer;
+    g.beginFill(0x111813, 0.9);
+    for (let row = -ry; row <= ry; row += 1) {
+      if (Math.abs(row) === ry) continue;
+      const width = Math.round(rx * (1 - Math.abs(row) / (ry + 1)));
+      for (let col = -width + 1; col <= width - 1; col += 1) g.drawRect(Math.round(x + col * px), Math.round(y + row * px), px, px);
+    }
+    g.endFill();
+    g.beginFill(edge, 1);
+    for (let row = -ry; row <= ry; row += 1) {
+      const width = Math.round(rx * (1 - Math.abs(row) / (ry + 1)));
+      if (Math.abs(row) === ry) {
+        for (let col = -width; col <= width; col += 1) g.drawRect(Math.round(x + col * px), Math.round(y + row * px), px, px);
+        continue;
+      }
+      g.drawRect(Math.round(x - width * px), Math.round(y + row * px), px, px);
+      g.drawRect(Math.round(x + width * px), Math.round(y + row * px), px, px);
+    }
+    g.endFill();
   }
 
   private drawTeamAccent(entity: RenderEntity, centerX: number, topY: number, visualWidth: number, color: string | undefined) {
@@ -489,9 +552,11 @@ function targetFlashFor(state: GameState, id: string) {
   return { amount: Math.max(0, 1 - (performance.now() - effect.createdAt) / effect.duration), color: effect.color || "white" };
 }
 
-function tintForFlash(flash: { amount: number; color: string }) {
-  if (flash.amount <= 0) return 0xffffff;
-  return flash.color === "red" ? 0xff6a5a : 0xffffee;
+function redTint(amount: number) {
+  const t = Math.min(1, amount * 0.9);
+  const g = Math.round(255 + (66 - 255) * t);
+  const b = Math.round(255 + (50 - 255) * t);
+  return (255 << 16) | (g << 8) | b;
 }
 
 function buildingSize(type: string) {
