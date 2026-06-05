@@ -239,12 +239,21 @@ async function serveStatic(req: import("node:http").IncomingMessage, res: import
   try {
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) throw new Error("Not a file");
-    res.writeHead(200, { "Content-Type": MIME[extname(filePath) as keyof typeof MIME] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": MIME[extname(filePath) as keyof typeof MIME] || "application/octet-stream",
+      "Cache-Control": cacheControl(filePath),
+    });
     createReadStream(filePath).pipe(res);
   } catch {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not found");
   }
+}
+
+function cacheControl(filePath: string) {
+  const ext = extname(filePath);
+  if (ext === ".html" || ext === ".css" || ext === ".js") return "no-cache";
+  return "public, max-age=86400";
 }
 
 async function readJson(req: import("node:http").IncomingMessage): Promise<unknown> {
