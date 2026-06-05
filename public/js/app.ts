@@ -5,8 +5,7 @@ import { UI } from "./ui.js";
 import { BUILDINGS, SCALE, TILE_H, TRAINING } from "./constants.js";
 import { BUILDING_DEFS, deserializeBuilding } from "../../src/shared/buildingRegistry.js";
 import { allUnitClasses, unitBehaviorFor } from "../../src/shared/unitRegistry.js";
-import { sprites } from "./sprites/index.js";
-import { spriteBounds } from "./spriteBounds.js";
+import { spriteMetrics } from "./sprites/spriteInfo.js";
 import type { Building, BuildingType, CommandPayload, EntityId, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
 import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
@@ -810,9 +809,7 @@ function hitTest(x: number, y: number) {
 }
 
 function renderedEntityRect(entity: Unit | Building | ResourceNode) {
-  const spriteName = entity.type;
-  const rows = sprites[spriteName] || sprites.house;
-  const bounds = spriteBounds(rows);
+  const bounds = spriteMetrics(entity.type);
   const scale = entityPixel(entity, view.camera.zoom || 1);
   const center = entity.kind === "building"
     ? isoToScreen(entity.x + ((entity.size || 1) - 1) / 2, entity.y + ((entity.size || 1) - 1) / 2, view.camera)

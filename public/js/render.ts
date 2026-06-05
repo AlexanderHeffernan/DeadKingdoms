@@ -1,24 +1,37 @@
-import { Application, BLEND_MODES, Container, Graphics, SCALE_MODES, Sprite, Texture } from "pixi.js";
+import {
+  Application,
+  BLEND_MODES,
+  Container,
+  Graphics,
+  SCALE_MODES,
+  Sprite,
+  Texture,
+} from "pixi.js";
 import { SCALE, TILE_H, TILE_W } from "./constants.js";
 import { BUILDING_DEFS } from "../../src/shared/buildingRegistry.js";
 import { isoToScreen } from "./iso.js";
 import { palette } from "./sprites/palette.js";
 import { sprites } from "./sprites/index.js";
-import { spriteBounds } from "./spriteBounds.js";
-import type { Building, BuildingType, ResourceNode, ResourceType, Ruin, SoundDebugSource, SpriteName, Unit } from "../../src/shared/types.js";
-import type { CameraState, ClientSnapshot, Effect, GameState, ViewState } from "./clientTypes.js";
-
-const tileColors = ["#345f3e", "#386846", "#2f5739"];
-const GROUND_TILE = [
-  "................",
-  "......aaaa......",
-  "....aaaaaaaa....",
-  "..aaaaaaaaaaaa..",
-  "aaaaaaaaaaaaaaaa",
-  "..bbbbbbbbbbbb..",
-  "....bbbbbbbb....",
-  "......bbbb......",
-];
+import { pngSprites } from "./sprites/pngSprites.js";
+import { spriteMetrics } from "./sprites/spriteInfo.js";
+import grassLightTileUrl from "./sprites/grass_tile_light.png";
+import grassDarkTileUrl from "./sprites/grass_tile_dark.png";
+import type {
+  Building,
+  ResourceNode,
+  ResourceType,
+  Ruin,
+  SoundDebugSource,
+  SpriteName,
+  Unit,
+} from "../../src/shared/types.js";
+import type {
+  CameraState,
+  ClientSnapshot,
+  Effect,
+  GameState,
+  ViewState,
+} from "./clientTypes.js";
 
 type RenderEntity = Unit | Building | ResourceNode | Ruin;
 
@@ -38,6 +51,11 @@ export class Renderer {
   private textureCache = new Map<string, Texture>();
   private tileTextureCache = new Map<string, Texture>();
   private lastMinimapDraw = 0;
+  private grassLightImage = new Image();
+  private grassLightReady = false;
+
+  private grassDarkImage = new Image();
+  private grassDarkReady = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -58,8 +76,24 @@ export class Renderer {
     this.entityLayer = new Container();
     this.entityLayer.sortableChildren = true;
     this.overlayLayer = new Graphics();
-    this.app.stage.addChild(this.background, this.terrainLayer, this.selectionLayer, this.entityLayer, this.overlayLayer);
+    this.app.stage.addChild(
+      this.background,
+      this.terrainLayer,
+      this.selectionLayer,
+      this.entityLayer,
+      this.overlayLayer,
+    );
     this.currentZoom = 1;
+    this.grassLightImage.onload = () => {
+      this.grassLightReady = true;
+      this.tileTextureCache.clear();
+    };
+    this.grassLightImage.src = grassLightTileUrl;
+    this.grassDarkImage.onload = () => {
+      this.grassDarkReady = true;
+      this.tileTextureCache.clear();
+    };
+    this.grassDarkImage.src = grassDarkTileUrl;
   }
 
   resize() {
@@ -79,7 +113,11 @@ export class Renderer {
       return;
     }
 
-    this.drawTiles(state.snapshot.map.size, view.camera, state.snapshot.visibility);
+    this.drawTiles(
+      state.snapshot.map.size,
+      view.camera,
+      state.snapshot.visibility,
+    );
     const active = new Set<string>();
     this.drawLastSeen(state, view, active);
     this.drawEntities(state, view, active);
@@ -101,7 +139,11 @@ export class Renderer {
     this.background.endFill();
   }
 
-  private drawTiles(size: number, camera: CameraState, visibility: ClientSnapshot["visibility"]) {
+  private drawTiles(
+    size: number,
+    camera: CameraState,
+    visibility: ClientSnapshot["visibility"],
+  ) {
     const exploredSet = visibility?.exploredSet;
     const visibleSet = visibility?.visibleSet;
     const bounds = visibleTileBounds(size, camera);
@@ -111,14 +153,24 @@ export class Renderer {
         const key = y * size + x;
         if (visibility && !exploredSet?.has(key)) continue;
         const screen = isoToScreen(x, y, camera);
-        if (screen.x < -90 || screen.x > window.innerWidth + 90 || screen.y < -60 || screen.y > window.innerHeight + 60) continue;
+        if (
+          screen.x < -90 ||
+          screen.x > window.innerWidth + 90 ||
+          screen.y < -60 ||
+          screen.y > window.innerHeight + 60
+        )
+          continue;
         const visible = !visibility || (visibleSet?.has(key) ?? false);
-        const color = visible ? tileColors[(x + y) % tileColors.length]! : "#1e3025";
+        const color = visible ? null : "#1e3025";
         const tile = this.tileAt(index++);
-        tile.texture = this.tileTexture(color, visible);
+        tile.texture = this.tileTexture(visible, (y % 2) + (x % 2) == 1);
         tile.scale.set(this.currentZoom);
-        tile.x = Math.round(screen.x - (tile.texture.width * this.currentZoom) / 2);
-        tile.y = Math.round(screen.y - (tile.texture.height * this.currentZoom) / 2);
+        tile.x = Math.round(
+          screen.x - (tile.texture.width * this.currentZoom) / 2,
+        );
+        tile.y = Math.round(
+          screen.y - (tile.texture.height * this.currentZoom) / 2,
+        );
         tile.visible = true;
       }
     }
@@ -137,42 +189,46 @@ export class Renderer {
   }
 
   private hideUnusedTiles(start: number) {
-    for (let i = start; i < this.tilePool.length; i += 1) this.tilePool[i]!.visible = false;
+    for (let i = start; i < this.tilePool.length; i += 1)
+      this.tilePool[i]!.visible = false;
   }
 
-  private tileTexture(color: string, visible: boolean) {
-    const key = `${color}:${visible ? 1 : 0}`;
+  private tileTexture(visible: boolean, isDark: boolean) {
+    const key = isDark
+      ? `grassDark:${visible ? 1 : 0}`
+      : `grassLight:${visible ? 1 : 0}`;
+
     const cached = this.tileTextureCache.get(key);
     if (cached) return cached;
+
     const canvas = document.createElement("canvas");
-    canvas.width = TILE_W + 4;
-    canvas.height = TILE_H + 4;
+    canvas.width = TILE_W * 2;
+    canvas.height = TILE_H * 2;
+
     const ctx = canvas.getContext("2d")!;
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    ctx.fillStyle = visible ? color : "#1e3025";
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - TILE_H / 2);
-    ctx.lineTo(cx + TILE_W / 2, cy);
-    ctx.lineTo(cx, cy + TILE_H / 2);
-    ctx.lineTo(cx - TILE_W / 2, cy);
-    ctx.closePath();
-    ctx.fill();
-    const px = SCALE;
-    const startX = Math.round(cx - 8 * px);
-    const startY = Math.round(cy - 4 * px);
-    for (let y = 0; y < GROUND_TILE.length; y += 1) {
-      const row = GROUND_TILE[y]!;
-      for (let x = 0; x < row.length; x += 1) {
-        const part = row[x]!;
-        if (part === ".") continue;
-        ctx.fillStyle = visible ? shade(color, part === "a" ? 1.06 : 0.88) : color;
-        ctx.fillRect(startX + x * px, startY + y * px, px, px);
-      }
+    ctx.imageSmoothingEnabled = false;
+
+    const grassImage = isDark ? this.grassDarkImage : this.grassLightImage;
+
+    ctx.drawImage(grassImage, 0, 0, TILE_W, TILE_H);
+
+    if (!visible) {
+      ctx.save();
+
+      // Only affect existing non-transparent pixels
+      ctx.globalCompositeOperation = "source-atop";
+
+      // Darken the visible grass pixels
+      ctx.fillStyle = "rgba(10, 16, 12, 0.62)";
+      ctx.fillRect(0, 0, TILE_W, TILE_H);
+
+      ctx.restore();
     }
+
     const texture = Texture.from(canvas);
     texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
     this.tileTextureCache.set(key, texture);
+
     return texture;
   }
 
@@ -184,7 +240,8 @@ export class Renderer {
       ...Object.values(snap.buildings),
       ...Object.values(snap.units),
     ].filter((entity) => isEntityNearViewport(entity, view.camera));
-    for (const entity of entities) this.updateEntitySprite(entity, state, view, active, 1, entity.id);
+    for (const entity of entities)
+      this.updateEntitySprite(entity, state, view, active, 1, entity.id);
   }
 
   private drawLastSeen(state: GameState, view: ViewState, active: Set<string>) {
@@ -198,57 +255,175 @@ export class Renderer {
     const remembered = [
       ...Object.values(state.lastSeen.buildings),
       ...Object.values(state.lastSeen.resources),
-      ...Object.values(state.lastSeen.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
-    ].filter((entity) => !visibleIds.has(entity.id) && isExplored(state.snapshot!.visibility, entity.x, entity.y, entity.size || 1, mapSize) && isEntityNearViewport(entity, view.camera));
-    for (const entity of remembered) this.updateEntitySprite(entity, state, view, active, 0.35, `last:${entity.id}`);
+      ...Object.values(state.lastSeen.ruins).map((ruin) => ({
+        ...ruin,
+        sprite: "ruin",
+      })),
+    ].filter(
+      (entity) =>
+        !visibleIds.has(entity.id) &&
+        isExplored(
+          state.snapshot!.visibility,
+          entity.x,
+          entity.y,
+          entity.size || 1,
+          mapSize,
+        ) &&
+        isEntityNearViewport(entity, view.camera),
+    );
+    for (const entity of remembered)
+      this.updateEntitySprite(
+        entity,
+        state,
+        view,
+        active,
+        0.35,
+        `last:${entity.id}`,
+      );
   }
 
-  private updateEntitySprite(entity: RenderEntity, state: GameState, view: ViewState, active: Set<string>, alpha: number, key: string) {
+  private updateEntitySprite(
+    entity: RenderEntity,
+    state: GameState,
+    view: ViewState,
+    active: Set<string>,
+    alpha: number,
+    key: string,
+  ) {
     const spriteName = spriteNameFor(entity);
-    const rows = sprites[spriteName];
-    if (!rows) return;
+    const png = pngSprites[spriteName];
+    if (!png && !sprites[spriteName]) return;
     const center = entityCenter(entity, view.camera);
     const px = worldPixel(view.camera.zoom || 1);
-    const bounds = spriteBounds(rows);
-    const texture = this.spriteTexture(spriteName, rows, entity.ownerId ? state.snapshot?.players[entity.ownerId]?.color : undefined);
-    let sprite = this.entitySprites.get(key);
-    if (!sprite) {
-      sprite = new Sprite(texture);
-      sprite.roundPixels = true;
-      this.entitySprites.set(key, sprite);
-      this.entityLayer.addChild(sprite);
-    }
+    const bounds = spriteMetrics(spriteName);
+    const ownerColor =
+      entity.ownerId == null
+        ? undefined
+        : state.snapshot?.players[entity.ownerId]?.color;
     const visualWidth = bounds.width * px;
     const x = Math.round(center.x - visualWidth / 2 - bounds.minX * px);
-    const y = Math.round(spriteTopY(entity, center.y, bounds, px, view.camera.zoom || 1));
+    const y = Math.round(
+      spriteTopY(entity, center.y, bounds, px, view.camera.zoom || 1),
+    );
     const flip = "facing" in entity && entity.facing === "left";
-    sprite.texture = texture;
-    sprite.scale.set(flip ? -px : px, px);
-    sprite.x = flip ? x + texture.width * px : x;
-    sprite.y = y;
-    sprite.alpha = alpha;
-    sprite.visible = true;
-    sprite.zIndex = (entity.x + entity.y) * 100 + (entity.kind === "unit" ? 2 : entity.kind === "building" ? 1 : 0);
+    const baseZ =
+      (entity.x + entity.y) * 100 +
+      (entity.kind === "unit" ? 2 : entity.kind === "building" ? 1 : 0);
     const flash = targetFlashFor(state, entity.id);
-    sprite.tint = flash.amount > 0 && flash.color === "red" ? redTint(flash.amount) : 0xffffff;
-    active.add(key);
-    this.updateFlashOverlay(key, sprite, texture, flash, active);
+    const flashTint =
+      flash.amount > 0 && flash.color === "red"
+        ? redTint(flash.amount)
+        : 0xffffff;
 
-    const ownerColor = entity.ownerId == null ? undefined : state.snapshot?.players[entity.ownerId]?.color;
-    if (view.selectedIds.has(entity.id)) this.drawSelectionMarker(entity, view.camera, center.x, center.y, ownerColor || "#f4efe6");
+    let texture: Texture;
+    if (png) {
+      // Flag layer underneath, tinted to the owner's colour (the source art is
+      // white so a multiplicative tint recolours it directly).
+      const flagKey = `flagLayer:${key}`;
+      if (png.flag) {
+        const flagTexture = this.pngTexture(png.flag);
+        const flag = this.placeSprite(
+          flagKey,
+          flagTexture,
+          x,
+          y,
+          px,
+          flip,
+          alpha,
+          baseZ - 0.5,
+        );
+        flag.tint = ownerColor ? hexToNumber(ownerColor) : 0xffffff;
+        active.add(flagKey);
+      } else {
+        const existingFlag = this.entitySprites.get(flagKey);
+        if (existingFlag) existingFlag.visible = false;
+      }
+      texture = this.pngTexture(png.base);
+      const sprite = this.placeSprite(
+        key,
+        texture,
+        x,
+        y,
+        px,
+        flip,
+        alpha,
+        baseZ,
+      );
+      sprite.tint = flashTint;
+    } else {
+      texture = this.spriteTexture(
+        spriteName,
+        sprites[spriteName]!,
+        ownerColor,
+      );
+      const sprite = this.placeSprite(
+        key,
+        texture,
+        x,
+        y,
+        px,
+        flip,
+        alpha,
+        baseZ,
+      );
+      sprite.tint = flashTint;
+    }
+    active.add(key);
+    this.updateFlashOverlay(
+      key,
+      this.entitySprites.get(key)!,
+      texture,
+      flash,
+      active,
+    );
+
+    if (view.selectedIds.has(entity.id))
+      this.drawSelectionMarker(
+        entity,
+        view.camera,
+        center.x,
+        center.y,
+        ownerColor || "#f4efe6",
+      );
     this.drawTeamAccent(entity, center.x, y, visualWidth, ownerColor);
-    if ("attackFlash" in entity && entity.attackFlash > 0) this.drawAttackFlash(center.x, center.y, ownerColor || "#f4efe6");
+    if ("attackFlash" in entity && entity.attackFlash > 0)
+      this.drawAttackFlash(center.x, center.y, ownerColor || "#f4efe6");
     if (entity.kind === "unit") {
       const cmd = entity.command as { resourceKind?: ResourceType };
-      if (entity.workFlash > 0) this.drawWorkFlash(center.x, center.y, entity.facing, cmd.resourceKind || entity.carried?.resource);
-      if (entity.carried?.amount) this.drawCarryBadge(center.x, y - 2, entity.carried.resource);
+      if (entity.workFlash > 0)
+        this.drawWorkFlash(
+          center.x,
+          center.y,
+          entity.facing,
+          cmd.resourceKind || entity.carried?.resource,
+        );
+      if (entity.carried?.amount)
+        this.drawCarryBadge(center.x, y - 2, entity.carried.resource);
     }
-    if ("hp" in entity && entity.hp && entity.maxHp && entity.hp < entity.maxHp) this.drawHealth(center.x, y - 8, entity.hp / entity.maxHp);
-    if (entity.kind === "building" && entity.gatherResource() && entity.maxAmount && entity.amount! < entity.maxAmount) this.drawHealth(center.x, y - 8, (entity.amount || 0) / entity.maxAmount);
-    if (entity.kind === "resource" && entity.maxAmount && entity.amount < entity.maxAmount) this.drawHealth(center.x, y - 5, entity.amount / entity.maxAmount);
+    if ("hp" in entity && entity.hp && entity.maxHp && entity.hp < entity.maxHp)
+      this.drawHealth(center.x, y - 8, entity.hp / entity.maxHp);
+    if (
+      entity.kind === "building" &&
+      entity.gatherResource() &&
+      entity.maxAmount &&
+      entity.amount! < entity.maxAmount
+    )
+      this.drawHealth(center.x, y - 8, (entity.amount || 0) / entity.maxAmount);
+    if (
+      entity.kind === "resource" &&
+      entity.maxAmount &&
+      entity.amount < entity.maxAmount
+    )
+      this.drawHealth(center.x, y - 5, entity.amount / entity.maxAmount);
   }
 
-  private updateFlashOverlay(key: string, base: Sprite, texture: Texture, flash: { amount: number; color: string }, active: Set<string>) {
+  private updateFlashOverlay(
+    key: string,
+    base: Sprite,
+    texture: Texture,
+    flash: { amount: number; color: string },
+    active: Set<string>,
+  ) {
     const fKey = `flash:${key}`;
     if (flash.amount <= 0 || flash.color === "red") {
       const existing = this.flashSprites.get(fKey);
@@ -275,11 +450,54 @@ export class Renderer {
   }
 
   private hideAllEntitySprites(active: Set<string>) {
-    for (const [key, sprite] of this.entitySprites) sprite.visible = active.has(key);
-    for (const [key, sprite] of this.flashSprites) sprite.visible = active.has(key);
+    for (const [key, sprite] of this.entitySprites)
+      sprite.visible = active.has(key);
+    for (const [key, sprite] of this.flashSprites)
+      sprite.visible = active.has(key);
   }
 
-  private spriteTexture(spriteName: SpriteName, rows: readonly string[], playerColor: string | undefined) {
+  private placeSprite(
+    key: string,
+    texture: Texture,
+    x: number,
+    y: number,
+    px: number,
+    flip: boolean,
+    alpha: number,
+    zIndex: number,
+  ) {
+    let sprite = this.entitySprites.get(key);
+    if (!sprite) {
+      sprite = new Sprite(texture);
+      sprite.roundPixels = true;
+      this.entitySprites.set(key, sprite);
+      this.entityLayer.addChild(sprite);
+    }
+    sprite.texture = texture;
+    sprite.scale.set(flip ? -px : px, px);
+    sprite.x = flip ? x + texture.width * px : x;
+    sprite.y = y;
+    sprite.alpha = alpha;
+    sprite.tint = 0xffffff;
+    sprite.visible = true;
+    sprite.zIndex = zIndex;
+    return sprite;
+  }
+
+  private pngTexture(url: string) {
+    const cached = this.textureCache.get(url);
+    if (cached) return cached;
+    const texture = Texture.from(url);
+    texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+    this.textureCache.set(url, texture);
+    return texture;
+  }
+
+  private spriteTexture(
+    spriteName: SpriteName,
+    rows: readonly string[],
+    playerColor: string | undefined,
+  ) {
     const key = `${spriteName}:${playerColor || ""}`;
     const cached = this.textureCache.get(key);
     if (cached) return cached;
@@ -291,7 +509,10 @@ export class Renderer {
       const row = rows[py]!;
       for (let px = 0; px < row.length; px += 1) {
         const part = row[px]!;
-        const color = part === "p" || part === "P" ? (playerColor || "#2f5d9a") : palette[part as keyof typeof palette];
+        const color =
+          part === "p" || part === "P"
+            ? playerColor || "#2f5d9a"
+            : palette[part as keyof typeof palette];
         if (!color) continue;
         ctx.fillStyle = color;
         ctx.fillRect(px, py, 1, 1);
@@ -306,17 +527,35 @@ export class Renderer {
   private drawEffects(state: GameState, view: ViewState) {
     const now = performance.now();
     for (const effect of state.effects || []) {
-      const life = Math.max(0, Math.min(1, (now - effect.createdAt) / effect.duration));
+      const life = Math.max(
+        0,
+        Math.min(1, (now - effect.createdAt) / effect.duration),
+      );
       if (effect.type !== "moveCross") continue;
       const p = isoToScreen(effect.x, effect.y, view.camera);
       const alpha = 1 - life;
       const px = worldPixel(view.camera.zoom || 1);
       this.overlayLayer.beginFill(0xd83f34, alpha);
       const s = px * 2;
-      this.overlayLayer.drawRect(Math.round(p.x - s / 2), Math.round(p.y - px * 5), s, px * 10);
-      this.overlayLayer.drawRect(Math.round(p.x - px * 5), Math.round(p.y - s / 2), px * 10, s);
+      this.overlayLayer.drawRect(
+        Math.round(p.x - s / 2),
+        Math.round(p.y - px * 5),
+        s,
+        px * 10,
+      );
+      this.overlayLayer.drawRect(
+        Math.round(p.x - px * 5),
+        Math.round(p.y - s / 2),
+        px * 10,
+        s,
+      );
       this.overlayLayer.beginFill(0xffd2c9, alpha);
-      this.overlayLayer.drawRect(Math.round(p.x - px / 2), Math.round(p.y - px / 2), px, px);
+      this.overlayLayer.drawRect(
+        Math.round(p.x - px / 2),
+        Math.round(p.y - px / 2),
+        px,
+        px,
+      );
       this.overlayLayer.endFill();
     }
   }
@@ -329,10 +568,20 @@ export class Renderer {
       const zoom = view.camera.zoom || 1;
       const rx = (source.range * TILE_W * zoom) / 2;
       const ry = (source.range * TILE_H * zoom) / 2;
-      if (center.x + rx < -80 || center.x - rx > window.innerWidth + 80 || center.y + ry < -80 || center.y - ry > window.innerHeight + 80) continue;
+      if (
+        center.x + rx < -80 ||
+        center.x - rx > window.innerWidth + 80 ||
+        center.y + ry < -80 ||
+        center.y - ry > window.innerHeight + 80
+      )
+        continue;
       const color = soundColor(source);
       const alpha = Math.min(0.24, 0.06 + source.strength * 0.025);
-      this.overlayLayer.lineStyle(Math.max(1, Math.round(2 * zoom)), color, Math.min(0.9, alpha * 3));
+      this.overlayLayer.lineStyle(
+        Math.max(1, Math.round(2 * zoom)),
+        color,
+        Math.min(0.9, alpha * 3),
+      );
       this.overlayLayer.beginFill(color, alpha);
       this.overlayLayer.drawEllipse(center.x, center.y, rx, ry);
       this.overlayLayer.endFill();
@@ -352,9 +601,21 @@ export class Renderer {
     this.overlayLayer.endFill();
   }
 
-  private drawSelectionMarker(entity: RenderEntity, camera: CameraState, x: number, y: number, color: string) {
+  private drawSelectionMarker(
+    entity: RenderEntity,
+    camera: CameraState,
+    x: number,
+    y: number,
+    color: string,
+  ) {
     if (entity.kind === "building" || entity.kind === "ruin") {
-      this.drawPixelFootprint(entity.x, entity.y, entity.size || 1, camera, color);
+      this.drawPixelFootprint(
+        entity.x,
+        entity.y,
+        entity.size || 1,
+        camera,
+        color,
+      );
       return;
     }
     const px = worldPixel(this.currentZoom || 1);
@@ -363,7 +624,13 @@ export class Renderer {
     this.drawPixelDiamond(x, y, rx, ry, px, hexToNumber(color));
   }
 
-  private drawPixelFootprint(tileX: number, tileY: number, size: number, camera: CameraState, color: string) {
+  private drawPixelFootprint(
+    tileX: number,
+    tileY: number,
+    size: number,
+    camera: CameraState,
+    color: string,
+  ) {
     const top = isoToScreen(tileX - 0.5, tileY - 0.5, camera);
     const right = isoToScreen(tileX + size - 0.5, tileY - 0.5, camera);
     const bottom = isoToScreen(tileX + size - 0.5, tileY + size - 0.5, camera);
@@ -376,20 +643,34 @@ export class Renderer {
     this.drawPixelDiamond(cx, cy, rx, ry, px, hexToNumber(color));
   }
 
-  private drawPixelDiamond(x: number, y: number, rx: number, ry: number, px: number, edge: number) {
+  private drawPixelDiamond(
+    x: number,
+    y: number,
+    rx: number,
+    ry: number,
+    px: number,
+    edge: number,
+  ) {
     const g = this.selectionLayer;
     g.beginFill(0x111813, 0.9);
     for (let row = -ry; row <= ry; row += 1) {
       if (Math.abs(row) === ry) continue;
       const width = Math.round(rx * (1 - Math.abs(row) / (ry + 1)));
-      for (let col = -width + 1; col <= width - 1; col += 1) g.drawRect(Math.round(x + col * px), Math.round(y + row * px), px, px);
+      for (let col = -width + 1; col <= width - 1; col += 1)
+        g.drawRect(Math.round(x + col * px), Math.round(y + row * px), px, px);
     }
     g.endFill();
     g.beginFill(edge, 1);
     for (let row = -ry; row <= ry; row += 1) {
       const width = Math.round(rx * (1 - Math.abs(row) / (ry + 1)));
       if (Math.abs(row) === ry) {
-        for (let col = -width; col <= width; col += 1) g.drawRect(Math.round(x + col * px), Math.round(y + row * px), px, px);
+        for (let col = -width; col <= width; col += 1)
+          g.drawRect(
+            Math.round(x + col * px),
+            Math.round(y + row * px),
+            px,
+            px,
+          );
         continue;
       }
       g.drawRect(Math.round(x - width * px), Math.round(y + row * px), px, px);
@@ -398,12 +679,30 @@ export class Renderer {
     g.endFill();
   }
 
-  private drawTeamAccent(entity: RenderEntity, centerX: number, topY: number, visualWidth: number, color: string | undefined) {
+  private drawTeamAccent(
+    entity: RenderEntity,
+    centerX: number,
+    topY: number,
+    visualWidth: number,
+    color: string | undefined,
+  ) {
     if (!color || !entity.ownerId) return;
     const px = worldPixel(this.currentZoom || 1);
     this.overlayLayer.beginFill(hexToNumber(color));
-    if (entity.kind === "building") this.overlayLayer.drawRect(Math.round(centerX - visualWidth * 0.18), Math.round(topY + px * 2), Math.max(px * 3, visualWidth * 0.16), px * 2);
-    else if (entity.kind === "unit") this.overlayLayer.drawRect(Math.round(centerX - px * 3), Math.round(topY + px * 7), px * 5, px * 2);
+    if (entity.kind === "building")
+      this.overlayLayer.drawRect(
+        Math.round(centerX - visualWidth * 0.18),
+        Math.round(topY + px * 2),
+        Math.max(px * 3, visualWidth * 0.16),
+        px * 2,
+      );
+    else if (entity.kind === "unit")
+      this.overlayLayer.drawRect(
+        Math.round(centerX - px * 3),
+        Math.round(topY + px * 7),
+        px * 5,
+        px * 2,
+      );
     this.overlayLayer.endFill();
   }
 
@@ -414,19 +713,42 @@ export class Renderer {
     this.overlayLayer.lineStyle();
   }
 
-  private drawWorkFlash(x: number, y: number, facing: "left" | "right" = "right", resource: "wood" | "ore" | "food" = "wood") {
+  private drawWorkFlash(
+    x: number,
+    y: number,
+    facing: "left" | "right" = "right",
+    resource: "wood" | "ore" | "food" = "wood",
+  ) {
     const dir = facing === "left" ? -1 : 1;
     const t = Math.floor(performance.now() / 120) % 2;
     const swingY = t ? -38 : -30;
-    this.overlayLayer.beginFill(resource === "ore" ? 0xc1b77b : resource === "food" ? 0x6fa04a : 0xe9bd59);
-    this.overlayLayer.drawRect(Math.round(x + dir * 8), Math.round(y + swingY), 14 * dir, 4);
+    this.overlayLayer.beginFill(
+      resource === "ore" ? 0xc1b77b : resource === "food" ? 0x6fa04a : 0xe9bd59,
+    );
+    this.overlayLayer.drawRect(
+      Math.round(x + dir * 8),
+      Math.round(y + swingY),
+      14 * dir,
+      4,
+    );
     this.overlayLayer.beginFill(resource === "ore" ? 0x687276 : 0x4b3728);
-    this.overlayLayer.drawRect(Math.round(x + dir * 18), Math.round(y + swingY + 4), 8 * dir, 4);
+    this.overlayLayer.drawRect(
+      Math.round(x + dir * 18),
+      Math.round(y + swingY + 4),
+      8 * dir,
+      4,
+    );
     this.overlayLayer.endFill();
   }
 
-  private drawCarryBadge(x: number, y: number, resource: "wood" | "ore" | "food") {
-    this.overlayLayer.beginFill(resource === "wood" ? 0x8b623e : resource === "ore" ? 0xc1b77b : 0x6fa04a);
+  private drawCarryBadge(
+    x: number,
+    y: number,
+    resource: "wood" | "ore" | "food",
+  ) {
+    this.overlayLayer.beginFill(
+      resource === "wood" ? 0x8b623e : resource === "ore" ? 0xc1b77b : 0x6fa04a,
+    );
     this.overlayLayer.drawRect(x - 5, y, 10, 6);
     this.overlayLayer.beginFill(0x111813);
     this.overlayLayer.drawRect(x - 3, y + 4, 6, 2);
@@ -450,11 +772,32 @@ export class Renderer {
     const mode = view.buildMode;
     if (!mode || !view.hoverTile) return;
     const size = buildingSize(mode);
-    const valid = canPlacePreview(state, mode, view.hoverTile.x, view.hoverTile.y);
-    this.drawFootprint(view.hoverTile.x, view.hoverTile.y, size, view.camera, valid ? "#e9bd59" : "#d84b3e", valid ? "rgb(233 189 89 / 0.28)" : "rgb(216 75 62 / 0.28)", 2);
+    const valid = canPlacePreview(
+      state,
+      mode,
+      view.hoverTile.x,
+      view.hoverTile.y,
+    );
+    this.drawFootprint(
+      view.hoverTile.x,
+      view.hoverTile.y,
+      size,
+      view.camera,
+      valid ? "#e9bd59" : "#d84b3e",
+      valid ? "rgb(233 189 89 / 0.28)" : "rgb(216 75 62 / 0.28)",
+      2,
+    );
   }
 
-  private drawFootprint(x: number, y: number, size: number, camera: CameraState, stroke: string, fill: string, lineWidth = 2) {
+  private drawFootprint(
+    x: number,
+    y: number,
+    size: number,
+    camera: CameraState,
+    stroke: string,
+    fill: string,
+    lineWidth = 2,
+  ) {
     const points = [
       isoToScreen(x - 0.5, y - 0.5, camera),
       isoToScreen(x + size - 0.5, y - 0.5, camera),
@@ -464,7 +807,8 @@ export class Renderer {
     this.overlayLayer.lineStyle(lineWidth, hexToNumber(stroke), 1);
     this.overlayLayer.beginFill(cssColorToNumber(fill), cssAlpha(fill));
     this.overlayLayer.moveTo(points[0]!.x, points[0]!.y);
-    for (let i = 1; i < points.length; i += 1) this.overlayLayer.lineTo(points[i]!.x, points[i]!.y);
+    for (let i = 1; i < points.length; i += 1)
+      this.overlayLayer.lineTo(points[i]!.x, points[i]!.y);
     this.overlayLayer.closePath();
     this.overlayLayer.endFill();
     this.overlayLayer.lineStyle();
@@ -479,11 +823,14 @@ export class Renderer {
 }
 
 function drawMinimapCanvas(state: GameState, view: ViewState) {
-  const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
+  const minimap = document.getElementById(
+    "minimap",
+  ) as HTMLCanvasElement | null;
   if (!minimap || !state.snapshot) return;
   const ctx = minimap.getContext("2d")!;
   const size = state.snapshot.map.size;
-  const project = (x: number, y: number) => minimapIsoToScreen(x, y, size, minimap.width, minimap.height);
+  const project = (x: number, y: number) =>
+    minimapIsoToScreen(x, y, size, minimap.width, minimap.height);
   ctx.clearRect(0, 0, minimap.width, minimap.height);
   ctx.fillStyle = "#101612";
   ctx.fillRect(0, 0, minimap.width, minimap.height);
@@ -510,14 +857,23 @@ function drawMinimapCanvas(state: GameState, view: ViewState) {
   }
   for (const building of Object.values(state.snapshot.buildings)) {
     const player = state.snapshot.players[building.ownerId];
-    const p = project(building.x + (building.size - 1) / 2, building.y + (building.size - 1) / 2);
+    const p = project(
+      building.x + (building.size - 1) / 2,
+      building.y + (building.size - 1) / 2,
+    );
     ctx.fillStyle = player?.color || "#d8d0c0";
-    ctx.fillRect(Math.round(p.x - 2), Math.round(p.y - 2), Math.max(3, building.size + 2), Math.max(3, building.size + 2));
+    ctx.fillRect(
+      Math.round(p.x - 2),
+      Math.round(p.y - 2),
+      Math.max(3, building.size + 2),
+      Math.max(3, building.size + 2),
+    );
   }
   for (const unit of Object.values(state.snapshot.units)) {
     const player = state.snapshot.players[unit.ownerId];
     const p = project(unit.x, unit.y);
-    ctx.fillStyle = player?.color || (unit.type === "zombie" ? "#416b38" : "#d8d0c0");
+    ctx.fillStyle =
+      player?.color || (unit.type === "zombie" ? "#416b38" : "#d8d0c0");
     ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
   }
   const corners = [
@@ -541,15 +897,30 @@ function drawMinimapCanvas(state: GameState, view: ViewState) {
 function spriteNameFor(entity: RenderEntity): SpriteName {
   if (entity.kind === "ruin") return "ruin";
   if (entity.kind === "resource") {
-    if (entity.type === "tree" || entity.type === "ore" || entity.type === "stump" || entity.type === "berry") return entity.type;
+    if (
+      entity.type === "tree" ||
+      entity.type === "ore" ||
+      entity.type === "stump" ||
+      entity.type === "berry"
+    )
+      return entity.type;
   }
   return entity.type as SpriteName;
 }
 
 function targetFlashFor(state: GameState, id: string) {
-  const effect = (state.effects || []).find((item): item is Extract<Effect, { type: "targetFlash" }> => item.type === "targetFlash" && item.targetId === id);
+  const effect = (state.effects || []).find(
+    (item): item is Extract<Effect, { type: "targetFlash" }> =>
+      item.type === "targetFlash" && item.targetId === id,
+  );
   if (!effect) return { amount: 0, color: "white" };
-  return { amount: Math.max(0, 1 - (performance.now() - effect.createdAt) / effect.duration), color: effect.color || "white" };
+  return {
+    amount: Math.max(
+      0,
+      1 - (performance.now() - effect.createdAt) / effect.duration,
+    ),
+    color: effect.color || "white",
+  };
 }
 
 function redTint(amount: number) {
@@ -560,21 +931,46 @@ function redTint(amount: number) {
 }
 
 function buildingSize(type: string) {
-  if (type in BUILDING_DEFS) return BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.size;
+  if (type in BUILDING_DEFS)
+    return BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.size;
   if (type === "townCenter") return 4;
   if (type === "barracks") return 3;
   if (type === "house") return 2;
-  if (type === "watchTower" || type === "lumberCamp" || type === "foodDepot" || type === "miningCamp") return 1;
+  if (
+    type === "watchTower" ||
+    type === "lumberCamp" ||
+    type === "foodDepot" ||
+    type === "miningCamp"
+  )
+    return 1;
   return 1;
 }
 
-function canPlacePreview(state: GameState, buildingType: string, x: number, y: number) {
+function canPlacePreview(
+  state: GameState,
+  buildingType: string,
+  x: number,
+  y: number,
+) {
   if (!state.snapshot) return false;
   const size = buildingSize(buildingType);
   const player = state.snapshot.players[state.playerId!];
   const cost = buildingCost(buildingType);
-  if (!Object.entries(cost).every(([resource, amount]) => (player?.resources?.[resource as ResourceType] || 0) >= (amount as number))) return false;
-  if (x < 0 || y < 0 || x + size > state.snapshot.map.size || y + size > state.snapshot.map.size) return false;
+  if (
+    !Object.entries(cost).every(
+      ([resource, amount]) =>
+        (player?.resources?.[resource as ResourceType] || 0) >=
+        (amount as number),
+    )
+  )
+    return false;
+  if (
+    x < 0 ||
+    y < 0 ||
+    x + size > state.snapshot.map.size ||
+    y + size > state.snapshot.map.size
+  )
+    return false;
   for (const building of Object.values(state.snapshot.buildings)) {
     if (rectsOverlap({ x, y, size }, building)) return false;
   }
@@ -587,30 +983,61 @@ function canPlacePreview(state: GameState, buildingType: string, x: number, y: n
 }
 
 function buildingCost(type: string) {
-  return type in BUILDING_DEFS ? BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.cost : {};
+  return type in BUILDING_DEFS
+    ? BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.cost
+    : {};
 }
 
-function rectsOverlap(a: { x: number; y: number; size: number }, b: { x: number; y: number; size: number }) {
-  return a.x < b.x + b.size && a.x + a.size > b.x && a.y < b.y + b.size && a.y + a.size > b.y;
+function rectsOverlap(
+  a: { x: number; y: number; size: number },
+  b: { x: number; y: number; size: number },
+) {
+  return (
+    a.x < b.x + b.size &&
+    a.x + a.size > b.x &&
+    a.y < b.y + b.size &&
+    a.y + a.size > b.y
+  );
 }
 
 function entityCenter(entity: RenderEntity, camera: CameraState) {
-  if (entity.kind === "building" || entity.kind === "ruin") return footprintCenter(entity.x, entity.y, entity.size || 1, camera);
-  return isoToScreen(entity.x + (entity.size || 0) / 2, entity.y + (entity.size || 0) / 2, camera);
+  if (entity.kind === "building" || entity.kind === "ruin")
+    return footprintCenter(entity.x, entity.y, entity.size || 1, camera);
+  return isoToScreen(
+    entity.x + (entity.size || 0) / 2,
+    entity.y + (entity.size || 0) / 2,
+    camera,
+  );
 }
 
 function isEntityNearViewport(entity: RenderEntity, camera: CameraState) {
   const size = entity.size || 1;
   const p = isoToScreen(entity.x + size / 2, entity.y + size / 2, camera);
   const margin = 260;
-  return p.x >= -margin && p.x <= window.innerWidth + margin && p.y >= -margin && p.y <= window.innerHeight + margin;
+  return (
+    p.x >= -margin &&
+    p.x <= window.innerWidth + margin &&
+    p.y >= -margin &&
+    p.y <= window.innerHeight + margin
+  );
 }
 
-function footprintCenter(x: number, y: number, size: number, camera: CameraState) {
+function footprintCenter(
+  x: number,
+  y: number,
+  size: number,
+  camera: CameraState,
+) {
   return isoToScreen(x + (size - 1) / 2, y + (size - 1) / 2, camera);
 }
 
-function spriteTopY(entity: RenderEntity, centerY: number, bounds: { maxY: number }, scale: number, zoom: number) {
+function spriteTopY(
+  entity: RenderEntity,
+  centerY: number,
+  bounds: { maxY: number },
+  scale: number,
+  zoom: number,
+) {
   const footprintBottom = centerY + ((entity.size || 0) * TILE_H * zoom) / 2;
   return footprintBottom - (bounds.maxY + 1) * scale;
 }
@@ -623,7 +1050,13 @@ function shade(hex: string, factor: number) {
   return `rgb(${r} ${g} ${b})`;
 }
 
-function isExplored(visibility: ClientSnapshot["visibility"], x: number, y: number, size: number, mapSize: number) {
+function isExplored(
+  visibility: ClientSnapshot["visibility"],
+  x: number,
+  y: number,
+  size: number,
+  mapSize: number,
+) {
   const explored = visibility?.exploredSet;
   if (!explored) return false;
   for (let yy = Math.floor(y); yy < Math.ceil(y + size); yy += 1) {
@@ -649,14 +1082,34 @@ function visibleTileBounds(size: number, camera: CameraState) {
   const corners = [
     screenToIsoLocal(-margin, -margin, camera),
     screenToIsoLocal(window.innerWidth + margin, -margin, camera),
-    screenToIsoLocal(window.innerWidth + margin, window.innerHeight + margin, camera),
+    screenToIsoLocal(
+      window.innerWidth + margin,
+      window.innerHeight + margin,
+      camera,
+    ),
     screenToIsoLocal(-margin, window.innerHeight + margin, camera),
   ];
   return {
-    minX: clampInt(Math.floor(Math.min(...corners.map((point) => point.x))) - 3, 0, size - 1),
-    maxX: clampInt(Math.ceil(Math.max(...corners.map((point) => point.x))) + 3, 0, size - 1),
-    minY: clampInt(Math.floor(Math.min(...corners.map((point) => point.y))) - 3, 0, size - 1),
-    maxY: clampInt(Math.ceil(Math.max(...corners.map((point) => point.y))) + 3, 0, size - 1),
+    minX: clampInt(
+      Math.floor(Math.min(...corners.map((point) => point.x))) - 3,
+      0,
+      size - 1,
+    ),
+    maxX: clampInt(
+      Math.ceil(Math.max(...corners.map((point) => point.x))) + 3,
+      0,
+      size - 1,
+    ),
+    minY: clampInt(
+      Math.floor(Math.min(...corners.map((point) => point.y))) - 3,
+      0,
+      size - 1,
+    ),
+    maxY: clampInt(
+      Math.ceil(Math.max(...corners.map((point) => point.y))) + 3,
+      0,
+      size - 1,
+    ),
   };
 }
 
@@ -664,7 +1117,13 @@ function clampInt(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function minimapIsoToScreen(x: number, y: number, size: number, width: number, height: number) {
+function minimapIsoToScreen(
+  x: number,
+  y: number,
+  size: number,
+  width: number,
+  height: number,
+) {
   const usableW = width - 12;
   const usableH = height - 12;
   return {

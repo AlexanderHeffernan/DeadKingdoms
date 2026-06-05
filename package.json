@@ -6,9 +6,9 @@
   "type": "module",
   "scripts": {
     "build:server": "tsc -p tsconfig.json",
-    "build:client": "node -e \"require('node:fs').rmSync('dist/client', { recursive: true, force: true })\" && esbuild public/js/app.ts --bundle --format=esm --target=es2020 --minify --outfile=dist/client/public/js/app.js",
+    "build:client": "node -e \"require('node:fs').rmSync('dist/client', { recursive: true, force: true })\" && esbuild public/js/app.ts --bundle --format=esm --target=es2020 --minify --loader:.png=dataurl --outfile=dist/client/public/js/app.js",
     "build": "npm run build:server && npm run build:client",
-    "dev:client": "node -e \"require('node:fs').rmSync('dist/client', { recursive: true, force: true })\" && esbuild public/js/app.ts --bundle --format=esm --target=es2020 --sourcemap --outfile=dist/client/public/js/app.js",
+    "dev:client": "node -e \"require('node:fs').rmSync('dist/client', { recursive: true, force: true })\" && esbuild public/js/app.ts --bundle --format=esm --target=es2020 --sourcemap --loader:.png=dataurl --outfile=dist/client/public/js/app.js",
     "dev": "npm run build:server && npm run dev:client && node dist/server/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "start": "node dist/server/index.js"
