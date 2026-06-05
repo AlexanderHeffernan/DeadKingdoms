@@ -13,7 +13,6 @@
     "test:pathing": "npm run build:server && node --test dist/server/pathing.test.js",
     "bench:pathing": "npm run build:server && node dist/server/pathing.benchmark.js",
     "bench:zombies": "npm run build:server && node dist/server/zombieDirector.benchmark.js",
-    "lint": "npx editorconfig-checker -exclude 'node_modules|dist'",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "start": "node dist/server/index.js"
   },
