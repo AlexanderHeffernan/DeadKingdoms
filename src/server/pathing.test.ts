@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Unit, World } from "../shared/types.js";
-import { findPath, isWalkable, resolveUnitSeparation } from "./pathing.js";
+import { findPath, isWalkable, moveAroundSmallObstacle, resolveUnitSeparation } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 	const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -136,6 +136,42 @@ test("resolveUnitSeparation does not move a single unit by comparing it with its
 
 	resolveUnitSeparation(world);
 
+	assert.equal(unit.x, 10.5);
+	assert.equal(unit.y, 10.5);
+});
+
+test("moveAroundSmallObstacle sidesteps an isolated blocked tile", () => {
+	const world = makeWorld([{ x: 11, y: 10 }]);
+	const unit = makeUnit(10.5, 10.5, "u-a");
+
+	const blocked = moveAroundSmallObstacle(world, unit, { x: 14.5, y: 10.5 }, 1);
+
+	assert.equal(blocked, false);
+	assert.notEqual(unit.y, 10.5);
+	assert.equal(isWalkable(world, Math.floor(unit.x), Math.floor(unit.y)), true);
+});
+
+test("moveAroundSmallObstacle escapes when a unit starts inside an occupied tile", () => {
+	const world = makeWorld([{ x: 10, y: 10 }]);
+	const unit = makeUnit(10.5, 10.5, "u-a");
+
+	const blocked = moveAroundSmallObstacle(world, unit, { x: 14.5, y: 10.5 }, 1);
+
+	assert.equal(blocked, false);
+	assert.equal(isWalkable(world, Math.floor(unit.x), Math.floor(unit.y)), true);
+});
+
+test("moveAroundSmallObstacle does not path around a wall-like blockage", () => {
+	const world = makeWorld([
+		{ x: 11, y: 9 },
+		{ x: 11, y: 10 },
+		{ x: 11, y: 11 },
+	]);
+	const unit = makeUnit(10.5, 10.5, "u-a");
+
+	const blocked = moveAroundSmallObstacle(world, unit, { x: 14.5, y: 10.5 }, 1);
+
+	assert.equal(blocked, true);
 	assert.equal(unit.x, 10.5);
 	assert.equal(unit.y, 10.5);
 });

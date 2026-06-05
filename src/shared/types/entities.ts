@@ -61,9 +61,9 @@ export interface Unit extends BaseEntity {
 	vision?: number;
 	soundTarget?: Vec2 | null;
 	wanderTarget?: Vec2 | null;
-	investigateTarget?: Vec2 | null;
-	investigateTime?: number;
 	retargetIn?: number;
+	hordeId?: string | null;
+	hordeOffset?: Vec2 | null;
 }
 
 /** Pending unit-production entry for train-capable buildings. */

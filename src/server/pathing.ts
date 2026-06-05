@@ -15,6 +15,106 @@ export function moveUnit(world: World, unit: Unit, target: { x: number; y: numbe
 	return arrived;
 }
 
+export function moveAroundSmallObstacle(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
+	const before = { x: unit.x, y: unit.y };
+	if (occupied(world, Math.floor(before.x), Math.floor(before.y)) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
+	const arrived = moveToward(unit, target, maxStep);
+	if (!isUnitBlocked(world, unit, target)) return arrived;
+	unit.x = before.x;
+	unit.y = before.y;
+	if (!isSmallObstacleAhead(world, before, target)) return true;
+
+	for (const sidestepTarget of sidestepTargets(before, target)) {
+		const sidestepBefore = { x: unit.x, y: unit.y };
+		moveToward(unit, sidestepTarget, maxStep);
+		if (!isUnitBlocked(world, unit, sidestepTarget)) return false;
+		unit.x = sidestepBefore.x;
+		unit.y = sidestepBefore.y;
+	}
+	return true;
+}
+
+function escapeOccupiedTile(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
+	const tile = { x: Math.floor(unit.x), y: Math.floor(unit.y) };
+	const candidates = escapeDirections(unit, target);
+	for (const direction of candidates) {
+		const escapeTarget = {
+			x: unit.x + direction.x,
+			y: unit.y + direction.y,
+		};
+		const before = { x: unit.x, y: unit.y };
+		moveToward(unit, escapeTarget, maxStep);
+		if (!occupied(world, Math.floor(unit.x), Math.floor(unit.y))) return true;
+		unit.x = before.x;
+		unit.y = before.y;
+	}
+	for (const direction of candidates) {
+		const x = tile.x + direction.x;
+		const y = tile.y + direction.y;
+		if (occupied(world, x, y)) continue;
+		unit.x = clamp(x + 0.5, 0.2, MAP_SIZE - 0.2);
+		unit.y = clamp(y + 0.5, 0.2, MAP_SIZE - 0.2);
+		return true;
+	}
+	return false;
+}
+
+function escapeDirections(from: { x: number; y: number }, target: { x: number; y: number }) {
+	const dx = target.x - from.x;
+	const dy = target.y - from.y;
+	const length = Math.hypot(dx, dy) || 1;
+	const forward = { x: Math.round(dx / length), y: Math.round(dy / length) };
+	const directions = [
+		forward,
+		{ x: -forward.y, y: forward.x },
+		{ x: forward.y, y: -forward.x },
+		{ x: forward.x - forward.y, y: forward.y + forward.x },
+		{ x: forward.x + forward.y, y: forward.y - forward.x },
+		{ x: -forward.x, y: -forward.y },
+		{ x: 1, y: 0 },
+		{ x: -1, y: 0 },
+		{ x: 0, y: 1 },
+		{ x: 0, y: -1 },
+	];
+	return directions.filter((direction, index) => {
+		if (direction.x === 0 && direction.y === 0) return false;
+		return directions.findIndex((other) => other.x === direction.x && other.y === direction.y) === index;
+	});
+}
+
+function isSmallObstacleAhead(world: World, from: { x: number; y: number }, target: { x: number; y: number }): boolean {
+	const dx = target.x - from.x;
+	const dy = target.y - from.y;
+	const length = Math.hypot(dx, dy) || 1;
+	const ahead = {
+		x: Math.floor(from.x + (dx / length) * 0.75),
+		y: Math.floor(from.y + (dy / length) * 0.75),
+	};
+	if (!occupied(world, ahead.x, ahead.y)) return false;
+	let occupiedNeighbors = 0;
+	for (let y = ahead.y - 1; y <= ahead.y + 1; y += 1) {
+		for (let x = ahead.x - 1; x <= ahead.x + 1; x += 1) {
+			if (occupied(world, x, y)) occupiedNeighbors += 1;
+		}
+	}
+	return occupiedNeighbors <= 2;
+}
+
+function sidestepTargets(from: { x: number; y: number }, target: { x: number; y: number }) {
+	const dx = target.x - from.x;
+	const dy = target.y - from.y;
+	const length = Math.hypot(dx, dy) || 1;
+	const nx = dx / length;
+	const ny = dy / length;
+	const side = Math.sin(from.x * 12.9898 + from.y * 78.233) > 0 ? 1 : -1;
+	const forward = 0.35;
+	const lateral = 1.2;
+	return [
+		{ x: from.x + nx * forward + -ny * lateral * side, y: from.y + ny * forward + nx * lateral * side },
+		{ x: from.x + nx * forward + ny * lateral * side, y: from.y + ny * forward + -nx * lateral * side },
+	];
+}
+
 const SEPARATION_CELL_SIZE = 1;
 const MIN_SEPARATION_DISTANCE = 0.48;
 
