@@ -1,3 +1,4 @@
+import { Application, Container, Graphics, SCALE_MODES, Sprite, Texture } from "pixi.js";
 import { SCALE, TILE_H, TILE_W } from "./constants.js";
 import { BUILDING_DEFS } from "../../src/shared/buildingRegistry.js";
 import { isoToScreen } from "./iso.js";
@@ -18,124 +19,216 @@ const GROUND_TILE = [
   "....bbbbbbbb....",
   "......bbbb......",
 ];
-const GROUND_PALETTE = {
-  ".": null,
-  a: "#386846",
-  b: "#2f5739",
-};
+
+type RenderEntity = Unit | Building | ResourceNode | Ruin;
 
 export class Renderer {
   canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
+  app: Application;
+  background: Graphics;
+  terrainLayer: Container;
+  entityLayer: Container;
+  overlayLayer: Graphics;
   currentZoom: number;
+
+  private tilePool: Sprite[] = [];
+  private entitySprites = new Map<string, Sprite>();
+  private textureCache = new Map<string, Texture>();
+  private tileTextureCache = new Map<string, Texture>();
+  private lastMinimapDraw = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Missing canvas context");
-    this.ctx = ctx;
-    this.ctx.imageSmoothingEnabled = false;
+    this.app = new Application({
+      view: canvas,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      resolution: Math.max(1, window.devicePixelRatio || 1),
+      autoDensity: true,
+      autoStart: false,
+      antialias: false,
+      backgroundAlpha: 1,
+    });
+    this.app.renderer.background.color = 0x315f3c;
+    this.background = new Graphics();
+    this.terrainLayer = new Container();
+    this.entityLayer = new Container();
+    this.entityLayer.sortableChildren = true;
+    this.overlayLayer = new Graphics();
+    this.app.stage.addChild(this.background, this.terrainLayer, this.entityLayer, this.overlayLayer);
     this.currentZoom = 1;
   }
 
   resize() {
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    this.canvas.width = width * dpr;
-    this.canvas.height = height * dpr;
-    this.canvas.style.width = `${width}px`;
-    this.canvas.style.height = `${height}px`;
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.ctx.imageSmoothingEnabled = false;
+    this.app.renderer.resolution = Math.max(1, window.devicePixelRatio || 1);
+    this.app.renderer.resize(window.innerWidth, window.innerHeight);
   }
 
   draw(state: GameState, view: ViewState) {
-    const { ctx } = this;
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = state.snapshot?.visibility ? "#111813" : "#315f3c";
-    ctx.fillRect(0, 0, width, height);
-    if (!state.snapshot) return;
     this.currentZoom = view.camera.zoom || 1;
+    this.drawBackground(state);
+    this.overlayLayer.clear();
+    if (!state.snapshot) {
+      this.hideAllEntitySprites(new Set());
+      this.hideUnusedTiles(0);
+      this.app.render();
+      return;
+    }
+
     this.drawTiles(state.snapshot.map.size, view.camera, state.snapshot.visibility);
-    this.drawLastSeen(state, view);
-
-    const entities = [
-      ...Object.values(state.snapshot.resources),
-      ...Object.values(state.snapshot.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
-      ...Object.values(state.snapshot.buildings),
-      ...Object.values(state.snapshot.units),
-    ].filter((entity) => isEntityNearViewport(entity, view.camera)).sort((a, b) => (a.x + a.y) - (b.x + b.y));
-
-    for (const entity of entities) this.drawEntity(entity, state, view);
+    const active = new Set<string>();
+    this.drawLastSeen(state, view, active);
+    this.drawEntities(state, view, active);
+    this.hideAllEntitySprites(active);
     this.drawEffects(state, view);
     this.drawPlacement(view, state);
     this.drawSelectionBox(view);
     this.drawMinimap(state, view);
+    this.app.render();
   }
 
-  drawTiles(size: number, camera: CameraState, visibility: ClientSnapshot["visibility"]) {
+  private drawBackground(state: GameState) {
+    const color = state.snapshot?.visibility ? 0x111813 : 0x315f3c;
+    this.app.renderer.background.color = color;
+    this.background.clear();
+    this.background.beginFill(color);
+    this.background.drawRect(0, 0, window.innerWidth, window.innerHeight);
+    this.background.endFill();
+  }
+
+  private drawTiles(size: number, camera: CameraState, visibility: ClientSnapshot["visibility"]) {
     const exploredSet = visibility?.exploredSet;
     const visibleSet = visibility?.visibleSet;
     const bounds = visibleTileBounds(size, camera);
+    let index = 0;
     for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
       for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
         const key = y * size + x;
         if (visibility && !exploredSet?.has(key)) continue;
         const screen = isoToScreen(x, y, camera);
-        if (screen.x < -80 || screen.x > window.innerWidth + 80 || screen.y < -50 || screen.y > window.innerHeight + 80) continue;
+        if (screen.x < -90 || screen.x > window.innerWidth + 90 || screen.y < -60 || screen.y > window.innerHeight + 60) continue;
         const visible = !visibility || (visibleSet?.has(key) ?? false);
         const color = visible ? tileColors[(x + y) % tileColors.length]! : "#1e3025";
-        this.drawTile(screen.x, screen.y, color, visible);
+        const tile = this.tileAt(index++);
+        tile.texture = this.tileTexture(color, visible);
+        tile.scale.set(this.currentZoom);
+        tile.x = Math.round(screen.x - (tile.texture.width * this.currentZoom) / 2);
+        tile.y = Math.round(screen.y - (tile.texture.height * this.currentZoom) / 2);
+        tile.visible = true;
       }
     }
+    this.hideUnusedTiles(index);
   }
 
-  drawTile(cx: number, cy: number, color: string, visible: boolean) {
-    const zoom = this.currentZoom || 1;
-    const halfW = (TILE_W * zoom) / 2 + 1.5;
-    const halfH = (TILE_H * zoom) / 2 + 1.5;
-    this.ctx.fillStyle = visible ? color : "#1e3025";
-    this.ctx.beginPath();
-    this.ctx.moveTo(cx, cy - halfH);
-    this.ctx.lineTo(cx + halfW, cy);
-    this.ctx.lineTo(cx, cy + halfH);
-    this.ctx.lineTo(cx - halfW, cy);
-    this.ctx.closePath();
-    this.ctx.fill();
-    const px = worldPixel(this.currentZoom || 1);
+  private tileAt(index: number) {
+    let tile = this.tilePool[index];
+    if (!tile) {
+      tile = new Sprite();
+      tile.roundPixels = true;
+      this.tilePool[index] = tile;
+      this.terrainLayer.addChild(tile);
+    }
+    return tile;
+  }
+
+  private hideUnusedTiles(start: number) {
+    for (let i = start; i < this.tilePool.length; i += 1) this.tilePool[i]!.visible = false;
+  }
+
+  private tileTexture(color: string, visible: boolean) {
+    const key = `${color}:${visible ? 1 : 0}`;
+    const cached = this.tileTextureCache.get(key);
+    if (cached) return cached;
+    const canvas = document.createElement("canvas");
+    canvas.width = TILE_W + 4;
+    canvas.height = TILE_H + 4;
+    const ctx = canvas.getContext("2d")!;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    ctx.fillStyle = visible ? color : "#1e3025";
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - TILE_H / 2);
+    ctx.lineTo(cx + TILE_W / 2, cy);
+    ctx.lineTo(cx, cy + TILE_H / 2);
+    ctx.lineTo(cx - TILE_W / 2, cy);
+    ctx.closePath();
+    ctx.fill();
+    const px = SCALE;
     const startX = Math.round(cx - 8 * px);
     const startY = Math.round(cy - 4 * px);
     for (let y = 0; y < GROUND_TILE.length; y += 1) {
-      const groundRow = GROUND_TILE[y]!;
-      for (let x = 0; x < groundRow.length; x += 1) {
-        const key = groundRow[x]!;
-        if (key === ".") continue;
-        this.ctx.fillStyle = visible ? shade(color, key === "a" ? 1.06 : 0.88) : color;
-        this.ctx.fillRect(startX + x * px, startY + y * px, px, px);
+      const row = GROUND_TILE[y]!;
+      for (let x = 0; x < row.length; x += 1) {
+        const part = row[x]!;
+        if (part === ".") continue;
+        ctx.fillStyle = visible ? shade(color, part === "a" ? 1.06 : 0.88) : color;
+        ctx.fillRect(startX + x * px, startY + y * px, px, px);
       }
     }
+    const texture = Texture.from(canvas);
+    texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+    this.tileTextureCache.set(key, texture);
+    return texture;
   }
 
-  drawEntity(entity: RenderEntity, state: GameState, view: ViewState) {
+  private drawEntities(state: GameState, view: ViewState, active: Set<string>) {
+    const snap = state.snapshot!;
+    const entities = [
+      ...Object.values(snap.resources),
+      ...Object.values(snap.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
+      ...Object.values(snap.buildings),
+      ...Object.values(snap.units),
+    ].filter((entity) => isEntityNearViewport(entity, view.camera));
+    for (const entity of entities) this.updateEntitySprite(entity, state, view, active, 1, entity.id);
+  }
+
+  private drawLastSeen(state: GameState, view: ViewState, active: Set<string>) {
+    if (!state.snapshot?.visibility) return;
+    const visibleIds = new Set([
+      ...Object.keys(state.snapshot.buildings),
+      ...Object.keys(state.snapshot.resources),
+      ...Object.keys(state.snapshot.ruins),
+    ]);
+    const mapSize = state.snapshot.map.size;
+    const remembered = [
+      ...Object.values(state.lastSeen.buildings),
+      ...Object.values(state.lastSeen.resources),
+      ...Object.values(state.lastSeen.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
+    ].filter((entity) => !visibleIds.has(entity.id) && isExplored(state.snapshot!.visibility, entity.x, entity.y, entity.size || 1, mapSize) && isEntityNearViewport(entity, view.camera));
+    for (const entity of remembered) this.updateEntitySprite(entity, state, view, active, 0.35, `last:${entity.id}`);
+  }
+
+  private updateEntitySprite(entity: RenderEntity, state: GameState, view: ViewState, active: Set<string>, alpha: number, key: string) {
     const spriteName = spriteNameFor(entity);
     const rows = sprites[spriteName];
     if (!rows) return;
     const center = entityCenter(entity, view.camera);
-    const scale = entityScale(entity, view.camera.zoom || 1);
+    const px = worldPixel(view.camera.zoom || 1);
     const bounds = spriteBounds(rows);
-    const visualWidth = bounds.width * scale;
-    const x = Math.round(center.x - visualWidth / 2 - bounds.minX * scale);
-    const y = Math.round(spriteTopY(entity, center.y, bounds, scale, view.camera.zoom || 1));
-    const snap = state.snapshot!;
-    const ownerId = entity.ownerId;
-    const ownerColor = ownerId == null ? undefined : snap.players[ownerId]?.color;
-    if (view.selectedIds.has(entity.id)) this.drawSelectionMarker(entity, view.camera, center.x, center.y, ownerColor || "#f4efe6");
-    const flash = targetFlashFor(state, entity.id);
+    const texture = this.spriteTexture(spriteName, rows, entity.ownerId ? state.snapshot?.players[entity.ownerId]?.color : undefined);
+    let sprite = this.entitySprites.get(key);
+    if (!sprite) {
+      sprite = new Sprite(texture);
+      sprite.roundPixels = true;
+      this.entitySprites.set(key, sprite);
+      this.entityLayer.addChild(sprite);
+    }
+    const visualWidth = bounds.width * px;
+    const x = Math.round(center.x - visualWidth / 2 - bounds.minX * px);
+    const y = Math.round(spriteTopY(entity, center.y, bounds, px, view.camera.zoom || 1));
     const flip = "facing" in entity && entity.facing === "left";
-    this.drawSprite(rows, x, y, ownerColor, flip, scale, flash.amount, flash.color);
+    sprite.texture = texture;
+    sprite.scale.set(flip ? -px : px, px);
+    sprite.x = flip ? x + texture.width * px : x;
+    sprite.y = y;
+    sprite.alpha = alpha;
+    sprite.visible = true;
+    sprite.zIndex = (entity.x + entity.y) * 100 + (entity.kind === "unit" ? 2 : entity.kind === "building" ? 1 : 0);
+    sprite.tint = tintForFlash(targetFlashFor(state, entity.id));
+    active.add(key);
+
+    const ownerColor = entity.ownerId == null ? undefined : state.snapshot?.players[entity.ownerId]?.color;
+    if (view.selectedIds.has(entity.id)) this.drawSelectionMarker(entity, view.camera, center.x, center.y, ownerColor || "#f4efe6");
     this.drawTeamAccent(entity, center.x, y, visualWidth, ownerColor);
     if ("attackFlash" in entity && entity.attackFlash > 0) this.drawAttackFlash(center.x, center.y, ownerColor || "#f4efe6");
     if (entity.kind === "unit") {
@@ -148,60 +241,35 @@ export class Renderer {
     if (entity.kind === "resource" && entity.maxAmount && entity.amount < entity.maxAmount) this.drawHealth(center.x, y - 5, entity.amount / entity.maxAmount);
   }
 
-  drawSprite(rows: readonly string[], x: number, y: number, playerColor: string | undefined, flip = false, scale = SCALE, flash = 0, flashColor = "white") {
-    const { ctx } = this;
-    if (flip) {
-      ctx.save();
-      ctx.translate(x + rows[0]!.length * scale, y);
-      ctx.scale(-1, 1);
-      x = 0;
-      y = 0;
-    }
+  private hideAllEntitySprites(active: Set<string>) {
+    for (const [key, sprite] of this.entitySprites) sprite.visible = active.has(key);
+  }
+
+  private spriteTexture(spriteName: SpriteName, rows: readonly string[], playerColor: string | undefined) {
+    const key = `${spriteName}:${playerColor || ""}`;
+    const cached = this.textureCache.get(key);
+    if (cached) return cached;
+    const canvas = document.createElement("canvas");
+    canvas.width = rows[0]?.length || 1;
+    canvas.height = rows.length || 1;
+    const ctx = canvas.getContext("2d")!;
     for (let py = 0; py < rows.length; py += 1) {
-      const spriteRow = rows[py]!;
-      for (let px = 0; px < spriteRow.length; px += 1) {
-        const key = spriteRow[px]!;
-        let color = key === "p" || key === "P" ? (key === "P" ? lighten(playerColor) : playerColor) : palette[key as keyof typeof palette];
+      const row = rows[py]!;
+      for (let px = 0; px < row.length; px += 1) {
+        const part = row[px]!;
+        const color = part === "p" || part === "P" ? (playerColor || "#2f5d9a") : palette[part as keyof typeof palette];
         if (!color) continue;
-        if (flash > 0) color = flashColor === "red" ? redFlash(color, flash) : brighten(color, 1 + flash * 1.35);
         ctx.fillStyle = color;
-        ctx.fillRect(x + px * scale, y + py * scale, scale, scale);
+        ctx.fillRect(px, py, 1, 1);
       }
     }
-    if (flip) ctx.restore();
+    const texture = Texture.from(canvas);
+    texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+    this.textureCache.set(key, texture);
+    return texture;
   }
 
-  drawCarryBadge(x: number, y: number, resource: "wood" | "ore" | "food") {
-    const { ctx } = this;
-    ctx.fillStyle = resource === "wood" ? "#8b623e" : resource === "ore" ? "#c1b77b" : "#6fa04a";
-    ctx.fillRect(x - 5, y, 10, 6);
-    ctx.fillStyle = "#111813";
-    ctx.fillRect(x - 3, y + 4, 6, 2);
-  }
-
-  drawAttackFlash(x: number, y: number, color: string) {
-    const { ctx } = this;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(x - 18, y - 26);
-    ctx.lineTo(x + 18, y - 8);
-    ctx.stroke();
-  }
-
-  drawWorkFlash(x: number, y: number, facing: "left" | "right" = "right", resource: "wood" | "ore" | "food" = "wood") {
-    const { ctx } = this;
-    const dir = facing === "left" ? -1 : 1;
-    const t = Math.floor(performance.now() / 120) % 2;
-    const swingY = t ? -38 : -30;
-    ctx.fillStyle = resource === "ore" ? "#c1b77b" : resource === "food" ? "#6fa04a" : "#e9bd59";
-    ctx.fillRect(Math.round(x + dir * 8), Math.round(y + swingY), 14 * dir, 4);
-    ctx.fillStyle = resource === "ore" ? "#687276" : "#4b3728";
-    ctx.fillRect(Math.round(x + dir * 18), Math.round(y + swingY + 4), 8 * dir, 4);
-  }
-
-  drawEffects(state: GameState, view: ViewState) {
-    const { ctx } = this;
+  private drawEffects(state: GameState, view: ViewState) {
     const now = performance.now();
     for (const effect of state.effects || []) {
       const life = Math.max(0, Math.min(1, (now - effect.createdAt) / effect.duration));
@@ -209,203 +277,178 @@ export class Renderer {
       const p = isoToScreen(effect.x, effect.y, view.camera);
       const alpha = 1 - life;
       const px = worldPixel(view.camera.zoom || 1);
-      ctx.save();
-      ctx.globalAlpha *= alpha;
-      ctx.fillStyle = "#d83f34";
+      this.overlayLayer.beginFill(0xd83f34, alpha);
       const s = px * 2;
-      ctx.fillRect(Math.round(p.x - s / 2), Math.round(p.y - px * 5), s, px * 10);
-      ctx.fillRect(Math.round(p.x - px * 5), Math.round(p.y - s / 2), px * 10, s);
-      ctx.fillStyle = "#ffd2c9";
-      ctx.fillRect(Math.round(p.x - px / 2), Math.round(p.y - px / 2), px, px);
-      ctx.restore();
+      this.overlayLayer.drawRect(Math.round(p.x - s / 2), Math.round(p.y - px * 5), s, px * 10);
+      this.overlayLayer.drawRect(Math.round(p.x - px * 5), Math.round(p.y - s / 2), px * 10, s);
+      this.overlayLayer.beginFill(0xffd2c9, alpha);
+      this.overlayLayer.drawRect(Math.round(p.x - px / 2), Math.round(p.y - px / 2), px, px);
+      this.overlayLayer.endFill();
     }
   }
 
-  drawHealth(x: number, y: number, pct: number) {
-    const { ctx } = this;
-    ctx.fillStyle = "#1b1715";
-    ctx.fillRect(x - 18, y, 36, 5);
-    ctx.fillStyle = pct > 0.45 ? "#5fbf64" : "#d8714f";
-    ctx.fillRect(x - 17, y + 1, Math.max(1, 34 * pct), 3);
+  private drawHealth(x: number, y: number, pct: number) {
+    this.overlayLayer.beginFill(0x1b1715);
+    this.overlayLayer.drawRect(x - 18, y, 36, 5);
+    this.overlayLayer.beginFill(pct > 0.45 ? 0x5fbf64 : 0xd8714f);
+    this.overlayLayer.drawRect(x - 17, y + 1, Math.max(1, 34 * pct), 3);
+    this.overlayLayer.endFill();
   }
 
-  drawSelectionMarker(entity: RenderEntity, camera: CameraState, x: number, y: number, color: string) {
+  private drawSelectionMarker(entity: RenderEntity, camera: CameraState, x: number, y: number, color: string) {
     if (entity.kind === "building" || entity.kind === "ruin") {
       this.drawFootprint(entity.x, entity.y, entity.size || 1, camera, color, "rgb(17 24 19 / 0.82)", 3);
       return;
     }
-    const zoom = this.currentZoom || 1;
-    const px = worldPixel(zoom);
-    const size = entity.size || 0.8;
-    const rx = Math.max(5, Math.round(size * 8));
-    const ry = Math.max(3, Math.round(size * 4));
-    for (let row = -ry; row <= ry; row += 1) {
-      const width = Math.round(rx * (1 - Math.abs(row) / (ry + 1)));
-      for (let col = -width; col <= width; col += 1) {
-        const edge = Math.abs(col) === width || Math.abs(row) === ry;
-        this.ctx.fillStyle = edge ? color : "rgb(17 24 19 / 0.9)";
-        this.ctx.fillRect(Math.round(x + col * px), Math.round(y + row * px), px, px);
-      }
-    }
+    const px = worldPixel(this.currentZoom || 1);
+    const rx = Math.max(5, Math.round((entity.size || 0.8) * 8));
+    const ry = Math.max(3, Math.round((entity.size || 0.8) * 4));
+    this.overlayLayer.beginFill(0x111813, 0.9);
+    this.overlayLayer.drawEllipse(x, y, rx * px, ry * px);
+    this.overlayLayer.endFill();
+    this.overlayLayer.lineStyle(Math.max(1, px), hexToNumber(color), 1);
+    this.overlayLayer.drawEllipse(x, y, rx * px, ry * px);
+    this.overlayLayer.lineStyle();
   }
 
-  drawTeamAccent(entity: RenderEntity, centerX: number, topY: number, visualWidth: number, color: string | undefined) {
+  private drawTeamAccent(entity: RenderEntity, centerX: number, topY: number, visualWidth: number, color: string | undefined) {
     if (!color || !entity.ownerId) return;
     const px = worldPixel(this.currentZoom || 1);
-    const { ctx } = this;
-    if (entity.kind === "building") {
-      ctx.fillStyle = color;
-      ctx.fillRect(Math.round(centerX - visualWidth * 0.18), Math.round(topY + px * 2), Math.max(px * 3, visualWidth * 0.16), px * 2);
-      ctx.fillStyle = "#f4efe6";
-      ctx.fillRect(Math.round(centerX - visualWidth * 0.18), Math.round(topY + px * 2), px, px);
-    } else if (entity.kind === "unit") {
-      ctx.fillStyle = color;
-      ctx.fillRect(Math.round(centerX - px * 3), Math.round(topY + px * 7), px * 5, px * 2);
-    }
+    this.overlayLayer.beginFill(hexToNumber(color));
+    if (entity.kind === "building") this.overlayLayer.drawRect(Math.round(centerX - visualWidth * 0.18), Math.round(topY + px * 2), Math.max(px * 3, visualWidth * 0.16), px * 2);
+    else if (entity.kind === "unit") this.overlayLayer.drawRect(Math.round(centerX - px * 3), Math.round(topY + px * 7), px * 5, px * 2);
+    this.overlayLayer.endFill();
   }
 
-  drawSelectionBox(view: ViewState) {
+  private drawAttackFlash(x: number, y: number, color: string) {
+    this.overlayLayer.lineStyle(3, hexToNumber(color));
+    this.overlayLayer.moveTo(x - 18, y - 26);
+    this.overlayLayer.lineTo(x + 18, y - 8);
+    this.overlayLayer.lineStyle();
+  }
+
+  private drawWorkFlash(x: number, y: number, facing: "left" | "right" = "right", resource: "wood" | "ore" | "food" = "wood") {
+    const dir = facing === "left" ? -1 : 1;
+    const t = Math.floor(performance.now() / 120) % 2;
+    const swingY = t ? -38 : -30;
+    this.overlayLayer.beginFill(resource === "ore" ? 0xc1b77b : resource === "food" ? 0x6fa04a : 0xe9bd59);
+    this.overlayLayer.drawRect(Math.round(x + dir * 8), Math.round(y + swingY), 14 * dir, 4);
+    this.overlayLayer.beginFill(resource === "ore" ? 0x687276 : 0x4b3728);
+    this.overlayLayer.drawRect(Math.round(x + dir * 18), Math.round(y + swingY + 4), 8 * dir, 4);
+    this.overlayLayer.endFill();
+  }
+
+  private drawCarryBadge(x: number, y: number, resource: "wood" | "ore" | "food") {
+    this.overlayLayer.beginFill(resource === "wood" ? 0x8b623e : resource === "ore" ? 0xc1b77b : 0x6fa04a);
+    this.overlayLayer.drawRect(x - 5, y, 10, 6);
+    this.overlayLayer.beginFill(0x111813);
+    this.overlayLayer.drawRect(x - 3, y + 4, 6, 2);
+    this.overlayLayer.endFill();
+  }
+
+  private drawSelectionBox(view: ViewState) {
     if (!view.dragging || !view.dragCurrent || !view.dragStart) return;
-    const { ctx } = this;
-    const x = Math.min(view.dragStart!.x, view.dragCurrent.x);
-    const y = Math.min(view.dragStart!.y, view.dragCurrent.y);
-    const w = Math.abs(view.dragCurrent.x - view.dragStart!.x);
-    const h = Math.abs(view.dragCurrent.y - view.dragStart!.y);
-    ctx.strokeStyle = "#f4efe6";
-    ctx.fillStyle = "rgb(244 239 230 / 0.12)";
-    ctx.strokeRect(x, y, w, h);
-    ctx.fillRect(x, y, w, h);
+    const x = Math.min(view.dragStart.x, view.dragCurrent.x);
+    const y = Math.min(view.dragStart.y, view.dragCurrent.y);
+    const w = Math.abs(view.dragCurrent.x - view.dragStart.x);
+    const h = Math.abs(view.dragCurrent.y - view.dragStart.y);
+    this.overlayLayer.lineStyle(1, 0xf4efe6, 1);
+    this.overlayLayer.beginFill(0xf4efe6, 0.12);
+    this.overlayLayer.drawRect(x, y, w, h);
+    this.overlayLayer.endFill();
+    this.overlayLayer.lineStyle();
   }
 
-  drawPlacement(view: ViewState, state: GameState) {
+  private drawPlacement(view: ViewState, state: GameState) {
     const mode = view.buildMode;
-    if (!mode) return;
-    const { ctx } = this;
-    const tile = view.hoverTile;
-    if (!tile) return;
+    if (!mode || !view.hoverTile) return;
     const size = buildingSize(mode);
-    const valid = canPlacePreview(state, mode, tile.x, tile.y);
-    const stroke = valid ? "#e9bd59" : "#d84b3e";
-    const fill = valid ? "rgb(233 189 89 / 0.28)" : "rgb(216 75 62 / 0.28)";
-    this.drawFootprint(tile.x, tile.y, size, view.camera, stroke, fill, 2);
-    const rows = sprites[mode as SpriteName];
-    if (rows) {
-      const center = footprintCenter(tile.x, tile.y, size, view.camera);
-      const scale = entityScale({ kind: "building", type: mode as BuildingType, size } as RenderEntity, view.camera.zoom || 1);
-      const bounds = spriteBounds(rows);
-      const visualWidth = bounds.width * scale;
-      ctx.globalAlpha = 0.72;
-      const y = spriteTopY({ kind: "building", type: mode as BuildingType, size } as RenderEntity, center.y, bounds, scale, view.camera.zoom || 1);
-      this.drawSprite(rows, Math.round(center.x - visualWidth / 2 - bounds.minX * scale), Math.round(y), state.snapshot?.players[state.playerId!]?.color, false, scale, valid ? 0 : 0.75, valid ? "white" : "red");
-      ctx.globalAlpha = 1;
-    }
+    const valid = canPlacePreview(state, mode, view.hoverTile.x, view.hoverTile.y);
+    this.drawFootprint(view.hoverTile.x, view.hoverTile.y, size, view.camera, valid ? "#e9bd59" : "#d84b3e", valid ? "rgb(233 189 89 / 0.28)" : "rgb(216 75 62 / 0.28)", 2);
   }
 
-  drawFootprint(x: number, y: number, size: number, camera: CameraState, stroke: string, fill: string, lineWidth = 2) {
-    const { ctx } = this;
+  private drawFootprint(x: number, y: number, size: number, camera: CameraState, stroke: string, fill: string, lineWidth = 2) {
     const points = [
       isoToScreen(x - 0.5, y - 0.5, camera),
       isoToScreen(x + size - 0.5, y - 0.5, camera),
       isoToScreen(x + size - 0.5, y + size - 0.5, camera),
       isoToScreen(x - 0.5, y + size - 0.5, camera),
     ];
-    ctx.save();
-    ctx.fillStyle = fill;
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = lineWidth;
-    ctx.beginPath();
-    points.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
-    });
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    this.overlayLayer.lineStyle(lineWidth, hexToNumber(stroke), 1);
+    this.overlayLayer.beginFill(cssColorToNumber(fill), cssAlpha(fill));
+    this.overlayLayer.moveTo(points[0]!.x, points[0]!.y);
+    for (let i = 1; i < points.length; i += 1) this.overlayLayer.lineTo(points[i]!.x, points[i]!.y);
+    this.overlayLayer.closePath();
+    this.overlayLayer.endFill();
+    this.overlayLayer.lineStyle();
   }
 
-  drawLastSeen(state: GameState, view: ViewState) {
-    if (!state.snapshot?.visibility) return;
-    const visibleIds = new Set([
-      ...Object.keys(state.snapshot.buildings),
-      ...Object.keys(state.snapshot.resources),
-      ...Object.keys(state.snapshot.ruins),
-    ]);
-    const mapSize = state.snapshot.map.size;
-    const remembered = [
-      ...Object.values(state.lastSeen.buildings),
-      ...Object.values(state.lastSeen.resources),
-      ...Object.values(state.lastSeen.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
-    ].filter((entity) => !visibleIds.has(entity.id) && isExplored(state.snapshot!.visibility, entity.x, entity.y, entity.size || 1, mapSize));
-    this.ctx.globalAlpha = 0.35;
-    for (const entity of remembered.filter((entity) => isEntityNearViewport(entity, view.camera)).sort((a, b) => (a.x + a.y) - (b.x + b.y))) this.drawEntity(entity, state, view);
-    this.ctx.globalAlpha = 1;
+  private drawMinimap(state: GameState, view: ViewState) {
+    const now = performance.now();
+    if (now - this.lastMinimapDraw < 180) return;
+    this.lastMinimapDraw = now;
+    drawMinimapCanvas(state, view);
   }
+}
 
-  drawMinimap(state: GameState, view: ViewState) {
-    const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
-    if (!minimap || !state.snapshot) return;
-    const ctx = minimap.getContext("2d")!;
-    const size = state.snapshot.map.size;
-    const project = (x: number, y: number) => minimapIsoToScreen(x, y, size, minimap.width, minimap.height);
-    ctx.clearRect(0, 0, minimap.width, minimap.height);
-    ctx.fillStyle = "#101612";
-    ctx.fillRect(0, 0, minimap.width, minimap.height);
+function drawMinimapCanvas(state: GameState, view: ViewState) {
+  const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
+  if (!minimap || !state.snapshot) return;
+  const ctx = minimap.getContext("2d")!;
+  const size = state.snapshot.map.size;
+  const project = (x: number, y: number) => minimapIsoToScreen(x, y, size, minimap.width, minimap.height);
+  ctx.clearRect(0, 0, minimap.width, minimap.height);
+  ctx.fillStyle = "#101612";
+  ctx.fillRect(0, 0, minimap.width, minimap.height);
+  ctx.fillStyle = "#172219";
+  ctx.beginPath();
+  ctx.moveTo(minimap.width / 2, 6);
+  ctx.lineTo(minimap.width - 6, minimap.height / 2);
+  ctx.lineTo(minimap.width / 2, minimap.height - 6);
+  ctx.lineTo(6, minimap.height / 2);
+  ctx.closePath();
+  ctx.fill();
 
-    ctx.fillStyle = "#172219";
-    ctx.beginPath();
-    ctx.moveTo(minimap.width / 2, 6);
-    ctx.lineTo(minimap.width - 6, minimap.height / 2);
-    ctx.lineTo(minimap.width / 2, minimap.height - 6);
-    ctx.lineTo(6, minimap.height / 2);
-    ctx.closePath();
-    ctx.fill();
-
-    const visibility = state.snapshot.visibility;
-    const exploredSet = visibility?.exploredSet;
-    const visibleSet = visibility?.visibleSet;
-    if (exploredSet) {
-      for (const key of exploredSet) {
-        const x = key % size;
-        const y = Math.floor(key / size);
-        const p = project(x + 0.5, y + 0.5);
-        ctx.fillStyle = visibleSet?.has(key) ? "#356743" : "#223629";
-        ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
-      }
-    }
-    for (const building of Object.values(state.snapshot.buildings)) {
-      const player = state.snapshot.players[building.ownerId];
-      const p = project(building.x + (building.size - 1) / 2, building.y + (building.size - 1) / 2);
-      ctx.fillStyle = player?.color || "#d8d0c0";
-      ctx.fillRect(Math.round(p.x - 2), Math.round(p.y - 2), Math.max(3, building.size + 2), Math.max(3, building.size + 2));
-    }
-    for (const unit of Object.values(state.snapshot.units)) {
-      const player = state.snapshot.players[unit.ownerId];
-      const p = project(unit.x, unit.y);
-      ctx.fillStyle = player?.color || "#d8d0c0";
+  const visibility = state.snapshot.visibility;
+  const exploredSet = visibility?.exploredSet;
+  const visibleSet = visibility?.visibleSet;
+  if (exploredSet) {
+    for (const key of exploredSet) {
+      const x = key % size;
+      const y = Math.floor(key / size);
+      const p = project(x + 0.5, y + 0.5);
+      ctx.fillStyle = visibleSet?.has(key) ? "#356743" : "#223629";
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
     }
-    this.drawMinimapViewport(ctx, state, view, project);
   }
-
-  drawMinimapViewport(ctx: CanvasRenderingContext2D, state: GameState, view: ViewState, project: (x: number, y: number) => { x: number; y: number }) {
-    const corners = [
-      { x: 0, y: 0 },
-      { x: window.innerWidth, y: 0 },
-      { x: window.innerWidth, y: window.innerHeight },
-      { x: 0, y: window.innerHeight },
-    ].map((point) => screenToIsoLocal(point.x, point.y, view.camera));
-    ctx.strokeStyle = "#f4efe6";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    corners.forEach((corner, index) => {
-      const p = project(corner.x, corner.y);
-      if (index === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    });
-    ctx.closePath();
-    ctx.stroke();
+  for (const building of Object.values(state.snapshot.buildings)) {
+    const player = state.snapshot.players[building.ownerId];
+    const p = project(building.x + (building.size - 1) / 2, building.y + (building.size - 1) / 2);
+    ctx.fillStyle = player?.color || "#d8d0c0";
+    ctx.fillRect(Math.round(p.x - 2), Math.round(p.y - 2), Math.max(3, building.size + 2), Math.max(3, building.size + 2));
   }
+  for (const unit of Object.values(state.snapshot.units)) {
+    const player = state.snapshot.players[unit.ownerId];
+    const p = project(unit.x, unit.y);
+    ctx.fillStyle = player?.color || (unit.type === "zombie" ? "#416b38" : "#d8d0c0");
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
+  }
+  const corners = [
+    { x: 0, y: 0 },
+    { x: window.innerWidth, y: 0 },
+    { x: window.innerWidth, y: window.innerHeight },
+    { x: 0, y: window.innerHeight },
+  ].map((point) => screenToIsoLocal(point.x, point.y, view.camera));
+  ctx.strokeStyle = "#f4efe6";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  corners.forEach((corner, index) => {
+    const p = project(corner.x, corner.y);
+    if (index === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+  ctx.stroke();
 }
 
 function spriteNameFor(entity: RenderEntity): SpriteName {
@@ -420,6 +463,11 @@ function targetFlashFor(state: GameState, id: string) {
   const effect = (state.effects || []).find((item): item is Extract<Effect, { type: "targetFlash" }> => item.type === "targetFlash" && item.targetId === id);
   if (!effect) return { amount: 0, color: "white" };
   return { amount: Math.max(0, 1 - (performance.now() - effect.createdAt) / effect.duration), color: effect.color || "white" };
+}
+
+function tintForFlash(flash: { amount: number; color: string }) {
+  if (flash.amount <= 0) return 0xffffff;
+  return flash.color === "red" ? 0xff6a5a : 0xffffee;
 }
 
 function buildingSize(type: string) {
@@ -473,37 +521,9 @@ function footprintCenter(x: number, y: number, size: number, camera: CameraState
   return isoToScreen(x + (size - 1) / 2, y + (size - 1) / 2, camera);
 }
 
-function lighten(color = "#ffffff") {
-  return color;
-}
-
-function entityScale(entity: RenderEntity, zoom: number) {
-  return worldPixel(zoom);
-}
-
 function spriteTopY(entity: RenderEntity, centerY: number, bounds: { maxY: number }, scale: number, zoom: number) {
   const footprintBottom = centerY + ((entity.size || 0) * TILE_H * zoom) / 2;
   return footprintBottom - (bounds.maxY + 1) * scale;
-}
-
-function brighten(color = "#ffffff", factor = 1) {
-  if (!color.startsWith("#")) return color;
-  const n = Number.parseInt(color.slice(1), 16);
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  const lift = (channel: number) => Math.max(0, Math.min(255, Math.round(channel * factor + 70 * (factor - 1))));
-  return `rgb(${lift(r)} ${lift(g)} ${lift(b)})`;
-}
-
-function redFlash(color = "#ffffff", amount = 1) {
-  if (!color.startsWith("#")) return color;
-  const n = Number.parseInt(color.slice(1), 16);
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  const mix = (base: number, target: number) => Math.round(base + (target - base) * Math.min(1, amount * 0.9));
-  return `rgb(${mix(r, 255)} ${mix(g, 42)} ${mix(b, 32)})`;
 }
 
 function shade(hex: string, factor: number) {
@@ -568,4 +588,19 @@ function worldPixel(zoom: number) {
   return Math.max(2, Math.round(SCALE * zoom));
 }
 
-type RenderEntity = Unit | Building | ResourceNode | Ruin;
+function hexToNumber(color = "#ffffff") {
+  if (!color.startsWith("#")) return 0xffffff;
+  return Number.parseInt(color.slice(1), 16);
+}
+
+function cssColorToNumber(color: string) {
+  if (color.startsWith("#")) return hexToNumber(color);
+  if (color.includes("216 75 62")) return 0xd84b3e;
+  if (color.includes("233 189 89")) return 0xe9bd59;
+  return 0x111813;
+}
+
+function cssAlpha(color: string) {
+  const match = /\/\s*([0-9.]+)/.exec(color);
+  return match ? Number(match[1]) : 1;
+}

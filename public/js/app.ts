@@ -59,6 +59,8 @@ let eventStream: EventSource | null = null;
 let godModeInput = "";
 let godModeEnabled = false;
 let godModeCheckPending = false;
+let lastFrameAt = performance.now();
+let smoothedFps = 60;
 const ui = new UI(state, {
   setBuildMode(type) {
     view.buildMode = type;
@@ -334,10 +336,21 @@ function centerOnTown(once = true) {
 }
 
 function drawLoop() {
+  updateFpsStat();
   edgePan();
   pruneEffects();
   renderer.draw(state, view);
   requestAnimationFrame(drawLoop);
+}
+
+function updateFpsStat() {
+  const now = performance.now();
+  const dt = Math.max(1, now - lastFrameAt);
+  lastFrameAt = now;
+  const fps = 1000 / dt;
+  smoothedFps = smoothedFps * 0.9 + fps * 0.1;
+  const el = document.getElementById("fps");
+  if (el) el.textContent = `FPS ${Math.round(smoothedFps)}`;
 }
 
 function onMouseDown(event: MouseEvent) {

@@ -7,8 +7,7 @@ export function makeSnapshot(
   sentExplored: Set<number> | null = null,
 ): Snapshot {
   const player = playerId ? world.players[playerId] : null;
-  const normalVisible = playerId ? cachedVisibility(world, playerId) : null;
-  const visible = player?.godMode ? null : normalVisible;
+  const visible = playerId && !player?.godMode ? cachedVisibility(world, playerId) : null;
   const visibleSet = visible ? visible.visible : null;
   const filterVisible = <T extends { x: number; y: number; size?: number }>(entities: Record<string, T>, set = visibleSet): Record<string, T> => {
     if (!set) return entities;
@@ -62,10 +61,7 @@ export function makeSnapshot(
     buildings: Object.fromEntries(
       Object.entries(filterVisible(world.buildings)).map(([id, building]) => [id, building.serialize()]),
     ),
-    // In god mode we reveal units/buildings globally, but keep resources scoped
-    // to normal player vision to avoid sending thousands of tree/ore/berry
-    // records every tick while debugging zombie movement.
-    resources: filterVisible(world.resources, player?.godMode ? normalVisible?.visible || null : visibleSet),
+    resources: filterVisible(world.resources),
     ruins: filterVisible(world.ruins),
     visibility: visible
       ? {
