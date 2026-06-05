@@ -20,6 +20,10 @@ export async function enableSoundDebug(playerId: PlayerId, secret: string) {
   return post("/api/dev/sound-debug", { playerId, secret });
 }
 
+export async function spawnZombieHorde(playerId: PlayerId, count = 500) {
+  return post("/api/dev/spawn-zombies", { playerId, count });
+}
+
 async function post(url: string, payload: Record<string, unknown>) {
   const res = await fetch(url, {
     method: "POST",

@@ -1,4 +1,4 @@
-import { enableGodMode, enableSoundDebug, join, leave, sendCommand } from "./api.js";
+import { enableGodMode, enableSoundDebug, join, leave, sendCommand, spawnZombieHorde } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
@@ -60,6 +60,7 @@ let godModeEnabled = false;
 let godModeCheckPending = false;
 let soundDebugEnabled = false;
 let soundDebugCheckPending = false;
+let zombieHordePending = false;
 let lastFrameAt = performance.now();
 let smoothedFps = 60;
 const ui = new UI(state, {
@@ -231,6 +232,7 @@ function onDevShortcutKeyDown(event: KeyboardEvent) {
   devCommandInput = `${devCommandInput}${event.key}`.slice(-DEV_COMMAND_BUFFER_LENGTH);
   void maybeEnableGodMode();
   void maybeEnableSoundDebug();
+  void maybeSpawnZombieHorde();
 }
 
 async function maybeEnableGodMode() {
@@ -269,6 +271,19 @@ async function maybeEnableSoundDebug() {
   } finally {
     soundDebugCheckPending = false;
     if (!soundDebugEnabled && checkedInput !== devCommandInput) void maybeEnableSoundDebug();
+  }
+}
+
+async function maybeSpawnZombieHorde() {
+  if (!godModeEnabled || zombieHordePending || !state.playerId || !devCommandInput.endsWith("zombiehorde")) return;
+  zombieHordePending = true;
+  try {
+    const result = await spawnZombieHorde(state.playerId, 500);
+    if (result.ok) ui.showToast(`Spawned ${result.spawned ?? 500} zombies.`);
+  } catch {
+    // Keep this shortcut silent unless it succeeds.
+  } finally {
+    zombieHordePending = false;
   }
 }
 

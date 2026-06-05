@@ -2,7 +2,7 @@ import { createReadStream, promises as fs } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { makeSnapshot } from "../shared/messages.js";
 import { MAX_PLAYERS } from "../shared/config.js";
-import { addPlayer, command, removePlayer } from "./world.js";
+import { addPlayer, command, removePlayer, spawnZombieHorde } from "./world.js";
 import type { CommandPayload, PlayerId, World } from "../shared/types.js";
 
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
@@ -29,6 +29,7 @@ export function createHandler(world: World, clients: Set<Client>) {
     if (req.method === "POST" && url.pathname === "/api/join") return joinGame(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/dev/god-mode") return enableGodMode(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/dev/sound-debug") return enableSoundDebug(req, res, world);
+    if (req.method === "POST" && url.pathname === "/api/dev/spawn-zombies") return spawnDevZombies(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/command") return receiveCommand(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/leave") return leaveGame(req, res, world);
     if (req.method === "GET" && url.pathname === "/events") return streamEvents(req, res, world, clients, url);
@@ -160,6 +161,17 @@ async function enableSoundDebug(req: import("node:http").IncomingMessage, res: i
   if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
   player.soundDebug = true;
   json(res, { ok: true });
+}
+
+async function spawnDevZombies(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+  const body = (await readJson(req)) as { playerId?: unknown; count?: unknown };
+  if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+  const player = world.players[body.playerId];
+  if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+  if (!player.godMode) return json(res, { ok: false, error: "God mode is required." }, 403);
+  const count = typeof body.count === "number" ? body.count : 500;
+  const spawned = spawnZombieHorde(world, body.playerId, count);
+  json(res, { ok: true, spawned });
 }
 
 async function receiveCommand(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {

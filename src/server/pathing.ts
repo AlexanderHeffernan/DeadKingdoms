@@ -14,24 +14,73 @@ export function moveUnit(world: World, unit: Unit, target: { x: number; y: numbe
   return arrived;
 }
 
+const SEPARATION_CELL_SIZE = 1;
+const NEIGHBOR_CELL_OFFSETS = [-1, 0, 1].flatMap((y) => [-1, 0, 1].map((x) => ({ x, y })));
+
+type SeparationGridEntry = {
+  unit: Unit;
+  index: number;
+  cellX: number;
+  cellY: number;
+};
+
+type SeparationGrid = {
+  buckets: Map<string, SeparationGridEntry[]>;
+  entries: SeparationGridEntry[];
+};
+
+function buildSpatialGrid(units: Unit[]): SeparationGrid {
+  const buckets = new Map<string, SeparationGridEntry[]>();
+  const entries: SeparationGridEntry[] = [];
+  units.forEach((unit, index) => {
+    const cellX = Math.floor(unit.x / SEPARATION_CELL_SIZE);
+    const cellY = Math.floor(unit.y / SEPARATION_CELL_SIZE);
+    const key = getGridKey(cellX, cellY);
+    const entry = { unit, index, cellX, cellY };
+    entries.push(entry);
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(entry);
+    else buckets.set(key, [entry]);
+  });
+  return { buckets, entries };
+}
+
+function getGridKey(cellX: number, cellY: number): string {
+  return `${cellX},${cellY}`;
+}
+
 export function resolveUnitSeparation(world: World) {
   const units = Object.values(world.units);
+  const grid = buildSpatialGrid(units);
   const minDistance = 0.48;
-  for (let i = 0; i < units.length; i += 1) {
-    for (let j = i + 1; j < units.length; j += 1) {
-      const a = units[i]!;
-      const b = units[j]!;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist >= minDistance) continue;
-      const push = (minDistance - (dist || 0.001)) / 2;
-      const nx = dist ? dx / dist : 1;
-      const ny = dist ? dy / dist : 0;
-      nudgeUnit(world, a, -nx * push, -ny * push);
-      nudgeUnit(world, b, nx * push, ny * push);
+
+  for (const entry of grid.entries) {
+    for (const other of nearbyEntries(grid, entry)) {
+      if (other.index <= entry.index) continue;
+      resolveUnitSeparationPair(world, entry.unit, other.unit, minDistance);
     }
   }
+}
+
+function nearbyEntries(grid: SeparationGrid, entry: SeparationGridEntry): SeparationGridEntry[] {
+  const entries: SeparationGridEntry[] = [];
+  for (const offset of NEIGHBOR_CELL_OFFSETS) {
+    const bucket = grid.buckets.get(getGridKey(entry.cellX + offset.x, entry.cellY + offset.y));
+    if (bucket) entries.push(...bucket);
+  }
+  return entries;
+}
+
+function resolveUnitSeparationPair(world: World, a: Unit, b: Unit, minDistance: number) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist >= minDistance) return;
+  const push = (minDistance - (dist || 0.001)) / 2;
+  const nx = dist ? dx / dist : 1;
+  const ny = dist ? dy / dist : 0;
+  nudgeUnit(world, a, -nx * push, -ny * push);
+  nudgeUnit(world, b, nx * push, ny * push);
 }
 
 function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {

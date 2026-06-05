@@ -111,6 +111,31 @@ export function removePlayer(world: World, playerId: PlayerId) {
   updateLeaderboard(world);
 }
 
+export function spawnZombieHorde(world: World, playerId: PlayerId, count: number): number {
+  if (!world.players[playerId]) return 0;
+  const safeCount = clamp(Math.floor(count), 1, 2000);
+  for (let i = 0; i < safeCount; i += 1) {
+    const point = randomZombieHordePoint(world);
+    createZombie(world, point.x, point.y);
+  }
+  notice(world, `God mode spawned ${safeCount} zombies.`);
+  return safeCount;
+}
+
+function randomZombieHordePoint(world: World): { x: number; y: number } {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const point = {
+      x: randomInt(1, MAP_SIZE - 2) + 0.5,
+      y: randomInt(1, MAP_SIZE - 2) + 0.5,
+    };
+    if (isWalkable(world, Math.floor(point.x), Math.floor(point.y))) return point;
+  }
+  return {
+    x: randomInt(1, MAP_SIZE - 2) + 0.5,
+    y: randomInt(1, MAP_SIZE - 2) + 0.5,
+  };
+}
+
 export function command(world: World, playerId: PlayerId, body: CommandPayload): CommandResult {
   const player = world.players[playerId];
   if (!player || player.defeated) return { ok: false, error: "Player unavailable." };
