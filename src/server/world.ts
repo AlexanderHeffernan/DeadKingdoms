@@ -16,6 +16,7 @@ import { id } from "./id.js";
 import { clamp, distance, rectsOverlap } from "./math.js";
 import { findPath, isWalkable, moveNearTarget, moveUnit, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
+import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
 import type {
   BuildQueueItem,
@@ -44,6 +45,7 @@ const RUIN_DECAY_SECONDS = 60;
 const ZOMBIE_INITIAL_RETARGET_SECONDS = 1.2;
 const MAX_ACTION_NOISES = 240;
 const SERVER_PERF_SMOOTHING = 0.1;
+const TARGET_UNIT_GRID_CELL_SIZE = 4;
 
 export function createWorld(): World {
   const world: World = {
@@ -203,6 +205,10 @@ function smoothMetric(current: number, next: number) {
 }
 
 function createSimulationContext(world: World): UnitSimulationContext & import("./zombieSpawning.js").ZombieSpawnContext {
+  const targetUnitGrid = new SpatialGrid(
+    Object.values(world.units).filter((unit) => unit.type !== "zombie" && unit.hp > 0),
+    TARGET_UNIT_GRID_CELL_SIZE,
+  );
   return {
     world,
     targetById: (targetId) => world.units[targetId as UnitId] || world.buildings[targetId as BuildingId] || null,
@@ -215,6 +221,11 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
     centerOf,
     distance,
     nearestEnemy: (source, range) => nearestEnemy(world, source, range),
+    nearbyTargetUnits: (source, range) =>
+      targetUnitGrid
+        .nearby(source, range)
+        .map((entry) => entry.item)
+        .filter((unit) => world.units[unit.id] === unit && unit.type !== "zombie" && unit.hp > 0),
     damage: (target, amount, attackerId) => damage(world, target, amount, attackerId),
     emitActionSound: (action, point) => emitActionSound(world, action, point),
     gatherTarget: (targetId, playerId) => world.resources[targetId as keyof typeof world.resources] || gatherableBuilding(world.buildings[targetId as BuildingId], playerId),

@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Unit, World } from "../shared/types.js";
-import { findPath } from "./pathing.js";
+import { findPath, resolveUnitSeparation } from "./pathing.js";
 
 type PathRequest = {
   unit: Unit;
@@ -25,8 +25,23 @@ type BenchmarkResult = {
   emptyPaths: number;
 };
 
+type SeparationBenchmarkCase = {
+  name: string;
+  repeats: number;
+  makeWorld: () => World;
+};
+
+type SeparationBenchmarkResult = {
+  name: string;
+  repeats: number;
+  units: number;
+  totalMs: number;
+  averageMs: number;
+  unitsPerSecond: number;
+};
+
 function main() {
-  const cases = [
+  const pathCases = [
     openFieldSinglePath(),
     blockedDestinationSinglePath(),
     wallGapSinglePath(),
@@ -34,12 +49,21 @@ function main() {
     clusteredGroupMove(),
     scatteredGroupMove(),
   ];
+  const separationCases = [
+    separationTwoUnitsSameCell(),
+    separationTwoUnitsNeighboringCells(),
+    separation500UnitsSpread(),
+    separation500UnitsClustered(),
+    separation1000UnitsSpread(),
+    separation1000UnitsClustered(),
+  ];
 
-  const results = cases.map(runBenchmark);
-  printResults(results);
+  printPathResults(pathCases.map(runPathBenchmark));
+  console.log("");
+  printSeparationResults(separationCases.map(runSeparationBenchmark));
 }
 
-function runBenchmark(testCase: BenchmarkCase): BenchmarkResult {
+function runPathBenchmark(testCase: BenchmarkCase): BenchmarkResult {
   for (let i = 0; i < Math.min(5, testCase.repeats); i += 1) {
     for (const request of testCase.requests) findPath(testCase.world, request.unit, request.target);
   }
@@ -66,6 +90,27 @@ function runBenchmark(testCase: BenchmarkCase): BenchmarkResult {
     pathsPerSecond: (paths / totalMs) * 1000,
     averagePathLength: totalPathLength / paths,
     emptyPaths,
+  };
+}
+
+function runSeparationBenchmark(testCase: SeparationBenchmarkCase): SeparationBenchmarkResult {
+  for (let i = 0; i < Math.min(5, testCase.repeats); i += 1) resolveUnitSeparation(testCase.makeWorld());
+
+  let unitCount = 0;
+  const start = performance.now();
+  for (let i = 0; i < testCase.repeats; i += 1) {
+    const world = testCase.makeWorld();
+    unitCount = Object.keys(world.units).length;
+    resolveUnitSeparation(world);
+  }
+  const totalMs = performance.now() - start;
+  return {
+    name: testCase.name,
+    repeats: testCase.repeats,
+    units: unitCount,
+    totalMs,
+    averageMs: totalMs / testCase.repeats,
+    unitsPerSecond: ((unitCount * testCase.repeats) / totalMs) * 1000,
   };
 }
 
@@ -152,6 +197,81 @@ function scatteredGroupMove(): BenchmarkCase {
   };
 }
 
+function separationTwoUnitsSameCell(): SeparationBenchmarkCase {
+  return {
+    name: "2 units same cell",
+    repeats: 5000,
+    makeWorld: () => worldWithUnits([makeUnit(10.4, 10.5, "sep-a"), makeUnit(10.6, 10.5, "sep-b")]),
+  };
+}
+
+function separationTwoUnitsNeighboringCells(): SeparationBenchmarkCase {
+  return {
+    name: "2 units neighboring cells",
+    repeats: 5000,
+    makeWorld: () => worldWithUnits([makeUnit(10.9, 10.5, "sep-a"), makeUnit(11.1, 10.5, "sep-b")]),
+  };
+}
+
+function separation500UnitsSpread(): SeparationBenchmarkCase {
+  return {
+    name: "500 units spread",
+    repeats: 120,
+    makeWorld: () => worldWithUnits(spreadUnits(500)),
+  };
+}
+
+function separation500UnitsClustered(): SeparationBenchmarkCase {
+  return {
+    name: "500 units clustered",
+    repeats: 120,
+    makeWorld: () => worldWithUnits(clusteredUnits(500)),
+  };
+}
+
+function separation1000UnitsSpread(): SeparationBenchmarkCase {
+  return {
+    name: "1000 units spread",
+    repeats: 60,
+    makeWorld: () => worldWithUnits(spreadUnits(1000)),
+  };
+}
+
+function separation1000UnitsClustered(): SeparationBenchmarkCase {
+  return {
+    name: "1000 units clustered",
+    repeats: 60,
+    makeWorld: () => worldWithUnits(clusteredUnits(1000)),
+  };
+}
+
+function worldWithUnits(units: Unit[]) {
+  const world = makeWorld();
+  for (const unit of units) world.units[unit.id] = unit;
+  return world;
+}
+
+function spreadUnits(count: number): Unit[] {
+  const units = [];
+  for (let i = 0; i < count; i += 1) {
+    const x = 4.5 + ((i * 17) % (MAP_SIZE - 8));
+    const y = 4.5 + ((Math.floor(i / 15) * 13 + i * 3) % (MAP_SIZE - 8));
+    units.push(makeUnit(x, y, `spread-${i}`));
+  }
+  return units;
+}
+
+function clusteredUnits(count: number): Unit[] {
+  const units = [];
+  const columns = Math.ceil(Math.sqrt(count));
+  for (let i = 0; i < count; i += 1) {
+    const x = 120 + (i % columns) * 0.22;
+    const y = 120 + Math.floor(i / columns) * 0.22;
+    units.push(makeUnit(x, y, `cluster-${i}`));
+  }
+  return units;
+}
+
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
   const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
   for (const tile of blocked) {
@@ -176,9 +296,9 @@ function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
   };
 }
 
-function makeUnit(x: number, y: number): Unit {
+function makeUnit(x: number, y: number, id = `u-${x}-${y}`): Unit {
   return {
-    id: `u-${x}-${y}` as Unit["id"],
+    id: id as Unit["id"],
     kind: "unit",
     type: "villager",
     ownerId: "p-benchmark" as Unit["ownerId"],
@@ -206,7 +326,7 @@ function rect(x: number, y: number, width: number, height: number) {
   return blocked;
 }
 
-function printResults(results: BenchmarkResult[]) {
+function printPathResults(results: BenchmarkResult[]) {
   console.log("Pathfinding benchmark");
   console.log("=====================");
   for (const result of results) {
@@ -219,6 +339,23 @@ function printResults(results: BenchmarkResult[]) {
         `${Math.round(result.pathsPerSecond).toString().padStart(6)} paths/s`,
         `${result.averagePathLength.toFixed(1).padStart(6)} avg nodes`,
         `${result.emptyPaths.toString().padStart(4)} empty`,
+      ].join("  "),
+    );
+  }
+}
+
+function printSeparationResults(results: SeparationBenchmarkResult[]) {
+  console.log("Unit separation benchmark");
+  console.log("=========================");
+  for (const result of results) {
+    console.log(
+      [
+        result.name.padEnd(36),
+        `${result.repeats.toString().padStart(5)} ticks`,
+        `${result.units.toString().padStart(5)} units`,
+        `${result.totalMs.toFixed(1).padStart(8)} ms total`,
+        `${result.averageMs.toFixed(3).padStart(7)} ms/tick`,
+        `${Math.round(result.unitsPerSecond).toString().padStart(8)} units/s`,
       ].join("  "),
     );
   }

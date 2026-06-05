@@ -2,6 +2,7 @@ import { MAP_SIZE } from "../shared/config.js";
 import type { PathNode, Unit, UnitCommand, World } from "../shared/types.js";
 import { clamp, distance, moveToward } from "./math.js";
 import { MinPriorityQueue } from "./utils/MinPriorityQueue.js";
+import { SpatialGrid } from "./utils/SpatialGrid.js";
 
 export function moveUnit(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
   const before = { x: unit.x, y: unit.y };
@@ -15,60 +16,18 @@ export function moveUnit(world: World, unit: Unit, target: { x: number; y: numbe
 }
 
 const SEPARATION_CELL_SIZE = 1;
-const NEIGHBOR_CELL_OFFSETS = [-1, 0, 1].flatMap((y) => [-1, 0, 1].map((x) => ({ x, y })));
-
-type SeparationGridEntry = {
-  unit: Unit;
-  index: number;
-  cellX: number;
-  cellY: number;
-};
-
-type SeparationGrid = {
-  buckets: Map<string, SeparationGridEntry[]>;
-  entries: SeparationGridEntry[];
-};
-
-function buildSpatialGrid(units: Unit[]): SeparationGrid {
-  const buckets = new Map<string, SeparationGridEntry[]>();
-  const entries: SeparationGridEntry[] = [];
-  units.forEach((unit, index) => {
-    const cellX = Math.floor(unit.x / SEPARATION_CELL_SIZE);
-    const cellY = Math.floor(unit.y / SEPARATION_CELL_SIZE);
-    const key = getGridKey(cellX, cellY);
-    const entry = { unit, index, cellX, cellY };
-    entries.push(entry);
-    const bucket = buckets.get(key);
-    if (bucket) bucket.push(entry);
-    else buckets.set(key, [entry]);
-  });
-  return { buckets, entries };
-}
-
-function getGridKey(cellX: number, cellY: number): string {
-  return `${cellX},${cellY}`;
-}
+const MIN_SEPARATION_DISTANCE = 0.48;
 
 export function resolveUnitSeparation(world: World) {
   const units = Object.values(world.units);
-  const grid = buildSpatialGrid(units);
-  const minDistance = 0.48;
+  const grid = new SpatialGrid(units, SEPARATION_CELL_SIZE);
 
   for (const entry of grid.entries) {
-    for (const other of nearbyEntries(grid, entry)) {
+    for (const other of grid.nearby(entry.item, MIN_SEPARATION_DISTANCE)) {
       if (other.index <= entry.index) continue;
-      resolveUnitSeparationPair(world, entry.unit, other.unit, minDistance);
+      resolveUnitSeparationPair(world, entry.item, other.item, MIN_SEPARATION_DISTANCE);
     }
   }
-}
-
-function nearbyEntries(grid: SeparationGrid, entry: SeparationGridEntry): SeparationGridEntry[] {
-  const entries: SeparationGridEntry[] = [];
-  for (const offset of NEIGHBOR_CELL_OFFSETS) {
-    const bucket = grid.buckets.get(getGridKey(entry.cellX + offset.x, entry.cellY + offset.y));
-    if (bucket) entries.push(...bucket);
-  }
-  return entries;
 }
 
 function resolveUnitSeparationPair(world: World, a: Unit, b: Unit, minDistance: number) {

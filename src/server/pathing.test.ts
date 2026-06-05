@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Unit, World } from "../shared/types.js";
-import { findPath, isWalkable } from "./pathing.js";
+import { findPath, isWalkable, resolveUnitSeparation } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
   const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -26,9 +26,9 @@ function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
   };
 }
 
-function makeUnit(x: number, y: number): Unit {
+function makeUnit(x: number, y: number, id = "u-test"): Unit {
   return {
-    id: "u-test" as Unit["id"],
+    id: id as Unit["id"],
     kind: "unit",
     type: "villager",
     ownerId: "p-test" as Unit["ownerId"],
@@ -44,6 +44,10 @@ function makeUnit(x: number, y: number): Unit {
     carried: null,
     selected: false,
   };
+}
+
+function addUnits(world: World, units: Unit[]) {
+  for (const unit of units) world.units[unit.id] = unit;
 }
 
 test("findPath returns a direct path on an open map", () => {
@@ -84,3 +88,58 @@ test("findPath returns an empty path for an out-of-map destination", () => {
 
   assert.equal(path.length, 0);
 });
+
+test("resolveUnitSeparation pushes overlapping units in the same grid cell apart", () => {
+  const world = makeWorld();
+  const a = makeUnit(10.4, 10.5, "u-a");
+  const b = makeUnit(10.6, 10.5, "u-b");
+  addUnits(world, [a, b]);
+
+  resolveUnitSeparation(world);
+
+  assert.ok(distanceBetween(a, b) >= 0.47);
+  assert.ok(a.x < 10.4);
+  assert.ok(b.x > 10.6);
+});
+
+test("resolveUnitSeparation checks neighboring grid cells", () => {
+  const world = makeWorld();
+  const a = makeUnit(10.9, 10.5, "u-a");
+  const b = makeUnit(11.1, 10.5, "u-b");
+  addUnits(world, [a, b]);
+
+  resolveUnitSeparation(world);
+
+  assert.ok(distanceBetween(a, b) >= 0.47);
+  assert.ok(a.x < 10.9);
+  assert.ok(b.x > 11.1);
+});
+
+test("resolveUnitSeparation leaves distant units untouched", () => {
+  const world = makeWorld();
+  const a = makeUnit(10.5, 10.5, "u-a");
+  const b = makeUnit(18.5, 18.5, "u-b");
+  addUnits(world, [a, b]);
+
+  resolveUnitSeparation(world);
+
+  assert.equal(a.x, 10.5);
+  assert.equal(a.y, 10.5);
+  assert.equal(b.x, 18.5);
+  assert.equal(b.y, 18.5);
+});
+
+test("resolveUnitSeparation does not move a single unit by comparing it with itself", () => {
+  const world = makeWorld();
+  const unit = makeUnit(10.5, 10.5, "u-a");
+  addUnits(world, [unit]);
+
+  resolveUnitSeparation(world);
+
+  assert.equal(unit.x, 10.5);
+  assert.equal(unit.y, 10.5);
+});
+
+function distanceBetween(a: Unit, b: Unit) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
