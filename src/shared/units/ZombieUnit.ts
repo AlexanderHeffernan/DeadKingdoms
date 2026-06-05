@@ -14,186 +14,186 @@ const ZOMBIE_GROUP_REDIRECT_SCORE = 0.12;
 const ZOMBIE_GROUP_SOUND_RADIUS = 5;
 
 export class ZombieUnit extends BaseUnit {
-  public static readonly type = "zombie";
-  public static readonly label = "Zombie";
-  public static readonly sprite = "zombie";
-  public static readonly stats = {
-    maxHp: 34,
-    speed: 1.35,
-    attack: 5,
-    range: 0.55,
-    cooldown: 1.5,
-    score: 0,
-    trainTime: 0,
-    cost: {},
-    vision: 0,
-    sound: 0.35,
-  } as const;
+	public static readonly type = "zombie";
+	public static readonly label = "Zombie";
+	public static readonly sprite = "zombie";
+	public static readonly stats = {
+		maxHp: 34,
+		speed: 1.35,
+		attack: 5,
+		range: 0.55,
+		cooldown: 1.5,
+		score: 0,
+		trainTime: 0,
+		cost: {},
+		vision: 0,
+		sound: 0.35,
+	} as const;
 
-  public step(context: UnitSimulationContext, zombie: Unit, dt: number) {
-    this.updateTimers(zombie, dt);
-    zombie.vision = this.stats.vision || 5;
-    const target = this.findNearestTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
-    if (target) {
-      this.engageTarget(context, zombie, target, dt);
-      return;
-    }
-    this.updateInvestigation(context, zombie, dt);
-    this.moveTowardCurrentGoal(context, zombie, dt);
-  }
+	public step(context: UnitSimulationContext, zombie: Unit, dt: number) {
+		this.updateTimers(zombie, dt);
+		zombie.vision = this.stats.vision || 5;
+		const target = this.findNearestTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
+		if (target) {
+			this.engageTarget(context, zombie, target, dt);
+			return;
+		}
+		this.updateInvestigation(context, zombie, dt);
+		this.moveTowardCurrentGoal(context, zombie, dt);
+	}
 
-  private engageTarget(context: UnitSimulationContext, zombie: Unit, target: UnitCombatTarget, dt: number) {
-    const targetPoint = context.centerOf(target);
-    const range = this.stats.range + (target.size || 0.6);
-    zombie.facing = targetPoint.x < zombie.x ? "left" : "right";
-    zombie.soundTarget = this.extendDirection(zombie, targetPoint, ZOMBIE_MOMENTUM_DISTANCE);
-    zombie.investigateTarget = targetPoint;
-    zombie.investigateTime = ZOMBIE_INVESTIGATE_SECONDS;
-    zombie.wanderTarget = null;
-    if (context.distance(zombie, targetPoint) > range) {
-      const blocked = context.moveUnit(zombie, targetPoint, this.stats.speed * dt);
-      if (blocked && context.distance(zombie, targetPoint) > range) context.attackBlockingBuilding(zombie, targetPoint);
-      return;
-    }
-    this.attackTarget(context, zombie, target);
-  }
+	private engageTarget(context: UnitSimulationContext, zombie: Unit, target: UnitCombatTarget, dt: number) {
+		const targetPoint = context.centerOf(target);
+		const range = this.stats.range + (target.size || 0.6);
+		zombie.facing = targetPoint.x < zombie.x ? "left" : "right";
+		zombie.soundTarget = this.extendDirection(zombie, targetPoint, ZOMBIE_MOMENTUM_DISTANCE);
+		zombie.investigateTarget = targetPoint;
+		zombie.investigateTime = ZOMBIE_INVESTIGATE_SECONDS;
+		zombie.wanderTarget = null;
+		if (context.distance(zombie, targetPoint) > range) {
+			const blocked = context.moveUnit(zombie, targetPoint, this.stats.speed * dt);
+			if (blocked && context.distance(zombie, targetPoint) > range) context.attackBlockingBuilding(zombie, targetPoint);
+			return;
+		}
+		this.attackTarget(context, zombie, target);
+	}
 
-  private attackTarget(context: UnitSimulationContext, zombie: Unit, target: UnitCombatTarget) {
-    if (zombie.cooldown > 0) return;
-    context.damage(target, this.stats.attack, zombie.ownerId);
-    zombie.cooldown = this.stats.cooldown;
-    zombie.attackFlash = 0.22;
-  }
+	private attackTarget(context: UnitSimulationContext, zombie: Unit, target: UnitCombatTarget) {
+		if (zombie.cooldown > 0) return;
+		context.damage(target, this.stats.attack, zombie.ownerId);
+		zombie.cooldown = this.stats.cooldown;
+		zombie.attackFlash = 0.22;
+	}
 
-  private updateInvestigation(context: UnitSimulationContext, zombie: Unit, dt: number) {
-    zombie.investigateTime = Math.max(0, (zombie.investigateTime || 0) - dt);
-    zombie.retargetIn = (zombie.retargetIn ?? 0) - dt;
-    if (zombie.retargetIn > 0) return;
-    const sound = this.findLoudestSound(context, zombie);
-    if (sound?.kind === "civilization") {
-      this.investigateSound(zombie, sound.point);
-    } else if (!zombie.soundTarget && zombie.investigateTime! > 0 && zombie.investigateTarget) {
-      zombie.soundTarget = this.extendDirection(zombie, zombie.investigateTarget, ZOMBIE_MOMENTUM_DISTANCE);
-      zombie.wanderTarget = null;
-    } else if (sound?.kind === "zombie" && (!zombie.soundTarget || sound.score >= ZOMBIE_GROUP_REDIRECT_SCORE)) {
-      zombie.soundTarget = sound.point;
-      zombie.wanderTarget = null;
-    } else if (!zombie.soundTarget) {
-      zombie.wanderTarget = this.chooseWanderTarget(zombie);
-    }
-    zombie.retargetIn = ZOMBIE_RETARGET_SECONDS + Math.random() * 0.6;
-  }
+	private updateInvestigation(context: UnitSimulationContext, zombie: Unit, dt: number) {
+		zombie.investigateTime = Math.max(0, (zombie.investigateTime || 0) - dt);
+		zombie.retargetIn = (zombie.retargetIn ?? 0) - dt;
+		if (zombie.retargetIn > 0) return;
+		const sound = this.findLoudestSound(context, zombie);
+		if (sound?.kind === "civilization") {
+			this.investigateSound(zombie, sound.point);
+		} else if (!zombie.soundTarget && zombie.investigateTime! > 0 && zombie.investigateTarget) {
+			zombie.soundTarget = this.extendDirection(zombie, zombie.investigateTarget, ZOMBIE_MOMENTUM_DISTANCE);
+			zombie.wanderTarget = null;
+		} else if (sound?.kind === "zombie" && (!zombie.soundTarget || sound.score >= ZOMBIE_GROUP_REDIRECT_SCORE)) {
+			zombie.soundTarget = sound.point;
+			zombie.wanderTarget = null;
+		} else if (!zombie.soundTarget) {
+			zombie.wanderTarget = this.chooseWanderTarget(zombie);
+		}
+		zombie.retargetIn = ZOMBIE_RETARGET_SECONDS + Math.random() * 0.6;
+	}
 
-  private investigateSound(zombie: Unit, point: { x: number; y: number }) {
-    zombie.soundTarget = point;
-    zombie.investigateTarget = point;
-    zombie.investigateTime = ZOMBIE_INVESTIGATE_SECONDS;
-    zombie.wanderTarget = null;
-  }
+	private investigateSound(zombie: Unit, point: { x: number; y: number }) {
+		zombie.soundTarget = point;
+		zombie.investigateTarget = point;
+		zombie.investigateTime = ZOMBIE_INVESTIGATE_SECONDS;
+		zombie.wanderTarget = null;
+	}
 
-  private moveTowardCurrentGoal(context: UnitSimulationContext, zombie: Unit, dt: number) {
-    const moveTarget = zombie.soundTarget || zombie.wanderTarget;
-    if (!moveTarget) return;
-    zombie.facing = moveTarget.x < zombie.x ? "left" : "right";
-    const arrived = context.moveUnit(zombie, moveTarget, this.stats.speed * dt);
-    if (!arrived && context.distance(zombie, moveTarget) >= 0.45) return;
-    const nextTarget = this.extendDirection(zombie, moveTarget, ZOMBIE_MOMENTUM_DISTANCE);
-    if (zombie.soundTarget) zombie.soundTarget = nextTarget;
-    else zombie.wanderTarget = nextTarget;
-    zombie.retargetIn = 0;
-  }
+	private moveTowardCurrentGoal(context: UnitSimulationContext, zombie: Unit, dt: number) {
+		const moveTarget = zombie.soundTarget || zombie.wanderTarget;
+		if (!moveTarget) return;
+		zombie.facing = moveTarget.x < zombie.x ? "left" : "right";
+		const arrived = context.moveUnit(zombie, moveTarget, this.stats.speed * dt);
+		if (!arrived && context.distance(zombie, moveTarget) >= 0.45) return;
+		const nextTarget = this.extendDirection(zombie, moveTarget, ZOMBIE_MOMENTUM_DISTANCE);
+		if (zombie.soundTarget) zombie.soundTarget = nextTarget;
+			else zombie.wanderTarget = nextTarget;
+		zombie.retargetIn = 0;
+	}
 
-  private findNearestTarget(context: UnitSimulationContext, zombie: Unit, range: number): UnitCombatTarget | null {
-    const unit = this.findNearestUnitTarget(context, zombie, range);
-    return unit || this.findNearestTownCenterTarget(context, zombie, range);
-  }
+	private findNearestTarget(context: UnitSimulationContext, zombie: Unit, range: number): UnitCombatTarget | null {
+		const unit = this.findNearestUnitTarget(context, zombie, range);
+		return unit || this.findNearestTownCenterTarget(context, zombie, range);
+	}
 
-  private findNearestUnitTarget(context: UnitSimulationContext, zombie: Unit, range: number): Unit | null {
-    let best: Unit | null = null;
-    let bestDist = range;
-    for (const unit of context.nearbyTargetUnits(zombie, range)) {
-      const d = context.distance(context.centerOf(zombie), context.centerOf(unit));
-      if (d < bestDist) {
-        best = unit;
-        bestDist = d;
-      }
-    }
-    return best;
-  }
+	private findNearestUnitTarget(context: UnitSimulationContext, zombie: Unit, range: number): Unit | null {
+		let best: Unit | null = null;
+		let bestDist = range;
+		for (const unit of context.nearbyTargetUnits(zombie, range)) {
+			const d = context.distance(context.centerOf(zombie), context.centerOf(unit));
+			if (d < bestDist) {
+				best = unit;
+				bestDist = d;
+			}
+		}
+		return best;
+	}
 
-  private findNearestTownCenterTarget(context: UnitSimulationContext, zombie: Unit, range: number): Building | null {
-    let best: Building | null = null;
-    let bestDist = range;
-    for (const building of Object.values(context.world.buildings)) {
-      if (!building.isTownCenter() || building.hp <= 0) continue;
-      const d = context.distance(context.centerOf(zombie), context.centerOf(building));
-      if (d < bestDist) {
-        best = building;
-        bestDist = d;
-      }
-    }
-    return best;
-  }
+	private findNearestTownCenterTarget(context: UnitSimulationContext, zombie: Unit, range: number): Building | null {
+		let best: Building | null = null;
+		let bestDist = range;
+		for (const building of Object.values(context.world.buildings)) {
+			if (!building.isTownCenter() || building.hp <= 0) continue;
+			const d = context.distance(context.centerOf(zombie), context.centerOf(building));
+			if (d < bestDist) {
+				best = building;
+				bestDist = d;
+			}
+		}
+		return best;
+	}
 
-  private findLoudestSound(context: UnitSimulationContext, listener: Unit): { point: Vec2; score: number; kind: "civilization" | "zombie" } | null {
-    let bestCivilization: { point: Vec2; score: number; kind: "civilization" } | null = null;
-    let bestZombie: { point: Vec2; score: number; kind: "zombie" } | null = null;
-    const consider = (point: Vec2, strength: number, kind: "civilization" | "zombie") => {
-      if (strength <= 0) return;
-      const d = context.distance(listener, point);
-      const range = ZOMBIE_HEARING_BASE_RANGE + strength * ZOMBIE_HEARING_RANGE_PER_SOUND;
-      if (d > range) return;
-      const score = strength / Math.max(4, d * d);
-      if (kind === "civilization") {
-        if (!bestCivilization || score > bestCivilization.score) bestCivilization = { point, score, kind };
-      } else if (!bestZombie || score > bestZombie.score) {
-        bestZombie = { point, score, kind };
-      }
-    };
-    for (const unit of Object.values(context.world.units)) {
-      if (unit.id === listener.id) continue;
-      const kind = unit.type === "zombie" ? "zombie" : "civilization";
-      const strength = kind === "zombie" ? this.groupSoundLevel(context, unit) : context.unitSoundLevel(unit);
-      consider(unit, strength, kind);
-    }
-    for (const building of Object.values(context.world.buildings)) {
-      consider(context.centerOf(building), building.soundLevel(), "civilization");
-    }
-    for (const noise of context.world.actionNoises) {
-      consider(noise, noise.sound, "civilization");
-    }
-    return bestCivilization || bestZombie;
-  }
+	private findLoudestSound(context: UnitSimulationContext, listener: Unit): { point: Vec2; score: number; kind: "civilization" | "zombie" } | null {
+		let bestCivilization: { point: Vec2; score: number; kind: "civilization" } | null = null;
+		let bestZombie: { point: Vec2; score: number; kind: "zombie" } | null = null;
+		const consider = (point: Vec2, strength: number, kind: "civilization" | "zombie") => {
+			if (strength <= 0) return;
+			const d = context.distance(listener, point);
+			const range = ZOMBIE_HEARING_BASE_RANGE + strength * ZOMBIE_HEARING_RANGE_PER_SOUND;
+			if (d > range) return;
+			const score = strength / Math.max(4, d * d);
+			if (kind === "civilization") {
+				if (!bestCivilization || score > bestCivilization.score) bestCivilization = { point, score, kind };
+			} else if (!bestZombie || score > bestZombie.score) {
+				bestZombie = { point, score, kind };
+			}
+		};
+		for (const unit of Object.values(context.world.units)) {
+			if (unit.id === listener.id) continue;
+			const kind = unit.type === "zombie" ? "zombie" : "civilization";
+			const strength = kind === "zombie" ? this.groupSoundLevel(context, unit) : context.unitSoundLevel(unit);
+			consider(unit, strength, kind);
+		}
+		for (const building of Object.values(context.world.buildings)) {
+			consider(context.centerOf(building), building.soundLevel(), "civilization");
+		}
+		for (const noise of context.world.actionNoises) {
+			consider(noise, noise.sound, "civilization");
+		}
+		return bestCivilization || bestZombie;
+	}
 
-  private groupSoundLevel(context: UnitSimulationContext, source: Unit) {
-    let nearbyZombies = 0;
-    for (const unit of Object.values(context.world.units)) {
-      if (unit.type !== "zombie") continue;
-      if (context.distance(source, unit) <= ZOMBIE_GROUP_SOUND_RADIUS) nearbyZombies += 1;
-    }
-    return Math.max(context.unitSoundLevel(source), nearbyZombies * context.unitSoundLevel(source));
-  }
+	private groupSoundLevel(context: UnitSimulationContext, source: Unit) {
+		let nearbyZombies = 0;
+		for (const unit of Object.values(context.world.units)) {
+			if (unit.type !== "zombie") continue;
+			if (context.distance(source, unit) <= ZOMBIE_GROUP_SOUND_RADIUS) nearbyZombies += 1;
+		}
+		return Math.max(context.unitSoundLevel(source), nearbyZombies * context.unitSoundLevel(source));
+	}
 
-  private chooseWanderTarget(zombie: Unit) {
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 2 + Math.random() * ZOMBIE_WANDER_RADIUS;
-    return {
-      x: this.clamp(zombie.x + Math.cos(angle) * radius, 0.5, MAP_SIZE - 0.5),
-      y: this.clamp(zombie.y + Math.sin(angle) * radius, 0.5, MAP_SIZE - 0.5),
-    };
-  }
+	private chooseWanderTarget(zombie: Unit) {
+		const angle = Math.random() * Math.PI * 2;
+		const radius = 2 + Math.random() * ZOMBIE_WANDER_RADIUS;
+		return {
+			x: this.clamp(zombie.x + Math.cos(angle) * radius, 0.5, MAP_SIZE - 0.5),
+			y: this.clamp(zombie.y + Math.sin(angle) * radius, 0.5, MAP_SIZE - 0.5),
+		};
+	}
 
-  private extendDirection(from: Vec2, toward: Vec2, distanceAhead: number) {
-    const dx = toward.x - from.x;
-    const dy = toward.y - from.y;
-    const length = Math.hypot(dx, dy) || 1;
-    return {
-      x: this.clamp(toward.x + (dx / length) * distanceAhead, 0.5, MAP_SIZE - 0.5),
-      y: this.clamp(toward.y + (dy / length) * distanceAhead, 0.5, MAP_SIZE - 0.5),
-    };
-  }
+	private extendDirection(from: Vec2, toward: Vec2, distanceAhead: number) {
+		const dx = toward.x - from.x;
+		const dy = toward.y - from.y;
+		const length = Math.hypot(dx, dy) || 1;
+		return {
+			x: this.clamp(toward.x + (dx / length) * distanceAhead, 0.5, MAP_SIZE - 0.5),
+			y: this.clamp(toward.y + (dy / length) * distanceAhead, 0.5, MAP_SIZE - 0.5),
+		};
+	}
 
-  private clamp(value: number, min: number, max: number) {
-    return Math.max(min, Math.min(max, value));
-  }
+	private clamp(value: number, min: number, max: number) {
+		return Math.max(min, Math.min(max, value));
+	}
 }

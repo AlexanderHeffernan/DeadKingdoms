@@ -12,6 +12,7 @@
     "dev": "npm run build:server && npm run dev:client && node dist/server/index.js",
     "test:pathing": "npm run build:server && node --test dist/server/pathing.test.js",
     "bench:pathing": "npm run build:server && node dist/server/pathing.benchmark.js",
+    "lint": "npx editorconfig-checker -exclude 'node_modules|dist'",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "start": "node dist/server/index.js"
   },
