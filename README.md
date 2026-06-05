@@ -15,6 +15,20 @@ npm run dev
 
 Open `http://127.0.0.1:3000`.
 
+## Pathing Tests and Benchmarks
+
+Run pathfinding correctness tests:
+
+```sh
+npm run test:pathing
+```
+
+Run repeatable pathfinding benchmarks for open-field, obstacle, and multi-unit scenarios:
+
+```sh
+npm run bench:pathing
+```
+
 ## Run with Docker
 
 Build and run the game on your machine or server:

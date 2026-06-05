@@ -31,6 +31,12 @@ export interface SoundDebugSource {
   range: number;
 }
 
+/** Backend simulation performance sent with snapshots. */
+export interface ServerPerfStats {
+  tps: number;
+  tickMs: number;
+}
+
 /** Sanitized player state sent to clients in snapshots. */
 export type SnapshotPlayer = Pick<
   Player,
@@ -54,4 +60,5 @@ export interface Snapshot {
   leaderboard: LeaderboardEntry[];
   notices: Notice[];
   soundDebug: SoundDebugSource[] | null;
+  serverPerf: ServerPerfStats;
 }

@@ -1,6 +1,6 @@
 import type { Building, Player, ResourceNode, Ruin, Unit } from "./entities.js";
 import type { BuildingId, MapDef, PlayerId, ResourceId, RuinId, UnitId, Vec2 } from "./core.js";
-import type { LeaderboardEntry, Notice } from "./snapshot.js";
+import type { LeaderboardEntry, Notice, ServerPerfStats } from "./snapshot.js";
 
 export interface ActionNoise extends Vec2 {
   id: string;
@@ -22,5 +22,6 @@ export interface World {
   leaderboard: LeaderboardEntry[];
   tick: number;
   spawnTimers: Record<string, number>;
+  serverPerf: ServerPerfStats & { lastTickAt?: number };
   _occupancy?: Uint8Array;
 }

@@ -80,6 +80,10 @@ export function makeSnapshot(
     leaderboard: world.leaderboard,
     notices: world.notices.slice(-8),
     soundDebug: player?.soundDebug ? buildSoundDebugSources(world) : null,
+    serverPerf: {
+      tps: world.serverPerf.tps,
+      tickMs: world.serverPerf.tickMs,
+    },
   };
 }
 

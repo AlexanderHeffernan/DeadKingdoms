@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import {
   ACTION_SOUND_DEFS,
   COLORS,
@@ -5,13 +6,15 @@ import {
   RESOURCE_DEFS,
   STARTING_RESOURCES,
   STARTING_UNITS,
+  TICK_RATE,
 } from "../shared/config.js";
 import { BUILDING_DEFS, createBuildingEntity } from "../shared/buildingRegistry.js";
 import { unitBehaviorFor } from "../shared/unitRegistry.js";
 import type { UnitSimulationContext } from "../shared/units/index.js";
 import type { GatherTarget } from "../shared/buildingDefinitions.js";
 import { id } from "./id.js";
-import { clamp, distance, moveToward, rectsOverlap } from "./math.js";
+import { clamp, distance, rectsOverlap } from "./math.js";
+import { findPath, isWalkable, moveNearTarget, moveUnit, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
 import type {
@@ -22,14 +25,12 @@ import type {
   CommandPayload,
   CommandResult,
   EntityId,
-  PathNode,
   Player,
   PlayerId,
   ResourceNode,
   ResourceType,
   Ruin,
   Unit,
-  UnitCommand,
   UnitId,
   UnitType,
   World,
@@ -42,6 +43,7 @@ const STUMP_DECAY_SECONDS = 60;
 const RUIN_DECAY_SECONDS = 60;
 const ZOMBIE_INITIAL_RETARGET_SECONDS = 1.2;
 const MAX_ACTION_NOISES = 240;
+const SERVER_PERF_SMOOTHING = 0.1;
 
 export function createWorld(): World {
   const world: World = {
@@ -56,6 +58,7 @@ export function createWorld(): World {
     leaderboard: [],
     tick: 0,
     spawnTimers: {},
+    serverPerf: { tps: TICK_RATE, tickMs: 0 },
   };
   seedResources(world);
   rebuildOccupancy(world);
@@ -118,18 +121,24 @@ export function command(world: World, playerId: PlayerId, body: CommandPayload):
 }
 
 export function stepWorld(world: World, dt: number) {
-  world.tick += 1;
-  rebuildOccupancy(world);
-  const context = createSimulationContext(world);
-  stepActionNoises(world, dt);
-  stepSpawner(context, zombieSpawnPolicy, dt);
-  stepResourceDecay(world, dt);
-  stepRuinDecay(world, dt);
-  for (const unit of Object.values(world.units)) unitBehavior(unit).step(context, unit, dt);
-  resolveUnitSeparation(world);
-  for (const building of Object.values(world.buildings)) stepBuilding(world, building, dt);
-  for (const playerId of Object.keys(world.players)) recalcPlayer(world, playerId);
-  updateLeaderboard(world);
+  const tickStartedAt = performance.now();
+  updateServerTps(world, tickStartedAt);
+  try {
+    world.tick += 1;
+    rebuildOccupancy(world);
+    const context = createSimulationContext(world);
+    stepActionNoises(world, dt);
+    stepSpawner(context, zombieSpawnPolicy, dt);
+    stepResourceDecay(world, dt);
+    stepRuinDecay(world, dt);
+    for (const unit of Object.values(world.units)) unitBehavior(unit).step(context, unit, dt);
+    resolveUnitSeparation(world);
+    for (const building of Object.values(world.buildings)) stepBuilding(world, building, dt);
+    for (const playerId of Object.keys(world.players)) recalcPlayer(world, playerId);
+    updateLeaderboard(world);
+  } finally {
+    updateServerTickDuration(world, performance.now() - tickStartedAt);
+  }
 }
 
 type CommandHandler<T extends CommandPayload["type"]> = (
@@ -150,6 +159,23 @@ const COMMAND_HANDLERS: { [K in CommandPayload["type"]]: CommandHandler<K> } = {
   toggleAutoFarm: commandToggleAutoFarm,
   replenishFarm: commandReplenishFarm,
 };
+
+function updateServerTps(world: World, tickStartedAt: number) {
+  const previousTickAt = world.serverPerf.lastTickAt;
+  world.serverPerf.lastTickAt = tickStartedAt;
+  if (previousTickAt === undefined) return;
+  const instantTps = 1000 / Math.max(1, tickStartedAt - previousTickAt);
+  world.serverPerf.tps = smoothMetric(world.serverPerf.tps, instantTps);
+}
+
+function updateServerTickDuration(world: World, tickMs: number) {
+  world.serverPerf.tickMs = smoothMetric(world.serverPerf.tickMs, tickMs);
+}
+
+function smoothMetric(current: number, next: number) {
+  if (current <= 0) return next;
+  return current * (1 - SERVER_PERF_SMOOTHING) + next * SERVER_PERF_SMOOTHING;
+}
 
 function createSimulationContext(world: World): UnitSimulationContext & import("./zombieSpawning.js").ZombieSpawnContext {
   return {
@@ -819,176 +845,6 @@ function canPlace(world: World, x: number, y: number, size: number): boolean {
     }
   }
   return true;
-}
-
-function moveUnit(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
-  const before = { x: unit.x, y: unit.y };
-  const arrived = moveToward(unit, target, maxStep);
-  if (isUnitBlocked(world, unit, target)) {
-    unit.x = before.x;
-    unit.y = before.y;
-    return true;
-  }
-  return arrived;
-}
-
-function resolveUnitSeparation(world: World) {
-  const units = Object.values(world.units);
-  const minDistance = 0.48;
-  for (let i = 0; i < units.length; i += 1) {
-    for (let j = i + 1; j < units.length; j += 1) {
-      const a = units[i]!;
-      const b = units[j]!;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist >= minDistance) continue;
-      const push = (minDistance - (dist || 0.001)) / 2;
-      const nx = dist ? dx / dist : 1;
-      const ny = dist ? dy / dist : 0;
-      nudgeUnit(world, a, -nx * push, -ny * push);
-      nudgeUnit(world, b, nx * push, ny * push);
-    }
-  }
-}
-
-function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {
-  const before = { x: unit.x, y: unit.y };
-  unit.x = clamp(unit.x + dx, 0.2, MAP_SIZE - 0.2);
-  unit.y = clamp(unit.y + dy, 0.2, MAP_SIZE - 0.2);
-  if (occupied(world, Math.floor(unit.x), Math.floor(unit.y))) {
-    unit.x = before.x;
-    unit.y = before.y;
-  }
-}
-
-function moveWithPath(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number): boolean {
-  if (!command.path || command.path.length === 0) {
-    command.path = findPath(world, unit, command);
-  }
-  const waypoint = command.path?.[0] || command;
-  unit.facing = waypoint.x < unit.x ? "left" : "right";
-  const arrivedWaypoint = moveUnit(world, unit, waypoint, maxStep);
-  if (arrivedWaypoint && command.path?.length) command.path.shift();
-  return (!command.path || command.path.length === 0) && distance(unit, command) < 0.35;
-}
-
-function moveNearTarget(world: World, unit: Unit, command: UnitCommand, target: { x: number; y: number }, range: number, maxStep: number): boolean {
-  if (distance(unit, target) <= range) return true;
-  if (!command.path || command.path.length === 0 || world.tick % 12 === 0) {
-    command.path = findPath(world, unit, nearestWalkableAround(world, target));
-  }
-  const waypoint = command.path?.[0] || target;
-  unit.facing = waypoint.x < unit.x ? "left" : "right";
-  const arrivedWaypoint = moveUnit(world, unit, waypoint, maxStep);
-  if (arrivedWaypoint && command.path?.length) command.path.shift();
-  return false;
-}
-
-function isUnitBlocked(world: World, unit: Unit, target: { x: number; y: number }): boolean {
-  const tileX = Math.floor(unit.x);
-  const tileY = Math.floor(unit.y);
-  if (!occupied(world, tileX, tileY)) return false;
-  // Check if the occupant is a building the unit is standing on (e.g. just spawned)
-  for (const building of Object.values(world.buildings)) {
-    if (unit.x >= building.x && unit.x < building.x + building.size && unit.y >= building.y && unit.y < building.y + building.size) {
-      if (distance(unit, target) <= building.size + 0.8) return false;
-      return true;
-    }
-  }
-  // Otherwise it's a resource tile: blocked unless we're close to our target.
-  return distance(unit, target) > 1.6;
-}
-
-function findPath(world: World, unit: Unit, target: { x: number; y: number }): PathNode[] {
-  const start = { x: Math.floor(unit.x), y: Math.floor(unit.y) };
-  const goal = nearestWalkableAround(world, target);
-  if (!isInMap(goal.x, goal.y)) return [];
-  if (start.x === goal.x && start.y === goal.y) return [{ x: goal.x + 0.5, y: goal.y + 0.5 }];
-  const open: PathNode[] = [{ ...start, g: 0, f: heuristic(start, goal), parent: null }];
-  const best = new Map([[key(start), open[0]]]);
-  const closed = new Set();
-  const dirs = [
-    { x: 1, y: 0 },
-    { x: -1, y: 0 },
-    { x: 0, y: 1 },
-    { x: 0, y: -1 },
-    { x: 1, y: 1 },
-    { x: 1, y: -1 },
-    { x: -1, y: 1 },
-    { x: -1, y: -1 },
-  ];
-  let iterations = 0;
-  while (open.length && iterations < 900) {
-    iterations += 1;
-    open.sort((a, b) => (a.f ?? 0) - (b.f ?? 0));
-    const current = open.shift()!;
-    if (current.x === goal.x && current.y === goal.y) return unpackPath(current);
-    closed.add(key(current));
-    for (const dir of dirs) {
-      const next = { x: current.x + dir.x, y: current.y + dir.y };
-      if (!isInMap(next.x, next.y) || closed.has(key(next))) continue;
-      if (!isWalkable(world, next.x, next.y) && !(next.x === goal.x && next.y === goal.y)) continue;
-      if (dir.x !== 0 && dir.y !== 0 && (!isWalkable(world, current.x + dir.x, current.y) || !isWalkable(world, current.x, current.y + dir.y))) continue;
-      const cost = (current.g ?? 0) + (dir.x !== 0 && dir.y !== 0 ? 1.4 : 1);
-      const existing = best.get(key(next));
-      if (existing && (existing.g ?? 0) <= cost) continue;
-      const node = { ...next, g: cost, f: cost + heuristic(next, goal), parent: current };
-      best.set(key(next), node);
-      open.push(node);
-    }
-  }
-  return [];
-}
-
-function nearestWalkableAround(world: World, target: { x: number; y: number }) {
-  const origin = { x: Math.floor(target.x), y: Math.floor(target.y) };
-  if (isWalkable(world, origin.x, origin.y)) return origin;
-  let best = origin;
-  let bestDistance = Infinity;
-  for (let radius = 1; radius <= 6; radius += 1) {
-    for (let y = origin.y - radius; y <= origin.y + radius; y += 1) {
-      for (let x = origin.x - radius; x <= origin.x + radius; x += 1) {
-        if (Math.abs(x - origin.x) !== radius && Math.abs(y - origin.y) !== radius) continue;
-        if (!isWalkable(world, x, y)) continue;
-        const d = Math.hypot(x - target.x, y - target.y);
-        if (d < bestDistance) {
-          best = { x, y };
-          bestDistance = d;
-        }
-      }
-    }
-    if (bestDistance < Infinity) return best;
-  }
-  return best;
-}
-
-function isWalkable(world: World, x: number, y: number): boolean {
-  if (!isInMap(x, y)) return false;
-  return !occupied(world, x, y);
-}
-
-function isInMap(x: number, y: number): boolean {
-  return x >= 0 && y >= 0 && x < MAP_SIZE && y < MAP_SIZE;
-}
-
-function key(point: { x: number; y: number }): string {
-  return `${point.x},${point.y}`;
-}
-
-function heuristic(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-function unpackPath(node: PathNode): PathNode[] {
-  const path = [];
-  let current = node;
-  while (current?.parent) {
-    path.push({ x: current.x + 0.5, y: current.y + 0.5 });
-    current = current.parent;
-  }
-  path.reverse();
-  return path;
 }
 
 function centerOf(entity: { x: number; y: number; size?: number }) {
