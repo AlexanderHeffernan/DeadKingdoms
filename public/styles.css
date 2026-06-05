@@ -44,6 +44,7 @@ button:disabled {
 }
 
 .join {
+  position: relative;
   height: 100vh;
   display: grid;
   place-items: center;
@@ -64,6 +65,19 @@ button:disabled {
 .join-panel h1 {
   margin: 0;
   font-size: 24px;
+}
+
+.online-players {
+  width: fit-content;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid rgb(233 189 89 / 0.32);
+  background: rgb(18 20 18 / 0.74);
+  color: #e9bd59;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .join-panel label {
@@ -90,6 +104,30 @@ button:disabled {
   min-height: 18px;
   color: #e9bd59;
   font-size: 13px;
+}
+
+.update-boxes {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  gap: 8px;
+  width: min(220px, calc(100vw - 32px));
+}
+
+.update-box {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid rgb(244 239 230 / 0.22);
+  background: rgb(24 27 23 / 0.84);
+  color: #cfc7b7;
+  font-size: 12px;
+}
+
+.update-box strong {
+  color: #f4efe6;
+  font-size: 14px;
 }
 
 .game {

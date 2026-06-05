@@ -8,6 +8,7 @@ import type { CommandPayload, PlayerId, World } from "../shared/types.js";
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
 const CLIENT_BUILD_DIR = new URL("../../dist/client/public/", import.meta.url);
 const SOUNDTRACK_DIR = new URL("../../assets/soundtrack/", import.meta.url);
+const PROJECT_DIR = new URL("../../", import.meta.url);
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -32,11 +33,49 @@ export function createHandler(world: World, clients: Set<Client>) {
     if (req.method === "POST" && url.pathname === "/api/command") return receiveCommand(req, res, world);
     if (req.method === "POST" && url.pathname === "/api/leave") return leaveGame(req, res, world);
     if (req.method === "GET" && url.pathname === "/events") return streamEvents(req, res, world, clients, url);
+    if (req.method === "GET" && url.pathname === "/api/status") return serverStatus(res, world);
     if (req.method === "GET" && url.pathname === "/api/snapshot") return json(res, makeSnapshot(world));
     if (req.method === "GET" && url.pathname === "/api/soundtrack") return listSoundtrack(res);
     if (req.method === "GET" && url.pathname.startsWith("/assets/soundtrack/")) return serveSoundtrack(req, res, url);
     return serveStatic(req, res, url);
   };
+}
+
+async function serverStatus(res: import("node:http").ServerResponse, world: World) {
+  const activePlayers = Object.values(world.players).filter((player) => !player.defeated).length;
+  json(res, {
+    activePlayers,
+    maxPlayers: MAX_PLAYERS,
+    lastUpdate: await lastUpdateTime(),
+  });
+}
+
+async function lastUpdateTime(): Promise<string | null> {
+  const envStamp = process.env.LAST_UPDATE || process.env.BUILD_DATE || process.env.SOURCE_DATE_EPOCH;
+  if (envStamp) {
+    const date = /^\d+$/.test(envStamp) ? new Date(Number(envStamp) * 1000) : new Date(envStamp);
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+
+  const roots = [PUBLIC_DIR, CLIENT_BUILD_DIR, new URL("package.json", PROJECT_DIR)];
+  let latest = 0;
+  for (const root of roots) {
+    latest = Math.max(latest, await newestMtime(root.pathname));
+  }
+  return latest > 0 ? new Date(latest).toISOString() : null;
+}
+
+async function newestMtime(pathname: string): Promise<number> {
+  try {
+    const stat = await fs.stat(pathname);
+    if (stat.isFile()) return stat.mtimeMs;
+    if (!stat.isDirectory()) return 0;
+    const entries = await fs.readdir(pathname, { withFileTypes: true });
+    const times = await Promise.all(entries.map((entry) => newestMtime(join(pathname, entry.name))));
+    return Math.max(stat.mtimeMs, ...times);
+  } catch {
+    return 0;
+  }
 }
 
 async function listSoundtrack(res: import("node:http").ServerResponse) {

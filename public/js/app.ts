@@ -1,4 +1,4 @@
-import { enableGodMode, enableSoundDebug, join, leave, sendCommand } from "./api.js";
+import { enableGodMode, enableSoundDebug, getStatus, join, leave, sendCommand } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
@@ -145,6 +145,8 @@ minimap.addEventListener("mousedown", onMinimapMouseDown);
 renderer.resize();
 drawLoop();
 initMusic();
+updateHomeStatus();
+setInterval(updateHomeStatus, 15000);
 if (state.playerId) enterGame();
 
 function enterGame() {
@@ -152,6 +154,24 @@ function enterGame() {
   document.getElementById("game")?.classList.remove("hidden");
   startMusic();
   connectEvents();
+}
+
+async function updateHomeStatus() {
+  const onlinePlayers = document.getElementById("onlinePlayers");
+  const lastUpdateDate = document.getElementById("lastUpdateDate");
+  const lastUpdateTime = document.getElementById("lastUpdateTime");
+  if (!onlinePlayers && !lastUpdateDate && !lastUpdateTime) return;
+  try {
+    const status = await getStatus();
+    if (onlinePlayers) onlinePlayers.textContent = `Players online: ${status.activePlayers}/${status.maxPlayers}`;
+    const updatedAt = status.lastUpdate ? new Date(status.lastUpdate) : null;
+    if (lastUpdateDate) lastUpdateDate.textContent = updatedAt ? updatedAt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "--";
+    if (lastUpdateTime) lastUpdateTime.textContent = updatedAt ? updatedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "--";
+  } catch {
+    if (onlinePlayers) onlinePlayers.textContent = "Players online: --";
+    if (lastUpdateDate) lastUpdateDate.textContent = "--";
+    if (lastUpdateTime) lastUpdateTime.textContent = "--";
+  }
 }
 
 async function initMusic() {
