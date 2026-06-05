@@ -1,4 +1,4 @@
-import { join, leave, sendCommand } from "./api.js";
+import { enableGodMode, join, leave, sendCommand } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
@@ -49,12 +49,16 @@ const view: ViewState = {
 };
 
 const ZOOM_STEPS = [0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const GOD_MODE_BUFFER_LENGTH = 40;
 
 const canvas = document.getElementById("world") as HTMLCanvasElement | null;
 const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
 if (!canvas || !minimap) throw new Error("Missing canvas elements");
 const renderer = new Renderer(canvas);
 let eventStream: EventSource | null = null;
+let godModeInput = "";
+let godModeEnabled = false;
+let godModeCheckPending = false;
 const ui = new UI(state, {
   setBuildMode(type) {
     view.buildMode = type;
@@ -127,6 +131,7 @@ canvas.addEventListener("wheel", (event) => {
   clampCamera();
 });
 window.addEventListener("keydown", onKeyDown);
+window.addEventListener("keydown", onGodModeKeyDown);
 minimap.addEventListener("mousedown", (event) => moveCameraFromMinimap(event));
 minimap.addEventListener("mousemove", (event) => {
   if (event.buttons === 1) moveCameraFromMinimap(event);
@@ -215,6 +220,35 @@ function updateMuteButton() {
   button.classList.toggle("muted", music.muted);
   button.setAttribute("aria-label", music.muted ? "Unmute music" : "Mute music");
   button.title = music.muted ? "Unmute music" : "Mute music";
+}
+
+function onGodModeKeyDown(event: KeyboardEvent) {
+  if (godModeEnabled || !state.playerId) return;
+  if (event.key.length !== 1) return;
+  godModeInput = `${godModeInput}${event.key}`.slice(-GOD_MODE_BUFFER_LENGTH);
+  if (godModeCheckPending) return;
+  void maybeEnableGodMode();
+}
+
+async function maybeEnableGodMode() {
+  if (!state.playerId || godModeInput.length < 3) return;
+  const checkedInput = godModeInput;
+  godModeCheckPending = true;
+  try {
+    const result = await enableGodMode(state.playerId, checkedInput);
+    if (result.ok) {
+      godModeEnabled = true;
+      godModeInput = "";
+      state.exploredSet.clear();
+      ui.showToast("God mode enabled: full map revealed.");
+      connectEvents();
+    }
+  } catch {
+    // Keep this shortcut silent unless it succeeds.
+  } finally {
+    godModeCheckPending = false;
+    if (!godModeEnabled && checkedInput !== godModeInput) void maybeEnableGodMode();
+  }
 }
 
 function connectEvents() {

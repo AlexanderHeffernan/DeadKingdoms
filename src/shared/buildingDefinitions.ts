@@ -39,6 +39,7 @@ export type BuildingStats = {
   score: number;
   cost: ResourceCost;
   vision: number;
+  sound: number;
 };
 
 export type BuildingInit = {
@@ -93,6 +94,9 @@ export interface BuildingEntity extends BuildingSnapshot, GatherTarget {
 
   /** Population capacity contributed by this building when complete. */
   populationCapacity(): number;
+
+  /** Persistent noise this completed building emits for zombie attraction. */
+  soundLevel(): number;
 
   /** Whether the supplied player can gather from this building. */
   canBeGatheredBy(playerId: PlayerId): boolean;
@@ -255,6 +259,10 @@ export abstract class Building implements BuildingEntity {
     return 0;
   }
 
+  soundLevel() {
+    return this.isComplete() ? this.stats.sound : this.stats.sound * 0.5;
+  }
+
   /** Whether the supplied player can gather from this building. */
   canBeGatheredBy(_playerId: PlayerId) {
     return false;
@@ -387,7 +395,7 @@ export class TownCenter extends ProductionDepotBuilding {
       type: "townCenter",
       label: "Town Center",
       sprite: "townCenter",
-      stats: { maxHp: 520, size: 4, score: 120, cost: { wood: 0 }, vision: 8 },
+      stats: { maxHp: 520, size: 4, score: 120, cost: { wood: 0 }, vision: 8, sound: 10 },
     });
   }
 
@@ -405,7 +413,7 @@ export class House extends Building {
       type: "house",
       label: "House",
       sprite: "house",
-      stats: { maxHp: 140, size: 2, score: 28, cost: { wood: 35 }, vision: 5 },
+      stats: { maxHp: 140, size: 2, score: 28, cost: { wood: 35 }, vision: 5, sound: 1.5 },
     });
   }
 
@@ -420,7 +428,7 @@ export class Barracks extends ProductionBuilding {
       type: "barracks",
       label: "Barracks",
       sprite: "barracks",
-      stats: { maxHp: 260, size: 3, score: 70, cost: { wood: 120, ore: 30 }, vision: 6 },
+      stats: { maxHp: 260, size: 3, score: 70, cost: { wood: 120, ore: 30 }, vision: 6, sound: 5 },
     });
   }
 
@@ -433,7 +441,7 @@ export class WatchTower extends Building {
       type: "watchTower",
       label: "Watch Tower",
       sprite: "watchTower",
-      stats: { maxHp: 210, size: 1, score: 55, cost: { wood: 80, ore: 45 }, vision: 11 },
+      stats: { maxHp: 210, size: 1, score: 55, cost: { wood: 80, ore: 45 }, vision: 11, sound: 3 },
     });
   }
 
@@ -450,7 +458,7 @@ export class Farm extends Building {
       type: "farm",
       label: "Farm",
       sprite: "farm",
-      stats: { maxHp: 95, size: 4, score: 22, cost: { wood: 45 }, vision: 3 },
+      stats: { maxHp: 95, size: 4, score: 22, cost: { wood: 45 }, vision: 3, sound: 2 },
     });
     this.amount ??= 160;
     this.maxAmount ??= 160;
@@ -508,7 +516,7 @@ export class LumberCamp extends DepotBuilding {
       type: "lumberCamp",
       label: "Lumber Camp",
       sprite: "lumberCamp",
-      stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5 },
+      stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5, sound: 3 },
     });
   }
 
@@ -521,7 +529,7 @@ export class FoodDepot extends DepotBuilding {
       type: "foodDepot",
       label: "Food Depot",
       sprite: "foodDepot",
-      stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5 },
+      stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5, sound: 3 },
     });
   }
 
@@ -534,7 +542,7 @@ export class MiningCamp extends DepotBuilding {
       type: "miningCamp",
       label: "Mining Camp",
       sprite: "miningCamp",
-      stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5 },
+      stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5, sound: 3 },
     });
   }
 

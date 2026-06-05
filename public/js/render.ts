@@ -67,7 +67,7 @@ export class Renderer {
       ...Object.values(state.snapshot.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
       ...Object.values(state.snapshot.buildings),
       ...Object.values(state.snapshot.units),
-    ].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+    ].filter((entity) => isEntityNearViewport(entity, view.camera)).sort((a, b) => (a.x + a.y) - (b.x + b.y));
 
     for (const entity of entities) this.drawEntity(entity, state, view);
     this.drawEffects(state, view);
@@ -79,8 +79,9 @@ export class Renderer {
   drawTiles(size: number, camera: CameraState, visibility: ClientSnapshot["visibility"]) {
     const exploredSet = visibility?.exploredSet;
     const visibleSet = visibility?.visibleSet;
-    for (let y = 0; y < size; y += 1) {
-      for (let x = 0; x < size; x += 1) {
+    const bounds = visibleTileBounds(size, camera);
+    for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+      for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
         const key = y * size + x;
         if (visibility && !exploredSet?.has(key)) continue;
         const screen = isoToScreen(x, y, camera);
@@ -337,7 +338,7 @@ export class Renderer {
       ...Object.values(state.lastSeen.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
     ].filter((entity) => !visibleIds.has(entity.id) && isExplored(state.snapshot!.visibility, entity.x, entity.y, entity.size || 1, mapSize));
     this.ctx.globalAlpha = 0.35;
-    for (const entity of remembered.sort((a, b) => (a.x + a.y) - (b.x + b.y))) this.drawEntity(entity, state, view);
+    for (const entity of remembered.filter((entity) => isEntityNearViewport(entity, view.camera)).sort((a, b) => (a.x + a.y) - (b.x + b.y))) this.drawEntity(entity, state, view);
     this.ctx.globalAlpha = 1;
   }
 
@@ -461,6 +462,13 @@ function entityCenter(entity: RenderEntity, camera: CameraState) {
   return isoToScreen(entity.x + (entity.size || 0) / 2, entity.y + (entity.size || 0) / 2, camera);
 }
 
+function isEntityNearViewport(entity: RenderEntity, camera: CameraState) {
+  const size = entity.size || 1;
+  const p = isoToScreen(entity.x + size / 2, entity.y + size / 2, camera);
+  const margin = 260;
+  return p.x >= -margin && p.x <= window.innerWidth + margin && p.y >= -margin && p.y <= window.innerHeight + margin;
+}
+
 function footprintCenter(x: number, y: number, size: number, camera: CameraState) {
   return isoToScreen(x + (size - 1) / 2, y + (size - 1) / 2, camera);
 }
@@ -525,6 +533,26 @@ function screenToIsoLocal(x: number, y: number, camera: CameraState) {
     x: sy / TILE_H + sx / TILE_W,
     y: sy / TILE_H - sx / TILE_W,
   };
+}
+
+function visibleTileBounds(size: number, camera: CameraState) {
+  const margin = 140;
+  const corners = [
+    screenToIsoLocal(-margin, -margin, camera),
+    screenToIsoLocal(window.innerWidth + margin, -margin, camera),
+    screenToIsoLocal(window.innerWidth + margin, window.innerHeight + margin, camera),
+    screenToIsoLocal(-margin, window.innerHeight + margin, camera),
+  ];
+  return {
+    minX: clampInt(Math.floor(Math.min(...corners.map((point) => point.x))) - 3, 0, size - 1),
+    maxX: clampInt(Math.ceil(Math.max(...corners.map((point) => point.x))) + 3, 0, size - 1),
+    minY: clampInt(Math.floor(Math.min(...corners.map((point) => point.y))) - 3, 0, size - 1),
+    maxY: clampInt(Math.ceil(Math.max(...corners.map((point) => point.y))) + 3, 0, size - 1),
+  };
+}
+
+function clampInt(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function minimapIsoToScreen(x: number, y: number, size: number, width: number, height: number) {

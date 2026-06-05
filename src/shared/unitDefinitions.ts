@@ -11,6 +11,7 @@ export type UnitStats = {
   trainTime: number;
   cost: ResourceCost;
   vision: number;
+  sound: number;
 };
 
 export type UnitClass<T extends BaseUnit = BaseUnit> = {
@@ -56,6 +57,9 @@ export interface UnitBehavior {
 
   /** Maximum resource amount this unit can carry from non-building resource nodes. */
   carryCapacity(): number;
+
+  /** Persistent noise this unit emits for zombie attraction. */
+  soundLevel(): number;
 
   /** Amount gathered per completed gather cycle for the supplied target. */
   gatherAmount(target: GatherTarget): number;
@@ -107,6 +111,10 @@ export abstract class BaseUnit implements UnitBehavior {
     return 0;
   }
 
+  soundLevel() {
+    return this.stats.sound;
+  }
+
   gatherAmount(target: GatherTarget) {
     return target.gatherAmountFor(this);
   }
@@ -131,6 +139,7 @@ export class VillagerUnit extends BaseUnit {
     trainTime: 7,
     cost: { food: 45 },
     vision: 6,
+    sound: 1,
   } as const;
 
   canGather() {
@@ -161,9 +170,28 @@ export class SoldierUnit extends BaseUnit {
     trainTime: 8,
     cost: { food: 45, ore: 20 },
     vision: 7,
+    sound: 1.8,
   } as const;
 
   canAutoAcquireTargets() {
     return true;
   }
+}
+
+export class ZombieUnit extends BaseUnit {
+  static readonly type = "zombie";
+  static readonly label = "Zombie";
+  static readonly sprite = "zombie";
+  static readonly stats = {
+    maxHp: 34,
+    speed: 1.35,
+    attack: 5,
+    range: 0.55,
+    cooldown: 1.5,
+    score: 0,
+    trainTime: 0,
+    cost: {},
+    vision: 0,
+    sound: 0.35,
+  } as const;
 }
