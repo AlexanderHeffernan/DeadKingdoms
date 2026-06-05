@@ -119,4 +119,3 @@ Useful commands:
 - `npm run typecheck`
 - `npm run build`
 - `npm run test:pathing`
-- `npm run lint`
