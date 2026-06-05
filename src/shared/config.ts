@@ -4,6 +4,8 @@ export const MAX_PLAYERS = 10;
 export const MAP_SIZE = 256;
 export const TILE_W = 64;
 export const TILE_H = 32;
+export const SOUND_HEARING_BASE_RANGE = 12;
+export const SOUND_HEARING_RANGE_PER_SOUND = 4.5;
 
 export const RESOURCE_TYPES = ["wood", "food", "ore"] as const;
 

@@ -1,4 +1,11 @@
-import { ACTION_SOUND_DEFS, COLORS, MAP_SIZE, RESOURCE_DEFS, STARTING_RESOURCES, STARTING_UNITS } from "../shared/config.js";
+import {
+  ACTION_SOUND_DEFS,
+  COLORS,
+  MAP_SIZE,
+  RESOURCE_DEFS,
+  STARTING_RESOURCES,
+  STARTING_UNITS,
+} from "../shared/config.js";
 import { BUILDING_DEFS, createBuildingEntity } from "../shared/buildingRegistry.js";
 import { unitBehaviorFor } from "../shared/unitRegistry.js";
 import type { UnitSimulationContext } from "../shared/units/index.js";
