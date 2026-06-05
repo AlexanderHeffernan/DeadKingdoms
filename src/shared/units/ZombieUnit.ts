@@ -111,8 +111,7 @@ export class ZombieUnit extends BaseUnit {
   private findNearestUnitTarget(context: UnitSimulationContext, zombie: Unit, range: number): Unit | null {
     let best: Unit | null = null;
     let bestDist = range;
-    for (const unit of Object.values(context.world.units)) {
-      if (unit.type === "zombie" || unit.hp <= 0) continue;
+    for (const unit of context.nearbyTargetUnits(zombie, range)) {
       const d = context.distance(context.centerOf(zombie), context.centerOf(unit));
       if (d < bestDist) {
         best = unit;

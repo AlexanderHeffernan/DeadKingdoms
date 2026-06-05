@@ -21,6 +21,7 @@ export class UI {
   resources: HTMLElement;
   status: HTMLElement;
   ping: HTMLElement;
+  serverPerf: HTMLElement;
   leaderboard: HTMLElement;
   selection: HTMLElement;
   actionsEl: HTMLElement;
@@ -35,6 +36,7 @@ export class UI {
     this.resources = mustGet("resources");
     this.status = mustGet("status");
     this.ping = mustGet("ping");
+    this.serverPerf = mustGet("serverPerf");
     this.leaderboard = mustGet("leaderboard");
     this.selection = mustGet("selection");
     this.actionsEl = mustGet("actions");
@@ -60,6 +62,7 @@ export class UI {
     this.attachResourceHovers();
     this.status.textContent = player.defeated ? "Defeated" : "";
     this.ping.textContent = `Ping ${Math.max(0, Date.now() - snapshot.now)}ms`;
+    this.serverPerf.textContent = `TPS ${Math.round(snapshot.serverPerf.tps)} Tick ${snapshot.serverPerf.tickMs.toFixed(1)}ms`;
     this.renderLeaderboard(snapshot);
     this.renderSelection(snapshot);
     const notice = snapshot.notices.at(-1)?.text || "";
