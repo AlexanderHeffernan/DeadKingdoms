@@ -388,7 +388,8 @@ export class Renderer {
         center.y,
         ownerColor || "#f4efe6",
       );
-    this.drawTeamAccent(entity, center.x, y, visualWidth, ownerColor);
+    if (entity.kind === "unit")
+      this.drawTeamAccent(entity, center.x, y, visualWidth, ownerColor);
     if ("attackFlash" in entity && entity.attackFlash > 0)
       this.drawAttackFlash(center.x, center.y, ownerColor || "#f4efe6");
     if (entity.kind === "unit") {
@@ -690,14 +691,7 @@ export class Renderer {
     if (!color || !entity.ownerId) return;
     const px = worldPixel(this.currentZoom || 1);
     this.overlayLayer.beginFill(hexToNumber(color));
-    if (entity.kind === "building")
-      this.overlayLayer.drawRect(
-        Math.round(centerX - visualWidth * 0.18),
-        Math.round(topY + px * 2),
-        Math.max(px * 3, visualWidth * 0.16),
-        px * 2,
-      );
-    else if (entity.kind === "unit")
+    if (entity.kind === "unit")
       this.overlayLayer.drawRect(
         Math.round(centerX - px * 3),
         Math.round(topY + px * 7),
@@ -779,40 +773,97 @@ export class Renderer {
       view.hoverTile.x,
       view.hoverTile.y,
     );
-    this.drawFootprint(
+    const ownerColor =
+      (state.playerId && state.snapshot?.players[state.playerId]?.color) ||
+      "#f4efe6";
+    this.drawPixelFootprint(
       view.hoverTile.x,
       view.hoverTile.y,
       size,
       view.camera,
-      valid ? "#e9bd59" : "#d84b3e",
-      valid ? "rgb(233 189 89 / 0.28)" : "rgb(216 75 62 / 0.28)",
-      2,
+      valid ? ownerColor : "#d84b3e",
+    );
+    this.drawPlacementPreviewSprite(
+      mode as SpriteName,
+      view.hoverTile.x,
+      view.hoverTile.y,
+      size,
+      view.camera,
+      ownerColor,
+      valid,
     );
   }
 
-  private drawFootprint(
+  private drawPlacementPreviewSprite(
+    spriteName: SpriteName,
     x: number,
     y: number,
     size: number,
     camera: CameraState,
-    stroke: string,
-    fill: string,
-    lineWidth = 2,
+    ownerColor: string,
+    valid: boolean,
   ) {
-    const points = [
-      isoToScreen(x - 0.5, y - 0.5, camera),
-      isoToScreen(x + size - 0.5, y - 0.5, camera),
-      isoToScreen(x + size - 0.5, y + size - 0.5, camera),
-      isoToScreen(x - 0.5, y + size - 0.5, camera),
-    ];
-    this.overlayLayer.lineStyle(lineWidth, hexToNumber(stroke), 1);
-    this.overlayLayer.beginFill(cssColorToNumber(fill), cssAlpha(fill));
-    this.overlayLayer.moveTo(points[0]!.x, points[0]!.y);
-    for (let i = 1; i < points.length; i += 1)
-      this.overlayLayer.lineTo(points[i]!.x, points[i]!.y);
-    this.overlayLayer.closePath();
-    this.overlayLayer.endFill();
-    this.overlayLayer.lineStyle();
+    const png = pngSprites[spriteName];
+    if (!png && !sprites[spriteName]) return;
+    const center = footprintCenter(x, y, size, camera);
+    const px = worldPixel(camera.zoom || 1);
+    const bounds = spriteMetrics(spriteName);
+    const visualWidth = bounds.width * px;
+    const spriteX = center.x - visualWidth / 2 - bounds.minX * px;
+    const topY = spriteTopY(
+      { kind: "building", type: spriteName, x, y, size } as Building,
+      center.y,
+      bounds,
+      px,
+      camera.zoom || 1,
+    );
+    const alpha = valid ? 0.42 : 0.28;
+    const zIndex = (x + y) * 100 + 0.75;
+    const tint = valid ? 0xffffff : 0xffb3aa;
+
+    if (png) {
+      const flagKey = "placementPreview:flag";
+      if (png.flag) {
+        const flag = this.placeSprite(
+          flagKey,
+          this.pngTexture(png.flag),
+          spriteX,
+          topY,
+          px,
+          false,
+          alpha,
+          zIndex - 0.5,
+        );
+        flag.tint = hexToNumber(ownerColor);
+      } else {
+        const existingFlag = this.entitySprites.get(flagKey);
+        if (existingFlag) existingFlag.visible = false;
+      }
+      const sprite = this.placeSprite(
+        "placementPreview",
+        this.pngTexture(png.base),
+        spriteX,
+        topY,
+        px,
+        false,
+        alpha,
+        zIndex,
+      );
+      sprite.tint = tint;
+      return;
+    }
+
+    const sprite = this.placeSprite(
+      "placementPreview",
+      this.spriteTexture(spriteName, sprites[spriteName]!, ownerColor),
+      spriteX,
+      topY,
+      px,
+      false,
+      alpha,
+      zIndex,
+    );
+    sprite.tint = tint;
   }
 
   private drawMinimap(state: GameState, view: ViewState) {
@@ -1050,14 +1101,6 @@ function spriteTopY(
   return footprintBottom - (bounds.maxY + 1) * scale;
 }
 
-function shade(hex: string, factor: number) {
-  const n = Number.parseInt(hex.slice(1), 16);
-  const r = Math.max(0, Math.min(255, Math.round(((n >> 16) & 255) * factor)));
-  const g = Math.max(0, Math.min(255, Math.round(((n >> 8) & 255) * factor)));
-  const b = Math.max(0, Math.min(255, Math.round((n & 255) * factor)));
-  return `rgb(${r} ${g} ${b})`;
-}
-
 function isExplored(
   visibility: ClientSnapshot["visibility"],
   x: number,
@@ -1154,16 +1197,4 @@ function soundColor(source: SoundDebugSource) {
 function hexToNumber(color = "#ffffff") {
   if (!color.startsWith("#")) return 0xffffff;
   return Number.parseInt(color.slice(1), 16);
-}
-
-function cssColorToNumber(color: string) {
-  if (color.startsWith("#")) return hexToNumber(color);
-  if (color.includes("216 75 62")) return 0xd84b3e;
-  if (color.includes("233 189 89")) return 0xe9bd59;
-  return 0x111813;
-}
-
-function cssAlpha(color: string) {
-  const match = /\/\s*([0-9.]+)/.exec(color);
-  return match ? Number(match[1]) : 1;
 }
