@@ -15,6 +15,15 @@ import type {
 import type { UnitCommand } from "./unitCommands.js";
 import type { VisibilityCache } from "./visibility.js";
 import type { BuildingEntity, BuildingSnapshot } from "../buildingDefinitions.js";
+import type { AdminLevel } from "./snapshot.js";
+
+export interface PlayerConnection {
+	ipAddress: string | null;
+	connectedAt: number;
+	lastSeenAt: number;
+	streamCount: number;
+	pingMs?: number;
+}
 
 /** Player-owned economy, score, fog-of-war, and population state. */
 export interface Player {
@@ -30,8 +39,10 @@ export interface Player {
 	score: number;
 	joinedAt: number;
 	godMode?: boolean;
+	adminLevel?: AdminLevel;
 	soundDebug?: boolean;
 	pathDebug?: boolean;
+	connection?: PlayerConnection;
 	_visCache?: VisibilityCache;
 }
 

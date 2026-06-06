@@ -2,8 +2,9 @@ import { createReadStream, promises as fs } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { makeSnapshot } from "../shared/messages.js";
 import { MAX_PLAYERS } from "../shared/config.js";
-import { addPlayer, command, grantPlayerSoldiers, removePlayer, spawnZombieHorde } from "./world.js";
-import type { CommandPayload, PlayerId, World } from "../shared/types.js";
+import { addAdminLog, addPlayer, command, grantPlayerSoldiers, removePlayer, spawnZombieHorde } from "./world.js";
+import { Logs } from "../shared/logs.js";
+import type { AdminLevel, CommandPayload, Player, PlayerId, World } from "../shared/types.js";
 
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
 const CLIENT_BUILD_DIR = new URL("../../dist/client/public/", import.meta.url);
@@ -28,11 +29,14 @@ export function createHandler(world: World, clients: Set<Client>) {
 		const host = req.headers.host || "localhost";
 		const url = new URL(req.url ?? "/", `http://${host}`);
 		if (req.method === "POST" && url.pathname === "/api/join") return joinGame(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/god-mode") return enableGodMode(req, res, world);
+		if (req.method === "POST" && url.pathname === "/api/dev/admin-access") return enableAdminAccess(req, res, world);
+		if (req.method === "POST" && url.pathname === "/api/dev/full-map-vision") return enableFullMapVision(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/dev/sound-debug") return enableSoundDebug(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/dev/path-debug") return enablePathDebug(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/dev/spawn-zombies") return spawnDevZombies(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/dev/grant-soldiers") return grantDevSoldiers(req, res, world);
+		if (req.method === "POST" && url.pathname === "/api/log") return receiveClientLog(req, res, world);
+		if (req.method === "POST" && url.pathname === "/api/ping") return receiveClientPing(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/command") return receiveCommand(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/leave") return leaveGame(req, res, world);
 		if (req.method === "GET" && url.pathname === "/events") return streamEvents(req, res, world, clients, url);
@@ -175,20 +179,30 @@ async function joinGame(req: import("node:http").IncomingMessage, res: import("n
 	const name = typeof body.name === "string" ? body.name : "Player";
 	const color = typeof body.color === "string" ? body.color : null;
 	const playerId = addPlayer(world, name, color);
+	recordPlayerConnection(world.players[playerId], clientIp(req), false);
 	json(res, { ok: true, playerId });
 }
 
-async function enableGodMode(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const secret = process.env.DEV_GOD_MODE_SECRET;
-	if (!secret) return json(res, { ok: false, error: "God mode secret is not configured." }, 403);
+async function enableAdminAccess(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
 	const body = (await readJson(req)) as { playerId?: unknown; secret?: unknown };
-	if (typeof body.playerId !== "string" || typeof body.secret !== "string" || !body.secret.endsWith(secret)) {
-		return json(res, { ok: false, error: "Invalid god mode secret." }, 403);
+	const adminLevel = typeof body.secret === "string" ? adminLevelForSecret(body.secret) : null;
+	if (typeof body.playerId !== "string" || !adminLevel) {
+		return json(res, { ok: false, error: "Invalid admin secret." }, 403);
 	}
 	const player = world.players[body.playerId];
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	player.adminLevel = adminLevel;
+	json(res, { ok: true, adminLevel });
+}
+
+async function enableFullMapVision(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown };
+	const player = typeof body.playerId === "string" ? world.players[body.playerId] : null;
+	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
 	player.godMode = true;
 	delete player._visCache;
+	Logs.log(`${player.name} enabled full-map admin vision.`);
 	json(res, { ok: true });
 }
 
@@ -221,23 +235,42 @@ async function spawnDevZombies(req: import("node:http").IncomingMessage, res: im
 	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
 	const player = world.players[body.playerId];
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
-	if (!player.godMode) return json(res, { ok: false, error: "God mode is required." }, 403);
+	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
 	const count = typeof body.count === "number" ? body.count : 500;
 	const spawned = spawnZombieHorde(world, body.playerId, count);
+	Logs.log(`${player.name} deployed a hostile stress horde of ${spawned}.`);
 	json(res, { ok: true, spawned });
 }
 
 async function grantDevSoldiers(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const secret = process.env.DEV_GRANT_SOLDIERS_SECRET || "revealZombies";
-	const body = (await readJson(req)) as { playerId?: unknown; secret?: unknown; count?: unknown };
-	if (typeof body.playerId !== "string" || typeof body.secret !== "string" || !body.secret.endsWith(secret)) {
-		return json(res, { ok: false, error: "Invalid soldier grant secret." }, 403);
-	}
+	const body = (await readJson(req)) as { playerId?: unknown; count?: unknown };
+	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
 	const player = world.players[body.playerId];
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
 	const count = typeof body.count === "number" ? body.count : 100;
 	const granted = grantPlayerSoldiers(world, body.playerId, count);
+	Logs.log(`${player.name} granted ${granted} soldiers.`);
 	json(res, { ok: true, granted });
+}
+
+async function receiveClientLog(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown; message?: unknown };
+	if (typeof body.message !== "string") return json(res, { ok: false, error: "Log message is required." }, 400);
+	const player = typeof body.playerId === "string" ? world.players[body.playerId] : null;
+	const source = player?.name || "client";
+	addAdminLog(world, source, body.message);
+	json(res, { ok: true });
+}
+
+async function receiveClientPing(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown; pingMs?: unknown };
+	const player = typeof body.playerId === "string" ? world.players[body.playerId] : null;
+	const pingMs = typeof body.pingMs === "number" ? body.pingMs : null;
+	if (!player || !player.connection || pingMs === null) return json(res, { ok: false }, 400);
+	player.connection.pingMs = Math.max(0, Math.min(60000, Math.round(pingMs)));
+	player.connection.lastSeenAt = Date.now();
+	json(res, { ok: true });
 }
 
 async function receiveCommand(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
@@ -255,6 +288,8 @@ async function leaveGame(req: import("node:http").IncomingMessage, res: import("
 function streamEvents(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, clients: Set<Client>, url: URL) {
 	const playerIdParam = url.searchParams.get("playerId");
 	const playerId = playerIdParam ?? null;
+	const player = playerId ? world.players[playerId] : null;
+	recordPlayerConnection(player, clientIp(req), true);
 	res.writeHead(200, {
 		"Content-Type": "text/event-stream",
 		"Cache-Control": "no-cache",
@@ -267,7 +302,52 @@ function streamEvents(req: import("node:http").IncomingMessage, res: import("nod
 	clients.add(client);
 	res.write(`data: ${JSON.stringify(makeSnapshot(world, playerId, null))}\n\n`);
 	client.sentExplored = new Set(playerId ? world.players[playerId]?.explored || [] : []);
-	req.on("close", () => clients.delete(client));
+	req.on("close", () => {
+		clients.delete(client);
+		const currentPlayer = playerId ? world.players[playerId] : null;
+		if (currentPlayer?.connection) {
+			currentPlayer.connection.streamCount = Math.max(0, currentPlayer.connection.streamCount - 1);
+			currentPlayer.connection.lastSeenAt = Date.now();
+		}
+	});
+}
+
+function adminLevelForSecret(secret: string): AdminLevel | null {
+	const entries: Array<[AdminLevel, string | undefined]> = [
+		["operator", process.env.DEV_OPERATOR_SECRET],
+		["operator", process.env.DEV_GOD_MODE_SECRET],
+		["moderator", process.env.DEV_MODERATOR_SECRET],
+		["observer", process.env.DEV_OBSERVER_MODE_SECRET],
+	];
+	for (const [level, configuredSecret] of entries) {
+		if (configuredSecret && secret.endsWith(configuredSecret)) return level;
+	}
+	return null;
+}
+
+function recordPlayerConnection(player: Player | null | undefined, ipAddress: string | null, openedStream: boolean) {
+	if (!player) return;
+	const now = Date.now();
+	if (!player.connection) {
+		player.connection = {
+			ipAddress,
+			connectedAt: now,
+			lastSeenAt: now,
+			streamCount: 0,
+		};
+	} else {
+		player.connection.ipAddress = ipAddress || player.connection.ipAddress;
+		player.connection.lastSeenAt = now;
+	}
+	if (openedStream) player.connection.streamCount += 1;
+}
+
+function clientIp(req: import("node:http").IncomingMessage): string | null {
+	const forwardedFor = req.headers["x-forwarded-for"];
+	const forwardedIp = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+	const ipAddress = forwardedIp?.split(",")[0]?.trim() || req.socket.remoteAddress || null;
+	if (!ipAddress) return null;
+	return ipAddress.startsWith("::ffff:") ? ipAddress.slice(7) : ipAddress;
 }
 
 async function serveStatic(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, url: URL) {

@@ -1,6 +1,6 @@
 import { SOUND_HEARING_BASE_RANGE, SOUND_HEARING_RANGE_PER_SOUND } from "./config.js";
 import { unitBehaviorFor } from "./unitRegistry.js";
-import type { PlayerId, Snapshot, SoundDebugSource, Unit, VisibilityCache, World } from "./types.js";
+import type { AdminLevel, AdminSnapshot, PlayerId, Snapshot, SoundDebugSource, Unit, VisibilityCache, World } from "./types.js";
 import { isVisible } from "./visibility.js";
 
 const ZOMBIE_OWNER_ID = "zombies" as PlayerId;
@@ -84,6 +84,36 @@ export function makeSnapshot(
 			tps: world.serverPerf.tps,
 			tickMs: world.serverPerf.tickMs,
 		},
+		admin: buildAdminSnapshot(world, player?.adminLevel),
+	};
+}
+
+function buildAdminSnapshot(world: World, level: AdminLevel | undefined): AdminSnapshot | null {
+	if (!level) return null;
+	const canViewIpAddresses = level === "moderator" || level === "operator";
+	return {
+		level,
+		serverPerf: {
+			tps: world.serverPerf.tps,
+			tickMs: world.serverPerf.tickMs,
+			samples: world.serverPerf.samples.slice(),
+		},
+		players: Object.values(world.players).map((player) => ({
+			id: player.id,
+			name: player.name,
+			color: player.color,
+			defeated: player.defeated,
+			score: player.score,
+			population: player.population,
+			popCap: player.popCap,
+			joinedAt: player.joinedAt,
+			connected: (player.connection?.streamCount ?? 0) > 0,
+			lastSeenAt: player.connection?.lastSeenAt ?? null,
+			pingMs: player.connection?.pingMs ?? null,
+			...(canViewIpAddresses ? { ipAddress: player.connection?.ipAddress ?? "unknown" } : {}),
+		})),
+		events: world.notices.slice(-8),
+		logs: world.adminLogs.slice(-200),
 	};
 }
 

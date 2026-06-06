@@ -399,11 +399,12 @@ function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 		resources: {},
 		ruins: {},
 		notices: [],
+		adminLogs: [],
 		actionNoises: [],
 		leaderboard: [],
 		tick: 0,
 		spawnTimers: {},
-		serverPerf: { tps: 10, tickMs: 0 },
+		serverPerf: { tps: 10, tickMs: 0, samples: [] },
 		_occupancy: occupancy,
 	};
 }
