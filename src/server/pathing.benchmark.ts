@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Unit, World } from "../shared/types.js";
-import { findPath, resolveUnitSeparation } from "./pathing.js";
+import { findPath, findSharedPath, resolveUnitSeparation } from "./pathing.js";
 
 type PathRequest = {
 	unit: Unit;
@@ -13,6 +13,8 @@ type BenchmarkCase = {
 	repeats: number;
 	requests: PathRequest[];
 	world: World;
+	shared?: boolean;
+	crowd?: number;
 };
 
 type BenchmarkResult = {
@@ -47,6 +49,8 @@ function main() {
 		wallGapSinglePath(),
 		mazeSinglePath(),
 		clusteredGroupMove(),
+		clusteredGroupSharedMove(),
+		clusteredCrowdSharedMove(),
 		scatteredGroupMove(),
 	];
 	const separationCases = [
@@ -65,7 +69,7 @@ function main() {
 
 function runPathBenchmark(testCase: BenchmarkCase): BenchmarkResult {
 	for (let i = 0; i < Math.min(5, testCase.repeats); i += 1) {
-		for (const request of testCase.requests) findPath(testCase.world, request.unit, request.target);
+		for (const request of testCase.requests) findBenchmarkPath(testCase, request);
 	}
 
 	let totalPathLength = 0;
@@ -75,7 +79,7 @@ function runPathBenchmark(testCase: BenchmarkCase): BenchmarkResult {
 
 	for (let i = 0; i < testCase.repeats; i += 1) {
 		for (const request of testCase.requests) {
-			const path = findPath(testCase.world, request.unit, request.target);
+			const path = findBenchmarkPath(testCase, request);
 			totalPathLength += path.length;
 			if (path.length === 0) emptyPaths += 1;
 		}
@@ -91,6 +95,10 @@ function runPathBenchmark(testCase: BenchmarkCase): BenchmarkResult {
 		averagePathLength: totalPathLength / paths,
 		emptyPaths,
 	};
+}
+
+function findBenchmarkPath(testCase: BenchmarkCase, request: PathRequest) {
+	return testCase.shared ? findSharedPath(testCase.world, request.unit, request.target, undefined, testCase.crowd ?? 1) : findPath(testCase.world, request.unit, request.target);
 }
 
 function runSeparationBenchmark(testCase: SeparationBenchmarkCase): SeparationBenchmarkResult {
@@ -177,6 +185,33 @@ function clusteredGroupMove(): BenchmarkCase {
 		repeats: 8,
 		world: makeWorld(),
 		requests,
+	};
+}
+
+function clusteredGroupSharedMove(): BenchmarkCase {
+	const requests = [];
+	for (let i = 0; i < 80; i += 1) {
+		requests.push({
+			unit: makeUnit(24.5 + (i % 10), 24.5 + Math.floor(i / 10)),
+			target: { x: 210.5, y: 210.5 },
+		});
+	}
+
+	return {
+		name: "80-unit clustered shared move",
+		repeats: 8,
+		world: makeWorld(),
+		requests,
+		shared: true,
+	};
+}
+
+function clusteredCrowdSharedMove(): BenchmarkCase {
+	return {
+		...clusteredGroupSharedMove(),
+		name: "80-unit clustered crowd-aware move",
+		shared: true,
+		crowd: 80,
 	};
 }
 

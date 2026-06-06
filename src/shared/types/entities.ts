@@ -31,6 +31,7 @@ export interface Player {
 	joinedAt: number;
 	godMode?: boolean;
 	soundDebug?: boolean;
+	pathDebug?: boolean;
 	_visCache?: VisibilityCache;
 }
 

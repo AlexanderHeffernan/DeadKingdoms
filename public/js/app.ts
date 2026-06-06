@@ -1,4 +1,4 @@
-import { enableGodMode, enableSoundDebug, getStatus, join, leave, sendCommand, spawnZombieHorde } from "./api.js";
+import { enableGodMode, enablePathDebug, enableSoundDebug, getStatus, grantSoldiers, join, leave, sendCommand, spawnZombieHorde } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
@@ -60,7 +60,10 @@ let godModeEnabled = false;
 let godModeCheckPending = false;
 let soundDebugEnabled = false;
 let soundDebugCheckPending = false;
+let pathDebugEnabled = false;
+let pathDebugCheckPending = false;
 let zombieHordePending = false;
+let grantSoldiersPending = false;
 let lastFrameAt = performance.now();
 let smoothedFps = 60;
 const ui = new UI(state, {
@@ -252,7 +255,9 @@ function onDevShortcutKeyDown(event: KeyboardEvent) {
   devCommandInput = `${devCommandInput}${event.key}`.slice(-DEV_COMMAND_BUFFER_LENGTH);
   void maybeEnableGodMode();
   void maybeEnableSoundDebug();
+  void maybeEnablePathDebug();
   void maybeSpawnZombieHorde();
+  void maybeGrantSoldiers();
 }
 
 async function maybeEnableGodMode() {
@@ -294,6 +299,25 @@ async function maybeEnableSoundDebug() {
   }
 }
 
+async function maybeEnablePathDebug() {
+  if (pathDebugEnabled || pathDebugCheckPending || !state.playerId || devCommandInput.length < 3) return;
+  const checkedInput = devCommandInput;
+  pathDebugCheckPending = true;
+  try {
+    const result = await enablePathDebug(state.playerId, checkedInput);
+    if (result.ok) {
+      pathDebugEnabled = true;
+      ui.showToast("Pathfinding debug enabled.");
+      connectEvents();
+    }
+  } catch {
+    // Keep this shortcut silent unless it succeeds.
+  } finally {
+    pathDebugCheckPending = false;
+    if (!pathDebugEnabled && checkedInput !== devCommandInput) void maybeEnablePathDebug();
+  }
+}
+
 async function maybeSpawnZombieHorde() {
   if (!godModeEnabled || zombieHordePending || !state.playerId || !devCommandInput.endsWith("zombiehorde")) return;
   zombieHordePending = true;
@@ -304,6 +328,24 @@ async function maybeSpawnZombieHorde() {
     // Keep this shortcut silent unless it succeeds.
   } finally {
     zombieHordePending = false;
+  }
+}
+
+async function maybeGrantSoldiers() {
+  if (grantSoldiersPending || !state.playerId || devCommandInput.length < 3) return;
+  const checkedInput = devCommandInput;
+  grantSoldiersPending = true;
+  try {
+    const result = await grantSoldiers(state.playerId, checkedInput, 100);
+    if (result.ok) {
+      devCommandInput = "";
+      ui.showToast(`Granted ${result.granted ?? 100} soldiers.`);
+    }
+  } catch {
+    // Keep this shortcut silent unless it succeeds.
+  } finally {
+    grantSoldiersPending = false;
+    if (checkedInput !== devCommandInput && devCommandInput.length > 0) void maybeGrantSoldiers();
   }
 }
 

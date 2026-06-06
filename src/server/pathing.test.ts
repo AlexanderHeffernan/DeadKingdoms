@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Unit, World } from "../shared/types.js";
-import { findPath, isWalkable, moveAroundSmallObstacle, resolveUnitSeparation } from "./pathing.js";
+import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 	const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -73,6 +73,46 @@ test("findPath routes around a wall with a gap", () => {
 	}
 });
 
+test("findSharedPath reuses a destination field for nearby units", () => {
+	const blocked = [];
+	for (let y = 2; y <= 16; y += 1) {
+		if (y !== 9) blocked.push({ x: 8, y });
+	}
+	const world = makeWorld(blocked);
+	const target = { x: 14.5, y: 9.5 };
+	const first = findSharedPath(world, makeUnit(4.5, 8.5), target);
+	const second = findSharedPath(world, makeUnit(4.5, 10.5), target);
+
+	assert.ok(first.length > 0);
+	assert.ok(second.length > 0);
+	assert.deepEqual(first.at(-1), { x: 14.5, y: 9.5 });
+	assert.deepEqual(second.at(-1), { x: 14.5, y: 9.5 });
+});
+
+test("findSharedPath prefers a wider opening for large crowds", () => {
+	const blocked = [];
+	for (let y = 2; y <= 28; y += 1) {
+		if (y === 5 || (y >= 18 && y <= 24)) continue;
+		blocked.push({ x: 18, y });
+	}
+	const world = makeWorld(blocked);
+	const path = findSharedPath(world, makeUnit(10.5, 5.5), { x: 26.5, y: 5.5 }, MAP_SIZE, 100);
+
+	assert.ok(path.some((point) => Math.floor(point.x) === 18 && Math.floor(point.y) >= 18 && Math.floor(point.y) <= 24));
+});
+
+test("findSharedPath can use a narrow opening for a small crowd", () => {
+	const blocked = [];
+	for (let y = 2; y <= 28; y += 1) {
+		if (y === 5 || (y >= 18 && y <= 24)) continue;
+		blocked.push({ x: 18, y });
+	}
+	const world = makeWorld(blocked);
+	const path = findSharedPath(world, makeUnit(10.5, 5.5), { x: 26.5, y: 5.5 }, MAP_SIZE, 1);
+
+	assert.ok(path.some((point) => Math.floor(point.x) === 18 && Math.floor(point.y) === 5));
+});
+
 test("findPath targets the nearest walkable tile around a blocked destination", () => {
 	const world = makeWorld([{ x: 20, y: 20 }]);
 	const path = findPath(world, makeUnit(15.5, 20.5), { x: 20.5, y: 20.5 });
@@ -100,6 +140,33 @@ test("resolveUnitSeparation pushes overlapping units in the same grid cell apart
 	assert.ok(distanceBetween(a, b) >= 0.47);
 	assert.ok(a.x < 10.4);
 	assert.ok(b.x > 10.6);
+});
+
+test("resolveUnitSeparation does not push moving units apart", () => {
+	const world = makeWorld();
+	const a = makeUnit(10.4, 10.5, "u-a");
+	const b = makeUnit(10.7, 10.5, "u-b");
+	a.command = { type: "move", x: 20.5, y: 10.5 };
+	b.command = { type: "move", x: 20.5, y: 10.5 };
+	addUnits(world, [a, b]);
+
+	resolveUnitSeparation(world);
+
+	assert.equal(a.x, 10.4);
+	assert.equal(a.y, 10.5);
+	assert.equal(b.x, 10.7);
+	assert.equal(b.y, 10.5);
+});
+
+test("resolveUnitSeparation keeps idle units more spread apart", () => {
+	const world = makeWorld();
+	const a = makeUnit(10.4, 10.5, "u-a");
+	const b = makeUnit(10.7, 10.5, "u-b");
+	addUnits(world, [a, b]);
+
+	resolveUnitSeparation(world);
+
+	assert.ok(distanceBetween(a, b) >= 0.47);
 });
 
 test("resolveUnitSeparation checks neighboring grid cells", () => {
@@ -174,6 +241,76 @@ test("moveAroundSmallObstacle does not path around a wall-like blockage", () => 
 	assert.equal(blocked, true);
 	assert.equal(unit.x, 10.5);
 	assert.equal(unit.y, 10.5);
+});
+
+test("moveWithPath does not consume a waypoint when blocked by an obstacle", () => {
+	const world = makeWorld([{ x: 11, y: 10 }]);
+	world.tick = 1;
+	const unit = makeUnit(10.5, 10.5, "u-a");
+	const command = {
+		type: "move" as const,
+		x: 14.5,
+		y: 10.5,
+		path: [
+			{ x: 11.5, y: 10.5 },
+			{ x: 12.5, y: 10.5 },
+		],
+	};
+
+	moveWithPath(world, unit, command, 1);
+
+	assert.notDeepEqual(command.path?.[0], { x: 12.5, y: 10.5 });
+	assert.equal(unit.x, 10.5);
+	assert.equal(unit.y, 10.5);
+});
+
+test("moveWithPath prunes stale reachable path nodes", () => {
+	const world = makeWorld();
+	world.tick = 1;
+	const unit = makeUnit(10.5, 10.5, "u-a");
+	const command = {
+		type: "move" as const,
+		x: 18.5,
+		y: 10.5,
+		path: [
+			{ x: 10.5, y: 11.5 },
+			{ x: 12.5, y: 10.5 },
+			{ x: 14.5, y: 10.5 },
+		],
+	};
+
+	moveWithPath(world, unit, command, 0.25);
+
+	assert.notDeepEqual(command.path?.[0], { x: 10.5, y: 11.5 });
+	assert.ok(unit.x > 10.5);
+});
+
+test("moveWithPath accepts joining an arrived group edge", () => {
+	const world = makeWorld();
+	const arrived = makeUnit(20.8, 20.5, "u-arrived");
+	arrived.command = { type: "idle" };
+	const joining = makeUnit(21.3, 20.5, "u-joining");
+	const command = { type: "move" as const, x: 20.5, y: 20.5, path: null, pathCrowd: 30 };
+	joining.command = command;
+	addUnits(world, [arrived, joining]);
+
+	const done = moveWithPath(world, joining, command, 0.25);
+
+	assert.equal(done, true);
+	assert.equal(joining.x, 21.3);
+});
+
+test("resolveUnitSeparation spreads units after they become idle at destination", () => {
+	const world = makeWorld();
+	const a = makeUnit(20.5, 20.5, "u-a");
+	const b = makeUnit(20.55, 20.5, "u-b");
+	a.command = { type: "idle" };
+	b.command = { type: "idle" };
+	addUnits(world, [a, b]);
+
+	resolveUnitSeparation(world);
+
+	assert.ok(distanceBetween(a, b) >= 0.47);
 });
 
 function distanceBetween(a: Unit, b: Unit) {

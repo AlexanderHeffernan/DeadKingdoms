@@ -122,6 +122,7 @@ export class Renderer {
     this.drawLastSeen(state, view, active);
     this.drawEntities(state, view, active);
     this.hideAllEntitySprites(active);
+    this.drawPathDebug(state, view);
     this.drawSoundDebug(state, view);
     this.drawEffects(state, view);
     this.drawPlacement(view, state);
@@ -593,6 +594,30 @@ export class Renderer {
       this.overlayLayer.drawCircle(center.x, center.y, dot);
       this.overlayLayer.endFill();
     }
+  }
+
+  private drawPathDebug(state: GameState, view: ViewState) {
+    if (!state.snapshot?.pathDebug) return;
+    const zoom = view.camera.zoom || 1;
+    const lineWidth = Math.max(1, Math.round(2 * zoom));
+    for (const unit of Object.values(state.snapshot.units)) {
+      if (unit.ownerId !== state.playerId || !state.selectedIds.has(unit.id)) continue;
+      const path = unit.command?.path;
+      if (!path?.length) continue;
+      this.overlayLayer.lineStyle(lineWidth, 0x4fd8c8, 0.42);
+      const start = isoToScreen(unit.x, unit.y, view.camera);
+      this.overlayLayer.moveTo(start.x, start.y);
+      for (const point of path) {
+        const screen = isoToScreen(point.x, point.y, view.camera);
+        this.overlayLayer.lineTo(screen.x, screen.y);
+      }
+      const end = isoToScreen(path[path.length - 1]!.x, path[path.length - 1]!.y, view.camera);
+      this.overlayLayer.lineStyle();
+      this.overlayLayer.beginFill(0x4fd8c8, 0.75);
+      this.overlayLayer.drawCircle(end.x, end.y, Math.max(2, 3 * zoom));
+      this.overlayLayer.endFill();
+    }
+    this.overlayLayer.lineStyle();
   }
 
   private drawHealth(x: number, y: number, pct: number) {
