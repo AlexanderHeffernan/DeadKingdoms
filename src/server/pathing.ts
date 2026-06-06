@@ -503,11 +503,10 @@ function commandCrowd(command: UnitCommand): number {
 }
 
 function clearanceRadiusForCrowd(crowd: number): number {
-	if (crowd >= 120) return 6;
-	if (crowd >= 70) return 5;
-	if (crowd >= 35) return 4;
-	if (crowd >= 16) return 3;
-	if (crowd >= 8) return 2;
+	if (crowd >= 180) return 4;
+	if (crowd >= 80) return 3;
+	if (crowd >= 28) return 2;
+	if (crowd >= 12) return 1;
 	return 0;
 }
 
@@ -646,7 +645,7 @@ function clearancePenalty(clearance: Uint8Array | null, clearanceRadius: number,
 	const distanceFromObstacle = clearance[id]!;
 	if (distanceFromObstacle >= clearanceRadius) return 0;
 	const shortage = clearanceRadius - distanceFromObstacle;
-	return shortage * shortage * 70;
+	return shortage * shortage * 42;
 }
 
 function clearanceField(world: World): Uint8Array {

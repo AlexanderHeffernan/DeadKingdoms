@@ -90,14 +90,14 @@ test("findSharedPath reuses a destination field for nearby units", () => {
 	assert.deepEqual(second.at(-1), { x: 14.5, y: 9.5 });
 });
 
-test("findSharedPath prefers a wider opening for large crowds", () => {
+test("findSharedPath prefers a wider opening for very large crowds", () => {
 	const blocked = [];
 	for (let y = 2; y <= 28; y += 1) {
 		if (y === 5 || (y >= 18 && y <= 24)) continue;
 		blocked.push({ x: 18, y });
 	}
 	const world = makeWorld(blocked);
-	const path = findSharedPath(world, makeUnit(10.5, 5.5), { x: 26.5, y: 5.5 }, MAP_SIZE, 100);
+	const path = findSharedPath(world, makeUnit(10.5, 5.5), { x: 26.5, y: 5.5 }, MAP_SIZE, 220);
 
 	assert.ok(path.some((point) => Math.floor(point.x) === 18 && Math.floor(point.y) >= 18 && Math.floor(point.y) <= 24));
 });
