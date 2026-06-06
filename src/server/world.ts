@@ -333,10 +333,11 @@ function rebuildOccupancy(world: World) {
 		}
 	}
 	if (!previous || occupancyChanged(previous, grid)) {
-		world._pathing ??= { occupancyVersion: 0, flowFields: new Map(), clearanceFields: new Map(), pathRequestsThisTick: 0, lastRequestTick: -1 };
+		world._pathing ??= { occupancyVersion: 0, flowFields: new Map(), clearanceFields: new Map(), arrivalGroups: new Map(), pathRequestsThisTick: 0, lastRequestTick: -1 };
 		world._pathing.occupancyVersion += 1;
 		world._pathing.flowFields.clear();
 		world._pathing.clearanceFields.clear();
+		world._pathing.arrivalGroups.clear();
 	}
 }
 

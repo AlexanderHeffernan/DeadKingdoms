@@ -300,6 +300,19 @@ test("moveWithPath accepts joining an arrived group edge", () => {
 	assert.equal(joining.x, 21.3);
 });
 
+test("moveWithPath requires the first group unit to reach the exact target", () => {
+	const world = makeWorld();
+	const unit = makeUnit(22.0, 20.5, "u-first");
+	const command = { type: "move" as const, x: 20.5, y: 20.5, path: null, pathCrowd: 30 };
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	const done = moveWithPath(world, unit, command, 0.25);
+
+	assert.equal(done, false);
+	assert.ok(unit.x < 22.0);
+});
+
 test("resolveUnitSeparation spreads units after they become idle at destination", () => {
 	const world = makeWorld();
 	const a = makeUnit(20.5, 20.5, "u-a");

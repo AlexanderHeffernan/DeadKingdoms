@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Unit, World } from "../shared/types.js";
-import { findPath, findSharedPath, resolveUnitSeparation } from "./pathing.js";
+import { findPath, findSharedPath, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 
 type PathRequest = {
 	unit: Unit;
@@ -33,6 +33,21 @@ type SeparationBenchmarkCase = {
 	makeWorld: () => World;
 };
 
+type MovementBenchmarkCase = {
+	name: string;
+	repeats: number;
+	makeWorld: () => World;
+};
+
+type MovementBenchmarkResult = {
+	name: string;
+	repeats: number;
+	units: number;
+	totalMs: number;
+	averageMs: number;
+	unitsPerSecond: number;
+};
+
 type SeparationBenchmarkResult = {
 	name: string;
 	repeats: number;
@@ -61,10 +76,15 @@ function main() {
 		separation1000UnitsSpread(),
 		separation1000UnitsClustered(),
 	];
+	const movementCases = [
+		arrival800UnitsNearGroupEdge(),
+	];
 
 	printPathResults(pathCases.map(runPathBenchmark));
 	console.log("");
 	printSeparationResults(separationCases.map(runSeparationBenchmark));
+	console.log("");
+	printMovementResults(movementCases.map(runMovementBenchmark));
 }
 
 function runPathBenchmark(testCase: BenchmarkCase): BenchmarkResult {
@@ -120,6 +140,36 @@ function runSeparationBenchmark(testCase: SeparationBenchmarkCase): SeparationBe
 		averageMs: totalMs / testCase.repeats,
 		unitsPerSecond: ((unitCount * testCase.repeats) / totalMs) * 1000,
 	};
+}
+
+function runMovementBenchmark(testCase: MovementBenchmarkCase): MovementBenchmarkResult {
+	for (let i = 0; i < Math.min(5, testCase.repeats); i += 1) stepMovingUnits(testCase.makeWorld());
+
+	let unitCount = 0;
+	const start = performance.now();
+	for (let i = 0; i < testCase.repeats; i += 1) {
+		const world = testCase.makeWorld();
+		unitCount = stepMovingUnits(world);
+	}
+	const totalMs = performance.now() - start;
+	return {
+		name: testCase.name,
+		repeats: testCase.repeats,
+		units: unitCount,
+		totalMs,
+		averageMs: totalMs / testCase.repeats,
+		unitsPerSecond: ((unitCount * testCase.repeats) / totalMs) * 1000,
+	};
+}
+
+function stepMovingUnits(world: World): number {
+	let count = 0;
+	for (const unit of Object.values(world.units)) {
+		if (unit.command.type !== "move") continue;
+		moveWithPath(world, unit, unit.command, 0.32);
+		count += 1;
+	}
+	return count;
 }
 
 function openFieldSinglePath(): BenchmarkCase {
@@ -280,6 +330,33 @@ function separation1000UnitsClustered(): SeparationBenchmarkCase {
 	};
 }
 
+function arrival800UnitsNearGroupEdge(): MovementBenchmarkCase {
+	return {
+		name: "800 moving units checking group arrival",
+		repeats: 80,
+		makeWorld: () => {
+			const world = makeWorld();
+			const target = { x: 160.5, y: 160.5 };
+			const arrived = clusteredUnits(120).map((unit, index) => {
+				unit.id = `arrived-${index}` as Unit["id"];
+				unit.x = target.x + (index % 12) * 0.18;
+				unit.y = target.y + Math.floor(index / 12) * 0.18;
+				unit.command = { type: "idle" };
+				return unit;
+			});
+			const moving = clusteredUnits(800).map((unit, index) => {
+				unit.id = `moving-${index}` as Unit["id"];
+				unit.x = target.x + 2.2 + (index % 40) * 0.12;
+				unit.y = target.y + Math.floor(index / 40) * 0.12;
+				unit.command = { type: "move", ...target, path: [{ x: target.x, y: target.y }], pathCrowd: 800 };
+				return unit;
+			});
+			for (const unit of [...arrived, ...moving]) world.units[unit.id] = unit;
+			return world;
+		},
+	};
+}
+
 function worldWithUnits(units: Unit[]) {
 	const world = makeWorld();
 	for (const unit of units) world.units[unit.id] = unit;
@@ -382,6 +459,23 @@ function printPathResults(results: BenchmarkResult[]) {
 function printSeparationResults(results: SeparationBenchmarkResult[]) {
 	console.log("Unit separation benchmark");
 	console.log("=========================");
+	for (const result of results) {
+		console.log(
+			[
+				result.name.padEnd(36),
+				`${result.repeats.toString().padStart(5)} ticks`,
+				`${result.units.toString().padStart(5)} units`,
+				`${result.totalMs.toFixed(1).padStart(8)} ms total`,
+				`${result.averageMs.toFixed(3).padStart(7)} ms/tick`,
+				`${Math.round(result.unitsPerSecond).toString().padStart(8)} units/s`,
+			].join("  "),
+		);
+	}
+}
+
+function printMovementResults(results: MovementBenchmarkResult[]) {
+	console.log("Movement benchmark");
+	console.log("==================");
 	for (const result of results) {
 		console.log(
 			[

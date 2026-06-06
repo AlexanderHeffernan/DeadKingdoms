@@ -23,6 +23,7 @@ export interface PathingWorldState {
 	occupancyVersion: number;
 	flowFields: Map<string, unknown>;
 	clearanceFields: Map<number, unknown>;
+	arrivalGroups: Map<string, unknown>;
 	pathRequestsThisTick: number;
 	lastRequestTick: number;
 }

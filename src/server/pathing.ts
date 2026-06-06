@@ -29,6 +29,11 @@ type FlowField = {
 	next: Int32Array;
 };
 
+type ArrivalGroupCache = {
+	tick: number;
+	grid: SpatialGrid<Unit>;
+};
+
 export function moveUnit(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
 	const before = { x: unit.x, y: unit.y };
 	const arrived = moveToward(unit, target, maxStep);
@@ -208,18 +213,39 @@ export function moveNearTarget(world: World, unit: Unit, command: UnitCommand, t
 }
 
 function isGroupArrived(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, target: Vec2): boolean {
-	if (distance(unit, target) <= arrivalRadius(command)) return true;
+	if (distance(unit, target) <= exactArrivalRadius(command)) return true;
 	if (commandCrowd(command) < 8) return false;
-	for (const other of Object.values(world.units)) {
-		if (other === unit || other.ownerId !== unit.ownerId || other.command.type !== "idle") continue;
-		if (distance(other, target) > arrivalRadius(command) + 2.2) continue;
+	const arrived = arrivedGroupGrid(world, unit, command, target);
+	if (arrived.entries.length === 0) return false;
+	for (const entry of arrived.nearby(unit, MIN_SEPARATION_DISTANCE + 0.35)) {
+		const other = entry.item;
+		if (other === unit) continue;
 		if (distance(unit, other) <= MIN_SEPARATION_DISTANCE + 0.35) return true;
 	}
 	return false;
 }
 
+function arrivedGroupGrid(world: World, unit: Unit, command: UnitCommand, target: Vec2): SpatialGrid<Unit> {
+	const state = pathingState(world);
+	if (state.arrivalGroups.size > 32) state.arrivalGroups.clear();
+	const key = `${world.tick}:${unit.ownerId}:${Math.floor(target.x)}:${Math.floor(target.y)}:${Math.round(arrivalRadius(command) * 10)}`;
+	const cached = state.arrivalGroups.get(key) as ArrivalGroupCache | undefined;
+	if (cached?.tick === world.tick) return cached.grid;
+	const radius = arrivalRadius(command) + 2.2;
+	const arrived = Object.values(world.units).filter((other) => {
+		return other.ownerId === unit.ownerId && other.command.type === "idle" && distance(other, target) <= radius;
+	});
+	const grid = new SpatialGrid(arrived, 1);
+	state.arrivalGroups.set(key, { tick: world.tick, grid });
+	return grid;
+}
+
 function arrivalRadius(command: UnitCommand): number {
 	return Math.min(GROUP_ARRIVAL_MAX_RADIUS, GROUP_ARRIVAL_BASE_RADIUS + Math.sqrt(commandCrowd(command)) * 0.28);
+}
+
+function exactArrivalRadius(command: UnitCommand): number {
+	return commandCrowd(command) >= 8 ? 0.45 : 0.35;
 }
 
 function followPathStep(world: World, unit: Unit, command: UnitCommand, fallback: Vec2, finalTarget: Vec2, maxStep: number) {
@@ -714,6 +740,7 @@ function pathingState(world: World) {
 			occupancyVersion: 0,
 			flowFields: new Map(),
 			clearanceFields: new Map(),
+			arrivalGroups: new Map(),
 			pathRequestsThisTick: 0,
 			lastRequestTick: -1,
 		};
