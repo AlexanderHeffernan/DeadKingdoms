@@ -12,9 +12,9 @@ const FLOW_BASE_COST = 10;
 const FLOW_LOOKAHEAD_NODES = 4;
 const FOLLOW_PATH_MAX_NODES = 24;
 const WIDE_MOVEMENT_MIN_DISTANCE = 8;
-const WIDE_MOVEMENT_MAX_LANES = 13;
-const WIDE_MOVEMENT_MIN_LANE_WIDTH = 0.16;
-const WIDE_MOVEMENT_MAX_LANE_WIDTH = 0.24;
+const WIDE_MOVEMENT_MAX_LANES = 19;
+const WIDE_MOVEMENT_MIN_LANE_WIDTH = 0.2;
+const WIDE_MOVEMENT_MAX_LANE_WIDTH = 0.34;
 const WAYPOINT_REACHED_DISTANCE = 0.28;
 const STUCK_MOVEMENT_EPSILON = 0.015;
 const GROUP_ARRIVAL_BASE_RADIUS = 0.8;
@@ -38,7 +38,7 @@ type FlowField = {
 export function moveUnit(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
 	const before = { x: unit.x, y: unit.y };
 	const arrived = moveToward(unit, target, maxStep);
-	if (isUnitBlocked(world, unit, target)) {
+	if (isUnitBlocked(world, unit, target, before)) {
 		unit.x = before.x;
 		unit.y = before.y;
 		return true;
@@ -48,9 +48,9 @@ export function moveUnit(world: World, unit: Unit, target: { x: number; y: numbe
 
 export function moveAroundSmallObstacle(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
 	const before = { x: unit.x, y: unit.y };
-	if (occupied(world, Math.floor(before.x), Math.floor(before.y)) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
+	if (isHardOccupied(world, unit, Math.floor(before.x), Math.floor(before.y)) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
 	const arrived = moveToward(unit, target, maxStep);
-	if (!isUnitBlocked(world, unit, target)) return arrived;
+	if (!isUnitBlocked(world, unit, target, before)) return arrived;
 	unit.x = before.x;
 	unit.y = before.y;
 	if (!isSmallObstacleAhead(world, before, target)) return true;
@@ -58,7 +58,7 @@ export function moveAroundSmallObstacle(world: World, unit: Unit, target: { x: n
 	for (const sidestepTarget of sidestepTargets(before, target)) {
 		const sidestepBefore = { x: unit.x, y: unit.y };
 		moveToward(unit, sidestepTarget, maxStep);
-		if (!isUnitBlocked(world, unit, sidestepTarget)) return false;
+		if (!isUnitBlocked(world, unit, sidestepTarget, sidestepBefore)) return false;
 		unit.x = sidestepBefore.x;
 		unit.y = sidestepBefore.y;
 	}
@@ -75,14 +75,14 @@ function escapeOccupiedTile(world: World, unit: Unit, target: { x: number; y: nu
 		};
 		const before = { x: unit.x, y: unit.y };
 		moveToward(unit, escapeTarget, maxStep);
-		if (!occupied(world, Math.floor(unit.x), Math.floor(unit.y))) return true;
+		if (!isHardOccupied(world, unit, Math.floor(unit.x), Math.floor(unit.y))) return true;
 		unit.x = before.x;
 		unit.y = before.y;
 	}
 	for (const direction of candidates) {
 		const x = tile.x + direction.x;
 		const y = tile.y + direction.y;
-		if (occupied(world, x, y)) continue;
+		if (isHardOccupied(world, unit, x, y)) continue;
 		unit.x = clamp(x + 0.5, 0.2, MAP_SIZE - 0.2);
 		unit.y = clamp(y + 0.5, 0.2, MAP_SIZE - 0.2);
 		return true;
@@ -121,11 +121,11 @@ function isSmallObstacleAhead(world: World, from: { x: number; y: number }, targ
 		x: Math.floor(from.x + (dx / length) * 0.75),
 		y: Math.floor(from.y + (dy / length) * 0.75),
 	};
-	if (!occupied(world, ahead.x, ahead.y)) return false;
+	if (!isHardOccupied(world, undefined, ahead.x, ahead.y)) return false;
 	let occupiedNeighbors = 0;
 	for (let y = ahead.y - 1; y <= ahead.y + 1; y += 1) {
 		for (let x = ahead.x - 1; x <= ahead.x + 1; x += 1) {
-			if (occupied(world, x, y)) occupiedNeighbors += 1;
+			if (isHardOccupied(world, undefined, x, y)) occupiedNeighbors += 1;
 		}
 	}
 	return occupiedNeighbors <= 2;
@@ -193,7 +193,7 @@ function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {
 	const before = { x: unit.x, y: unit.y };
 	unit.x = clamp(unit.x + dx, 0.2, MAP_SIZE - 0.2);
 	unit.y = clamp(unit.y + dy, 0.2, MAP_SIZE - 0.2);
-	if (occupied(world, Math.floor(unit.x), Math.floor(unit.y))) {
+	if (isHardOccupied(world, unit, Math.floor(unit.x), Math.floor(unit.y))) {
 		unit.x = before.x;
 		unit.y = before.y;
 	}
@@ -202,24 +202,33 @@ function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {
 export function moveWithPath(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number): boolean {
 	const baseTarget = moveCommandTarget(world, command);
 	const target = formationTarget(world, command, baseTarget);
+	const forming = tryApproachFormationTarget(world, unit, command, baseTarget, maxStep);
+	if (forming !== null) return forming;
 	if (isGroupArrived(world, unit, command, target)) return true;
-	if (occupied(world, Math.floor(unit.x), Math.floor(unit.y)) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
-	if (shouldRefreshPath(world, unit, command, baseTarget)) command.path = budgetedPath(world, unit, baseTarget);
+	if (isHardOccupied(world, unit, Math.floor(unit.x), Math.floor(unit.y)) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
+	if (shouldRefreshPath(world, unit, command, baseTarget)) {
+		const path = budgetedPath(world, unit, baseTarget);
+		if (!path) return false;
+		if (path.length === 0 && distance(unit, baseTarget) > exactArrivalRadius(command)) return false;
+		command.path = path;
+	}
 	followPathStep(world, unit, command, target, target, maxStep, movingUnitGrid(world));
+	const arrived = tryApproachFormationTarget(world, unit, command, baseTarget, maxStep);
+	if (arrived !== null) return arrived;
 	return isGroupArrived(world, unit, command, target);
 }
 
 export function moveNearTarget(world: World, unit: Unit, command: UnitCommand, target: { x: number; y: number }, range: number, maxStep: number): boolean {
 	if (distance(unit, target) <= range) return true;
 	const goal = nearestWalkableAround(world, target);
-	if (occupied(world, Math.floor(unit.x), Math.floor(unit.y)) && escapeOccupiedTile(world, unit, goal, maxStep)) return false;
+	if (isHardOccupied(world, unit, Math.floor(unit.x), Math.floor(unit.y)) && escapeOccupiedTile(world, unit, goal, maxStep)) return false;
 	if (shouldRefreshPath(world, unit, command, goal)) command.path = budgetedPath(world, unit, goal);
 	followPathStep(world, unit, command, target, target, maxStep, movingUnitGrid(world));
 	return false;
 }
 
 function isGroupArrived(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, target: Vec2): boolean {
-	if (!command.formationOffset) return distance(unit, target) <= exactArrivalRadius(command);
+	if (!command.formationTarget) return distance(unit, target) <= exactArrivalRadius(command);
 	if (distance(unit, target) <= FORMATION_SLOT_SETTLE_RADIUS) return true;
 	return command.path === null && distance(unit, command) <= arrivalRadius(command);
 }
@@ -238,13 +247,34 @@ function moveCommandTarget(world: World, command: Extract<UnitCommand, { type: "
 }
 
 function formationTarget(world: World, command: Extract<UnitCommand, { type: "move" }>, baseTarget: Vec2): Vec2 {
-	const offset = command.formationOffset;
-	if (!offset) return baseTarget;
-	const target = {
-		x: clamp(baseTarget.x + offset.x, 0.2, MAP_SIZE - 0.2),
-		y: clamp(baseTarget.y + offset.y, 0.2, MAP_SIZE - 0.2),
-	};
-	return isWalkable(world, Math.floor(target.x), Math.floor(target.y)) ? target : baseTarget;
+	return command.formationTarget || baseTarget;
+}
+
+function tryApproachFormationTarget(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, baseTarget: Vec2, maxStep: number): boolean | null {
+	if (!command.formationTarget) return null;
+	if (distance(unit, command.formationTarget) <= FORMATION_SLOT_SETTLE_RADIUS) return true;
+	if (distance(unit, baseTarget) > formationDeployRadius(command)) return null;
+	if (!hasClearMovementLine(world, unit, command.formationTarget)) {
+		return distance(unit, baseTarget) <= arrivalRadius(command) ? true : null;
+	}
+	command.path = null;
+	return moveFormationStep(world, unit, command.formationTarget, baseTarget, maxStep);
+}
+
+function moveFormationStep(world: World, unit: Unit, target: Vec2, baseTarget: Vec2, maxStep: number): boolean {
+	unit.facing = target.x < unit.x ? "left" : "right";
+	const before = { x: unit.x, y: unit.y };
+	moveAroundSmallObstacle(world, unit, target, maxStep);
+	if (enteredOccupiedTile(world, before, unit)) {
+		unit.x = before.x;
+		unit.y = before.y;
+	}
+	if (distance(before, unit) < STUCK_MOVEMENT_EPSILON && distance(unit, baseTarget) <= arrivalRadius(unit.command)) return true;
+	return distance(unit, target) <= FORMATION_SLOT_SETTLE_RADIUS;
+}
+
+function formationDeployRadius(command: UnitCommand): number {
+	return Math.min(34, Math.max(arrivalRadius(command) + 2, Math.sqrt(commandCrowd(command)) * 0.95));
 }
 
 function followPathStep(world: World, unit: Unit, command: UnitCommand, fallback: Vec2, finalTarget: Vec2, maxStep: number, movingGrid: SpatialGrid<Unit>) {
@@ -277,8 +307,8 @@ function pruneReachablePathPrefix(world: World, unit: Unit, path: PathNode[] | n
 }
 
 function enteredOccupiedTile(world: World, before: Vec2, unit: Unit): boolean {
-	const beforeOccupied = occupied(world, Math.floor(before.x), Math.floor(before.y));
-	const nowOccupied = occupied(world, Math.floor(unit.x), Math.floor(unit.y));
+	const beforeOccupied = isHardOccupied(world, unit, Math.floor(before.x), Math.floor(before.y));
+	const nowOccupied = isHardOccupied(world, unit, Math.floor(unit.x), Math.floor(unit.y));
 	return nowOccupied && !beforeOccupied;
 }
 
@@ -370,16 +400,19 @@ function unitLane(unit: Unit, crowd: number): number {
 }
 
 function movementLanesForCrowd(crowd: number): number {
-	if (crowd >= 120) return WIDE_MOVEMENT_MAX_LANES;
-	if (crowd >= 70) return 11;
-	if (crowd >= 35) return 9;
-	if (crowd >= 16) return 7;
+	if (crowd >= 500) return WIDE_MOVEMENT_MAX_LANES;
+	if (crowd >= 220) return 17;
+	if (crowd >= 120) return 15;
+	if (crowd >= 70) return 13;
+	if (crowd >= 35) return 11;
+	if (crowd >= 16) return 9;
 	return 5;
 }
 
 function laneWidthForCrowd(crowd: number): number {
-	if (crowd >= 35) return WIDE_MOVEMENT_MAX_LANE_WIDTH;
-	if (crowd >= 8) return 0.2;
+	if (crowd >= 120) return WIDE_MOVEMENT_MAX_LANE_WIDTH;
+	if (crowd >= 35) return 0.28;
+	if (crowd >= 8) return 0.24;
 	return WIDE_MOVEMENT_MIN_LANE_WIDTH;
 }
 
@@ -422,10 +455,10 @@ function unitHash(unit: Unit): number {
 	return Math.abs(hash);
 }
 
-function isUnitBlocked(world: World, unit: Unit, target: { x: number; y: number }): boolean {
+function isUnitBlocked(world: World, unit: Unit, target: { x: number; y: number }, before: Vec2): boolean {
 	const tileX = Math.floor(unit.x);
 	const tileY = Math.floor(unit.y);
-	if (!occupied(world, tileX, tileY)) return false;
+	if (!isHardOccupied(world, unit, tileX, tileY)) return false;
 	// Check if the occupant is a building the unit is standing on (e.g. just spawned)
 	for (const building of Object.values(world.buildings)) {
 		if (unit.x >= building.x && unit.x < building.x + building.size && unit.y >= building.y && unit.y < building.y + building.size) {
@@ -434,7 +467,60 @@ function isUnitBlocked(world: World, unit: Unit, target: { x: number; y: number 
 		}
 	}
 	// Otherwise it's a resource tile: blocked unless we're close to our target.
-	return distance(unit, target) > 1.6;
+	return distance(unit, target) > 1.6 || sameTile(unit, before);
+}
+
+function isHardOccupied(world: World, unit: Unit | undefined, x: number, y: number): boolean {
+	if (!occupied(world, x, y)) return false;
+	if (hardBlockingTiles(world).has(tileId(x, y))) return true;
+	if (!unit || !isMovingCommand(unit.command)) return true;
+	const idleOwners = idleUnitTiles(world).get(tileId(x, y));
+	if (!idleOwners || idleOwners.size !== 1) return true;
+	return idleOwners.get(unit.ownerId) !== 1;
+}
+
+function hardBlockingTiles(world: World): Set<number> {
+	const state = pathingState(world);
+	if (state.hardBlockingTilesVersion === state.occupancyVersion && state.hardBlockingTiles) return state.hardBlockingTiles as Set<number>;
+	const tiles = new Set<number>();
+	for (const resource of Object.values(world.resources)) {
+		const x = Math.floor(resource.x);
+		const y = Math.floor(resource.y);
+		if (isInMap(x, y)) tiles.add(tileId(x, y));
+	}
+	for (const building of Object.values(world.buildings)) {
+		if (!building.isWalkBlocking()) continue;
+		for (let dy = 0; dy < building.size; dy += 1) {
+			for (let dx = 0; dx < building.size; dx += 1) {
+				const x = building.x + dx;
+				const y = building.y + dy;
+				if (isInMap(x, y)) tiles.add(tileId(x, y));
+			}
+		}
+	}
+	state.hardBlockingTiles = tiles;
+	state.hardBlockingTilesVersion = state.occupancyVersion;
+	return tiles;
+}
+
+function idleUnitTiles(world: World): Map<number, Map<string, number>> {
+	const state = pathingState(world);
+	if (state.idleUnitTilesTick === world.tick && state.idleUnitTiles) return state.idleUnitTiles as Map<number, Map<string, number>>;
+	const tiles = new Map<number, Map<string, number>>();
+	for (const unit of Object.values(world.units)) {
+		if (isMovingCommand(unit.command)) continue;
+		const id = tileId(Math.floor(unit.x), Math.floor(unit.y));
+		const owners = tiles.get(id) || new Map<string, number>();
+		owners.set(unit.ownerId, (owners.get(unit.ownerId) || 0) + 1);
+		tiles.set(id, owners);
+	}
+	state.idleUnitTiles = tiles;
+	state.idleUnitTilesTick = world.tick;
+	return tiles;
+}
+
+function sameTile(a: Vec2, b: Vec2): boolean {
+	return Math.floor(a.x) === Math.floor(b.x) && Math.floor(a.y) === Math.floor(b.y);
 }
 
 export function findPath(world: World, unit: Unit, target: { x: number; y: number }): PathNode[] {

@@ -24,6 +24,10 @@ export interface PathingWorldState {
 	flowFields: Map<string, unknown>;
 	clearanceFields: Map<number, unknown>;
 	arrivalGroups: Map<string, unknown>;
+	hardBlockingTiles?: Set<number>;
+	hardBlockingTilesVersion?: number;
+	idleUnitTiles?: Map<number, Map<PlayerId, number>>;
+	idleUnitTilesTick?: number;
 	movingUnitGrid?: unknown;
 	movingUnitGridTick?: number;
 	pathRequestsThisTick: number;

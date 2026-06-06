@@ -148,9 +148,10 @@ export function grantPlayerSoldiers(world: World, playerId: PlayerId, count: num
 	if (!world.players[playerId]) return 0;
 	const safeCount = clamp(Math.floor(count), 1, 500);
 	const origin = playerSpawnCenter(world, playerId);
+	const existingSoldiers = Object.values(world.units).filter((unit) => unit.ownerId === playerId && unit.type === "soldier").length;
 	let granted = 0;
 	for (let i = 0; i < safeCount; i += 1) {
-		const point = soldierGrantPoint(world, origin, i);
+		const point = soldierGrantPoint(world, origin, existingSoldiers + i);
 		createUnit(world, playerId, "soldier", point.x, point.y);
 		granted += 1;
 	}
@@ -170,8 +171,8 @@ function playerSpawnCenter(world: World, playerId: PlayerId) {
 }
 
 function soldierGrantPoint(world: World, origin: { x: number; y: number }, index: number) {
-	const columns = 10;
-	const spacing = 0.65;
+	const columns = 24;
+	const spacing = 0.9;
 	const row = Math.floor(index / columns);
 	const column = index % columns;
 	const base = {
@@ -540,19 +541,19 @@ function pointInsideEntity(x: number, y: number, entity: { x: number; y: number;
 }
 
 function commandMove(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "move" }>): CommandResult {
-	forOwnUnitClusters(world, playerId, body.unitIds, (unit, cluster, index) => {
+	const clusterLandingTargets = new WeakMap<Unit[], { x: number; y: number }>();
+	forOwnUnitClusters(world, playerId, body.unitIds, (unit, cluster, index, reservedFormationTargets) => {
 		const target = {
 			x: clamp(Number(body.x), 0, MAP_SIZE - 1),
 			y: clamp(Number(body.y), 0, MAP_SIZE - 1),
 		};
-		const formationOffset = formationOffsetForCluster(cluster, index);
-		unit.command = formationOffset ? {
-			type: "move",
-			...target,
-			path: null,
-			pathCrowd: cluster.length,
-			formationOffset,
-		} : {
+		let landingTarget = clusterLandingTargets.get(cluster);
+		if (!landingTarget) {
+			landingTarget = nearestWalkablePoint(world, target, reservedFormationTargets);
+			clusterLandingTargets.set(cluster, landingTarget);
+		}
+		const formationTarget = formationTargetForCluster(world, landingTarget, cluster, index, reservedFormationTargets);
+		unit.command = formationTarget ? moveFormationCommand(target, cluster.length, formationTarget) : {
 			type: "move",
 			...target,
 			path: null,
@@ -560,6 +561,16 @@ function commandMove(world: World, playerId: PlayerId, body: Extract<CommandPayl
 		};
 	});
 	return { ok: true };
+}
+
+function moveFormationCommand(target: { x: number; y: number }, crowd: number, formationTarget: { x: number; y: number }) {
+	return {
+		type: "move" as const,
+		...target,
+		path: null,
+		pathCrowd: crowd,
+		formationTarget,
+	};
 }
 
 function commandAttack(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "attack" }>): CommandResult {
@@ -687,11 +698,12 @@ function forOwnUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undef
 	});
 }
 
-function forOwnUnitClusters(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined, fn: (unit: Unit, cluster: Unit[], index: number) => void) {
+function forOwnUnitClusters(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined, fn: (unit: Unit, cluster: Unit[], index: number, reservedFormationTargets: Set<string>) => void) {
 	const units = ownUnits(world, playerId, unitIds);
 	for (const cluster of spatialUnitClusters(units)) {
 		const ordered = orderFormationCluster(cluster);
-		ordered.forEach((unit, index) => fn(unit, ordered, index));
+		const reservedFormationTargets = new Set<string>();
+		ordered.forEach((unit, index) => fn(unit, ordered, index, reservedFormationTargets));
 	}
 }
 
@@ -710,25 +722,55 @@ function clusterCenter(cluster: Unit[]) {
 	return { x: total.x / Math.max(1, cluster.length), y: total.y / Math.max(1, cluster.length) };
 }
 
-function formationOffsetForCluster(cluster: Unit[], index: number) {
-	if (cluster.length < 2) return undefined;
-	const spacing = formationSpacing(cluster.length);
-	const columns = Math.max(1, Math.ceil(Math.sqrt(cluster.length)));
-	const rows = Math.max(1, Math.ceil(cluster.length / columns));
-	const row = Math.floor(index / columns);
-	const column = index % columns;
-	const rowShift = row % 2 === 0 ? 0 : 0.5;
-	const x = (column - (columns - 1) / 2 + rowShift) * spacing;
-	const y = (row - (rows - 1) / 2) * spacing;
-	if (index === 0) return undefined;
+function formationTargetForCluster(world: World, target: { x: number; y: number }, cluster: Unit[], index: number, reserved: Set<string>) {
+	const offset = formationSlotOffset(cluster.length, index);
+	if (!offset) return undefined;
+	return nearestWalkablePoint(world, { x: target.x + offset.x, y: target.y + offset.y }, reserved);
+}
+
+function formationSlotOffset(count: number, index: number) {
+	if (count < 2 || index === 0) return undefined;
+	const spacing = formationSpacing(count);
+	const angle = index * 2.399963229728653;
+	const radius = spacing * Math.sqrt(index);
+	const x = Math.cos(angle) * radius;
+	const y = Math.sin(angle) * radius;
 	return isFinite(x) && isFinite(y) ? { x, y } : undefined;
 }
 
 function formationSpacing(count: number) {
-	if (count >= 120) return 0.64;
-	if (count >= 40) return 0.6;
-	if (count >= 12) return 0.56;
-	return 0.56;
+	if (count >= 500) return 0.86;
+	if (count >= 220) return 0.82;
+	if (count >= 120) return 0.76;
+	if (count >= 40) return 0.7;
+	if (count >= 12) return 0.64;
+	return 0.6;
+}
+
+function nearestWalkablePoint(world: World, point: { x: number; y: number }, reserved?: Set<string>) {
+	const origin = {
+		x: clamp(Math.floor(point.x), 0, MAP_SIZE - 1),
+		y: clamp(Math.floor(point.y), 0, MAP_SIZE - 1),
+	};
+	if (isAvailableFormationTile(world, origin.x, origin.y, reserved)) return reserveFormationPoint(origin.x, origin.y, reserved);
+	for (let radius = 1; radius <= 16; radius += 1) {
+		for (let y = origin.y - radius; y <= origin.y + radius; y += 1) {
+			for (let x = origin.x - radius; x <= origin.x + radius; x += 1) {
+				if (Math.abs(x - origin.x) !== radius && Math.abs(y - origin.y) !== radius) continue;
+				if (isAvailableFormationTile(world, x, y, reserved)) return reserveFormationPoint(x, y, reserved);
+			}
+		}
+	}
+	return { x: clamp(point.x, 0.2, MAP_SIZE - 0.2), y: clamp(point.y, 0.2, MAP_SIZE - 0.2) };
+}
+
+function isAvailableFormationTile(world: World, x: number, y: number, reserved?: Set<string>) {
+	return isWalkable(world, x, y) && !reserved?.has(`${x},${y}`);
+}
+
+function reserveFormationPoint(x: number, y: number, reserved?: Set<string>) {
+	reserved?.add(`${x},${y}`);
+	return { x: x + 0.5, y: y + 0.5 };
 }
 
 function ownUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined): Unit[] {

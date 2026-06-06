@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
-import type { Unit, UnitCommand, World } from "../shared/types.js";
+import type { ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
 import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
@@ -244,6 +244,44 @@ test("moveAroundSmallObstacle does not path around a wall-like blockage", () => 
 	assert.equal(unit.y, 10.5);
 });
 
+test("moveAroundSmallObstacle lets moving units pass through idle friendly units", () => {
+	const world = makeWorld([{ x: 11, y: 10 }]);
+	const idle = makeUnit(11.5, 10.5, "u-idle");
+	const moving = makeUnit(10.5, 10.5, "u-moving");
+	moving.command = { type: "move", x: 12.5, y: 10.5, path: [{ x: 12.5, y: 10.5 }] };
+	addUnits(world, [idle, moving]);
+
+	const blocked = moveAroundSmallObstacle(world, moving, { x: 12.5, y: 10.5 }, 1);
+
+	assert.equal(blocked, false);
+	assert.equal(moving.x, 11.5);
+	assert.equal(moving.y, 10.5);
+});
+
+test("moveAroundSmallObstacle still blocks resources under idle friendly units", () => {
+	const world = makeWorld([{ x: 11, y: 10 }]);
+	const resource: ResourceNode = {
+		id: "r-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 11.5,
+		y: 10.5,
+		amount: 100,
+		maxAmount: 100,
+	};
+	world.resources[resource.id] = resource;
+	const idle = makeUnit(11.5, 10.5, "u-idle");
+	const moving = makeUnit(10.5, 10.5, "u-moving");
+	moving.command = { type: "move", x: 14.5, y: 10.5, path: [{ x: 14.5, y: 10.5 }] };
+	addUnits(world, [idle, moving]);
+
+	const blocked = moveAroundSmallObstacle(world, moving, { x: 14.5, y: 10.5 }, 1);
+
+	assert.equal(blocked, false);
+	assert.notEqual(moving.x, 11.5);
+});
+
 test("moveWithPath does not consume a waypoint when blocked by an obstacle", () => {
 	const world = makeWorld([{ x: 11, y: 10 }]);
 	world.tick = 1;
@@ -291,7 +329,7 @@ test("moveWithPath accepts joining an arrived group edge", () => {
 	const arrived = makeUnit(20.8, 20.5, "u-arrived");
 	arrived.command = { type: "idle" };
 	const joining = makeUnit(21.3, 20.5, "u-joining");
-	const command = { type: "move" as const, x: 20.5, y: 20.5, path: null, pathCrowd: 30, formationOffset: { x: 1, y: 0 } };
+	const command = { type: "move" as const, x: 20.5, y: 20.5, path: null, pathCrowd: 30, formationTarget: { x: 21.5, y: 20.5 } };
 	joining.command = command;
 	addUnits(world, [arrived, joining]);
 
@@ -348,7 +386,7 @@ test("moveWithPath lets formation slots settle away from the clicked center", ()
 		y: 20.5,
 		path: null,
 		pathCrowd: 20,
-		formationOffset: { x: 1.5, y: 1.0 },
+		formationTarget: { x: 22.0, y: 21.5 },
 	};
 	unit.command = command;
 	addUnits(world, [unit]);
@@ -358,6 +396,47 @@ test("moveWithPath lets formation slots settle away from the clicked center", ()
 	assert.equal(done, true);
 	assert.equal(unit.x, 22.0);
 	assert.equal(unit.y, 21.5);
+});
+
+test("moveWithPath follows the shared group path before deploying to a formation target", () => {
+	const world = makeWorld();
+	const unit = makeUnit(4.5, 4.5, "u-slot-path");
+	const command: Extract<UnitCommand, { type: "move" }> = {
+		type: "move",
+		x: 20.5,
+		y: 4.5,
+		path: null,
+		pathCrowd: 80,
+		formationTarget: { x: 20.5, y: 20.5 },
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	moveWithPath(world, unit, command, 0.25);
+
+	assert.deepEqual(command.path?.at(-1), { x: 20.5, y: 4.5 });
+});
+
+test("moveWithPath walks toward formation slots instead of teleporting", () => {
+	const world = makeWorld();
+	const unit = makeUnit(20.5, 4.5, "u-slot-walk");
+	const command: Extract<UnitCommand, { type: "move" }> = {
+		type: "move",
+		x: 20.5,
+		y: 4.5,
+		path: null,
+		pathCrowd: 80,
+		formationTarget: { x: 20.5, y: 20.5 },
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	const done = moveWithPath(world, unit, command, 0.25);
+
+	assert.equal(done, false);
+	assert.equal(unit.x, 20.5);
+	assert.ok(unit.y > 4.5);
+	assert.ok(unit.y <= 4.75);
 });
 
 test("resolveUnitSeparation spreads units after they become idle at destination", () => {
