@@ -131,11 +131,12 @@ function makeWorld(): World {
 		resources: {},
 		ruins: {},
 		notices: [],
+		adminLogs: [],
 		actionNoises: [],
 		leaderboard: [],
 		tick: 0,
 		spawnTimers: {},
-		serverPerf: { tps: 10, tickMs: 0 },
+		serverPerf: { tps: 10, tickMs: 0, samples: [] },
 		_occupancy: new Uint8Array(MAP_SIZE * MAP_SIZE),
 	};
 }

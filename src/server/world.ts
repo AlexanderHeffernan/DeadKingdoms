@@ -19,6 +19,7 @@ import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { stepZombieDirector } from "./zombieDirector.js";
 import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
+import { Logs } from "../shared/logs.js";
 import type {
 	BuildQueueItem,
 	Building,
@@ -45,7 +46,9 @@ const STUMP_DECAY_SECONDS = 60;
 const RUIN_DECAY_SECONDS = 60;
 const ZOMBIE_INITIAL_RETARGET_SECONDS = 1.2;
 const MAX_ACTION_NOISES = 240;
+const MAX_ADMIN_LOGS = 500;
 const SERVER_PERF_SMOOTHING = 0.1;
+const SERVER_PERF_SAMPLE_LIMIT = TICK_RATE * 120;
 const TARGET_UNIT_GRID_CELL_SIZE = 4;
 
 export function createWorld(): World {
@@ -57,11 +60,12 @@ export function createWorld(): World {
 		resources: {},
 		ruins: {},
 		notices: [],
+		adminLogs: [],
 		actionNoises: [],
 		leaderboard: [],
 		tick: 0,
 		spawnTimers: {},
-		serverPerf: { tps: TICK_RATE, tickMs: 0 },
+		serverPerf: { tps: TICK_RATE, tickMs: 0, samples: [] },
 	};
 	seedResources(world);
 	rebuildOccupancy(world);
@@ -92,9 +96,22 @@ export function addPlayer(world: World, name: string, requestedColor: string | n
 	for (const unit of STARTING_UNITS) createUnit(world, playerId, unit.unitType, spawn.x + unit.x, spawn.y + unit.y);
 	addLocalResources(world, spawn.x, spawn.y);
 	notice(world, `${world.players[playerId]!.name} joined the world.`);
+	Logs.log(`${world.players[playerId]!.name} joined the world.`);
 	recalcPlayer(world, playerId);
 	updateLeaderboard(world);
 	return playerId;
+}
+
+export function addAdminLog(world: World, source: string, message: string, at = Date.now()) {
+	world.adminLogs.push({
+		id: id("log"),
+		at,
+		source,
+		message: message.slice(0, 500),
+	});
+	if (world.adminLogs.length > MAX_ADMIN_LOGS) {
+		world.adminLogs.splice(0, world.adminLogs.length - MAX_ADMIN_LOGS);
+	}
 }
 
 function clearSpawnResources(world: World, x: number, y: number, radius: number) {
@@ -109,6 +126,7 @@ export function removePlayer(world: World, playerId: PlayerId) {
 	const player = world.players[playerId];
 	if (!player) return;
 	notice(world, `${player.name} left the world.`);
+	Logs.log(`${player.name} left the world.`);
 	destroyPlayerStuff(world, playerId);
 	delete world.players[playerId];
 	updateLeaderboard(world);
@@ -121,7 +139,7 @@ export function spawnZombieHorde(world: World, playerId: PlayerId, count: number
 		const point = randomZombieHordePoint(world);
 		createZombie(world, point.x, point.y);
 	}
-	notice(world, `God mode spawned ${safeCount} zombies.`);
+	notice(world, `Admin deployed ${safeCount} hostile units.`);
 	return safeCount;
 }
 
@@ -199,6 +217,15 @@ function updateServerTps(world: World, tickStartedAt: number) {
 
 function updateServerTickDuration(world: World, tickMs: number) {
 	world.serverPerf.tickMs = smoothMetric(world.serverPerf.tickMs, tickMs);
+	world.serverPerf.samples.push({
+		tick: world.tick,
+		tps: world.serverPerf.tps,
+		tickMs: world.serverPerf.tickMs,
+		at: Date.now(),
+	});
+	if (world.serverPerf.samples.length > SERVER_PERF_SAMPLE_LIMIT) {
+		world.serverPerf.samples.splice(0, world.serverPerf.samples.length - SERVER_PERF_SAMPLE_LIMIT);
+	}
 }
 
 function smoothMetric(current: number, next: number) {

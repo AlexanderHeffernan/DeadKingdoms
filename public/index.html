@@ -88,6 +88,160 @@
                     aria-label="Minimap"
                 ></canvas>
             </section>
+            <section id="adminPanel" class="hud admin-panel hidden">
+                <div id="adminHeading" class="admin-heading">
+                    <h2>Admin</h2>
+                    <div class="admin-heading-actions">
+                        <span id="adminLevel"></span>
+                        <button
+                            id="adminFullscreenButton"
+                            class="admin-window-button"
+                            type="button"
+                            aria-label="Open full screen admin dashboard"
+                            title="Open full screen admin dashboard"
+                        >
+                            []
+                        </button>
+                        <button
+                            id="adminMinimizeButton"
+                            class="admin-window-button"
+                            type="button"
+                            aria-label="Minimize admin panel"
+                            title="Minimize admin panel"
+                        >
+                            -
+                        </button>
+                    </div>
+                </div>
+                <canvas
+                    id="adminPerfChart"
+                    width="320"
+                    height="92"
+                    aria-label="Server performance chart"
+                ></canvas>
+                <div id="adminMetrics" class="admin-metrics"></div>
+                <div id="adminPlayers" class="admin-players"></div>
+                <div id="adminEvents" class="admin-events"></div>
+                <div class="resize-handle resize-handle-nw" data-resize="nw"></div>
+                <div class="resize-handle resize-handle-ne" data-resize="ne"></div>
+                <div class="resize-handle resize-handle-sw" data-resize="sw"></div>
+                <div class="resize-handle resize-handle-se" data-resize="se"></div>
+            </section>
+            <section id="adminFullscreen" class="admin-fullscreen hidden">
+                <div class="admin-fullscreen-bar">
+                    <div>
+                        <h2>Admin Dashboard</h2>
+                        <span id="adminFullscreenLevel"></span>
+                    </div>
+                    <button
+                        id="adminFullscreenCloseButton"
+                        class="admin-window-button"
+                        type="button"
+                        aria-label="Close full screen admin dashboard"
+                        title="Close full screen admin dashboard"
+                    >
+                        X
+                    </button>
+                </div>
+                <div class="admin-tabs" role="tablist" aria-label="Admin dashboard views">
+                    <button id="adminOverviewTab" class="active" type="button" role="tab" aria-selected="true">Overview</button>
+                    <button id="adminPerformanceTab" type="button" role="tab" aria-selected="false">Performance</button>
+                    <button id="adminPlayersTab" type="button" role="tab" aria-selected="false">Players</button>
+                    <button id="adminLogsTab" type="button" role="tab" aria-selected="false">Logs</button>
+                    <button id="adminDevCommandsTab" type="button" role="tab" aria-selected="false">Dev Commands</button>
+                </div>
+                <div id="adminOverviewView" class="admin-tab-view admin-overview">
+                    <div class="admin-overview-metrics" id="adminOverviewMetrics"></div>
+                    <div class="admin-overview-grid">
+                        <section>
+                            <h3>Players</h3>
+                            <div id="adminOverviewPlayers" class="admin-overview-list"></div>
+                        </section>
+                        <section>
+                            <h3>Events</h3>
+                            <div id="adminOverviewEvents" class="admin-overview-list"></div>
+                        </section>
+                        <section>
+                            <h3>Logs</h3>
+                            <div id="adminOverviewLogs" class="admin-overview-list"></div>
+                        </section>
+                    </div>
+                </div>
+                <div id="adminPerformanceView" class="admin-tab-view hidden">
+                    <div class="admin-chart-controls">
+                        <button id="adminChartOlderButton" type="button">Older</button>
+                        <button id="adminChartNewerButton" type="button">Newer</button>
+                        <label>
+                            Range
+                            <select id="adminChartRange">
+                                <option value="10">10s</option>
+                                <option value="30" selected>30s</option>
+                                <option value="60">1m</option>
+                                <option value="120">2m</option>
+                            </select>
+                        </label>
+                        <span id="adminChartWindow"></span>
+                    </div>
+                    <canvas
+                        id="adminFullscreenChart"
+                        width="1280"
+                        height="520"
+                        aria-label="Full screen server performance chart"
+                    ></canvas>
+                </div>
+                <div id="adminPlayersView" class="admin-tab-view hidden">
+                    <table class="admin-player-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>Population</th>
+                                <th>Score</th>
+                                <th>Ping</th>
+                                <th>Alive</th>
+                                <th>Connection status</th>
+                                <th>Since</th>
+                                <th>IP</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminPlayerTableBody"></tbody>
+                    </table>
+                </div>
+                <div id="adminLogsView" class="admin-tab-view hidden">
+                    <table class="admin-log-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Source</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminLogTableBody"></tbody>
+                    </table>
+                </div>
+                <div id="adminDevCommandsView" class="admin-tab-view hidden">
+                    <div class="admin-command-grid">
+                        <button id="adminEnableVisionButton" type="button">
+                            <strong>Enable Full-Map Admin Vision</strong>
+                            <span>Reveal the complete map for this admin session.</span>
+                        </button>
+                        <button id="adminSpawnHordeButton" type="button">
+                            <strong>Deploy Hostile Stress Horde</strong>
+                            <span>Spawn a controlled hostile horde for testing.</span>
+                        </button>
+                    </div>
+                    <div id="adminCommandStatus" class="admin-command-status"></div>
+                </div>
+            </section>
+            <button
+                id="adminRestoreButton"
+                class="admin-restore hidden"
+                type="button"
+                aria-label="Restore admin panel"
+                title="Restore admin panel"
+            >
+                Admin
+            </button>
             <section class="hud bottom">
                 <div id="selection" class="selection"></div>
                 <div id="actions" class="actions"></div>

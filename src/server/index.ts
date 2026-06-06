@@ -1,19 +1,23 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
 import { TICK_MS } from "../shared/config.js";
+import { Logs } from "../shared/logs.js";
 import { broadcast, createHandler } from "./http.js";
 import type { Client } from "./http.js";
-import { createWorld, stepWorld } from "./world.js";
+import { addAdminLog, createWorld, stepWorld } from "./world.js";
 
 loadEnvFile();
 
 const port = Number(process.env.PORT || 3000);
 const world = createWorld();
+Logs.setSource("server");
+Logs.setSink((entry) => addAdminLog(world, entry.source, entry.message, entry.at));
 const clients = new Set<Client>();
 const server = http.createServer(createHandler(world, clients));
 
 server.listen(port, "0.0.0.0", () => {
 	console.log(`RTS arena running at http://127.0.0.1:${port}`);
+	Logs.log(`Server started on port ${port}.`);
 });
 
 setInterval(() => {
