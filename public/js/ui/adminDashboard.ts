@@ -30,6 +30,7 @@ export class AdminDashboard {
 	private readonly logTableBody: HTMLTableSectionElement;
 	private readonly enableVisionButton: HTMLButtonElement;
 	private readonly spawnHordeButton: HTMLButtonElement;
+	private readonly grantSoldiersButton: HTMLButtonElement;
 	private readonly commandStatus: HTMLElement;
 	private readonly actions: AdminDashboardActions;
 	private activeTab: AdminDashboardTab = "overview";
@@ -68,6 +69,7 @@ export class AdminDashboard {
 		this.logTableBody = elements.logTableBody;
 		this.enableVisionButton = elements.enableVisionButton;
 		this.spawnHordeButton = elements.spawnHordeButton;
+		this.grantSoldiersButton = elements.grantSoldiersButton;
 		this.commandStatus = elements.commandStatus;
 		this.rangeSeconds = Number(this.range.value) || 30;
 		this.setupEvents();
@@ -144,6 +146,7 @@ export class AdminDashboard {
 		});
 		this.enableVisionButton.addEventListener("click", () => this.runCommand(this.enableVisionButton, this.actions.enableFullMapVision));
 		this.spawnHordeButton.addEventListener("click", () => this.runCommand(this.spawnHordeButton, this.actions.spawnHostileHorde));
+		this.grantSoldiersButton.addEventListener("click", () => this.runCommand(this.grantSoldiersButton, this.actions.grantSoldiers));
 	}
 
 	private setActiveTab(tab: AdminDashboardTab) {
@@ -440,12 +443,14 @@ export type AdminDashboardElements = {
 	logTableBody: HTMLTableSectionElement;
 	enableVisionButton: HTMLButtonElement;
 	spawnHordeButton: HTMLButtonElement;
+	grantSoldiersButton: HTMLButtonElement;
 	commandStatus: HTMLElement;
 };
 
 export type AdminDashboardActions = {
 	enableFullMapVision: () => Promise<string>;
 	spawnHostileHorde: () => Promise<string>;
+	grantSoldiers: () => Promise<string>;
 };
 
 type AdminDashboardTab = "overview" | "performance" | "players" | "logs" | "devCommands";

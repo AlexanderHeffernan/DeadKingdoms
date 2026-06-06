@@ -44,10 +44,12 @@ export class UI {
 			logTableBody: mustGet("adminLogTableBody") as HTMLTableSectionElement,
 			enableVisionButton: mustGet("adminEnableVisionButton") as HTMLButtonElement,
 			spawnHordeButton: mustGet("adminSpawnHordeButton") as HTMLButtonElement,
+			grantSoldiersButton: mustGet("adminGrantSoldiersButton") as HTMLButtonElement,
 			commandStatus: mustGet("adminCommandStatus"),
 		}, {
 			enableFullMapVision: actions.enableFullMapVision,
 			spawnHostileHorde: actions.spawnHostileHorde,
+			grantSoldiers: actions.grantSoldiers,
 		});
 		this.components = [
 			new ResourcePanel(state, mustGet("resources"), hoverCard),

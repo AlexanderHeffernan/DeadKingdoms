@@ -122,6 +122,7 @@ export class Renderer {
 		this.drawLastSeen(state, view, active);
 		this.drawEntities(state, view, active);
 		this.hideAllEntitySprites(active);
+		this.drawPathDebug(state, view);
 		this.drawSoundDebug(state, view);
 		this.drawEffects(state, view);
 		this.drawPlacement(view, state);
@@ -388,8 +389,6 @@ export class Renderer {
 				center.y,
 				ownerColor || "#f4efe6",
 			);
-		if (entity.kind === "unit")
-			this.drawTeamAccent(entity, center.x, y, visualWidth, ownerColor);
 		if ("attackFlash" in entity && entity.attackFlash > 0)
 			this.drawAttackFlash(center.x, center.y, ownerColor || "#f4efe6");
 		if (entity.kind === "unit") {
@@ -595,6 +594,30 @@ export class Renderer {
 		}
 	}
 
+	private drawPathDebug(state: GameState, view: ViewState) {
+		if (!state.snapshot?.pathDebug) return;
+		const zoom = view.camera.zoom || 1;
+		const lineWidth = Math.max(1, Math.round(2 * zoom));
+		for (const unit of Object.values(state.snapshot.units)) {
+			if (unit.ownerId !== state.playerId || !state.selectedIds.has(unit.id)) continue;
+			const path = unit.command?.path;
+			if (!path?.length) continue;
+			this.overlayLayer.lineStyle(lineWidth, 0x4fd8c8, 0.42);
+			const start = isoToScreen(unit.x, unit.y, view.camera);
+			this.overlayLayer.moveTo(start.x, start.y);
+			for (const point of path) {
+				const screen = isoToScreen(point.x, point.y, view.camera);
+				this.overlayLayer.lineTo(screen.x, screen.y);
+			}
+			const end = isoToScreen(path[path.length - 1]!.x, path[path.length - 1]!.y, view.camera);
+			this.overlayLayer.lineStyle();
+			this.overlayLayer.beginFill(0x4fd8c8, 0.75);
+			this.overlayLayer.drawCircle(end.x, end.y, Math.max(2, 3 * zoom));
+			this.overlayLayer.endFill();
+		}
+		this.overlayLayer.lineStyle();
+	}
+
 	private drawHealth(x: number, y: number, pct: number) {
 		this.overlayLayer.beginFill(0x1b1715);
 		this.overlayLayer.drawRect(x - 18, y, 36, 5);
@@ -679,26 +702,6 @@ export class Renderer {
 			g.drawRect(Math.round(x + width * px), Math.round(y + row * px), px, px);
 		}
 		g.endFill();
-	}
-
-	private drawTeamAccent(
-		entity: RenderEntity,
-		centerX: number,
-		topY: number,
-		visualWidth: number,
-		color: string | undefined,
-	) {
-		if (!color || !entity.ownerId) return;
-		const px = worldPixel(this.currentZoom || 1);
-		this.overlayLayer.beginFill(hexToNumber(color));
-		if (entity.kind === "unit")
-			this.overlayLayer.drawRect(
-				Math.round(centerX - px * 3),
-				Math.round(topY + px * 7),
-				px * 5,
-				px * 2,
-			);
-		this.overlayLayer.endFill();
 	}
 
 	private drawAttackFlash(x: number, y: number, color: string) {

@@ -101,6 +101,7 @@ export interface Snapshot {
 	leaderboard: LeaderboardEntry[];
 	notices: Notice[];
 	soundDebug: SoundDebugSource[] | null;
+	pathDebug: boolean;
 	serverPerf: ServerPerfStats;
 	admin: AdminSnapshot | null;
 }

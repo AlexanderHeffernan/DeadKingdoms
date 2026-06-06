@@ -50,6 +50,7 @@ export type UIActions = {
 	respawn: () => Promise<void>;
 	enableFullMapVision: () => Promise<string>;
 	spawnHostileHorde: () => Promise<string>;
+	grantSoldiers: () => Promise<string>;
 };
 
 export type SelectionEntity = Unit | Building | ResourceNode;

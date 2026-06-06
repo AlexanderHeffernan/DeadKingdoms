@@ -14,7 +14,7 @@ import type { UnitSimulationContext } from "../shared/units/index.js";
 import type { GatherTarget } from "../shared/buildingDefinitions.js";
 import { id } from "./id.js";
 import { clamp, distance, rectsOverlap } from "./math.js";
-import { findPath, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, resolveUnitSeparation } from "./pathing.js";
+import { isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { stepZombieDirector } from "./zombieDirector.js";
@@ -50,6 +50,7 @@ const MAX_ADMIN_LOGS = 500;
 const SERVER_PERF_SMOOTHING = 0.1;
 const SERVER_PERF_SAMPLE_LIMIT = TICK_RATE * 120;
 const TARGET_UNIT_GRID_CELL_SIZE = 4;
+const COMMAND_CLUSTER_DISTANCE = 12;
 
 export function createWorld(): World {
 	const world: World = {
@@ -141,6 +142,56 @@ export function spawnZombieHorde(world: World, playerId: PlayerId, count: number
 	}
 	notice(world, `Admin deployed ${safeCount} hostile units.`);
 	return safeCount;
+}
+
+export function grantPlayerSoldiers(world: World, playerId: PlayerId, count: number): number {
+	if (!world.players[playerId]) return 0;
+	const safeCount = clamp(Math.floor(count), 1, 500);
+	const origin = playerSpawnCenter(world, playerId);
+	let granted = 0;
+	for (let i = 0; i < safeCount; i += 1) {
+		const point = soldierGrantPoint(world, origin, i);
+		createUnit(world, playerId, "soldier", point.x, point.y);
+		granted += 1;
+	}
+	notice(world, `Dev command granted ${granted} soldiers.`);
+	recalcPlayer(world, playerId);
+	updateLeaderboard(world);
+	return granted;
+}
+
+function playerSpawnCenter(world: World, playerId: PlayerId) {
+	const townCenter = Object.values(world.buildings).find((building) => building.ownerId === playerId && building.isTownCenter());
+	if (townCenter) return centerOf(townCenter);
+	const building = Object.values(world.buildings).find((entity) => entity.ownerId === playerId);
+	if (building) return centerOf(building);
+	const unit = Object.values(world.units).find((entity) => entity.ownerId === playerId);
+	return unit ? { x: unit.x, y: unit.y } : { x: MAP_SIZE / 2, y: MAP_SIZE / 2 };
+}
+
+function soldierGrantPoint(world: World, origin: { x: number; y: number }, index: number) {
+	const columns = 10;
+	const spacing = 0.65;
+	const row = Math.floor(index / columns);
+	const column = index % columns;
+	const base = {
+		x: origin.x + (column - (columns - 1) / 2) * spacing,
+		y: origin.y + 3 + row * spacing,
+	};
+	if (isWalkable(world, Math.floor(base.x), Math.floor(base.y))) {
+		return { x: clamp(base.x, 0.2, MAP_SIZE - 0.2), y: clamp(base.y, 0.2, MAP_SIZE - 0.2) };
+	}
+	for (let radius = 1; radius <= 12; radius += 1) {
+		for (let dy = -radius; dy <= radius; dy += 1) {
+			for (let dx = -radius; dx <= radius; dx += 1) {
+				if (Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
+				const x = Math.floor(origin.x + dx);
+				const y = Math.floor(origin.y + dy);
+				if (isWalkable(world, x, y)) return { x: x + 0.5, y: y + 0.5 };
+			}
+		}
+	}
+	return { x: clamp(origin.x, 0.2, MAP_SIZE - 0.2), y: clamp(origin.y, 0.2, MAP_SIZE - 0.2) };
 }
 
 function randomZombieHordePoint(world: World): { x: number; y: number } {
@@ -286,6 +337,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 
 function rebuildOccupancy(world: World) {
 	const size = MAP_SIZE;
+	const previous = world._occupancy ? world._occupancy.slice() : null;
 	if (!world._occupancy || world._occupancy.length !== size * size) {
 		world._occupancy = new Uint8Array(size * size);
 	} else {
@@ -307,6 +359,21 @@ function rebuildOccupancy(world: World) {
 			}
 		}
 	}
+	if (!previous || occupancyChanged(previous, grid)) {
+		world._pathing ??= { occupancyVersion: 0, flowFields: new Map(), clearanceFields: new Map(), arrivalGroups: new Map(), pathRequestsThisTick: 0, lastRequestTick: -1 };
+		world._pathing.occupancyVersion += 1;
+		world._pathing.flowFields.clear();
+		world._pathing.clearanceFields.clear();
+		world._pathing.arrivalGroups.clear();
+	}
+}
+
+function occupancyChanged(previous: Uint8Array, next: Uint8Array) {
+	if (previous.length !== next.length) return true;
+	for (let i = 0; i < previous.length; i += 1) {
+		if (previous[i] !== next[i]) return true;
+	}
+	return false;
 }
 
 function occupied(world: World, x: number, y: number): boolean {
@@ -472,15 +539,16 @@ function pointInsideEntity(x: number, y: number, entity: { x: number; y: number;
 }
 
 function commandMove(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "move" }>): CommandResult {
-	forOwnUnits(world, playerId, body.unitIds, (unit, index) => {
+	forOwnUnitClusters(world, playerId, body.unitIds, (unit, cluster) => {
 		const target = {
-			x: clamp(Number(body.x) + (index % 3) * 0.25, 0, MAP_SIZE - 1),
-			y: clamp(Number(body.y) + Math.floor(index / 3) * 0.25, 0, MAP_SIZE - 1),
+			x: clamp(Number(body.x), 0, MAP_SIZE - 1),
+			y: clamp(Number(body.y), 0, MAP_SIZE - 1),
 		};
 		unit.command = {
 			type: "move",
 			...target,
-			path: findPath(world, unit, target),
+			path: null,
+			pathCrowd: cluster.length,
 		};
 	});
 	return { ok: true };
@@ -490,8 +558,8 @@ function commandAttack(world: World, playerId: PlayerId, body: Extract<CommandPa
 	const target = world.units[body.targetId] || world.buildings[body.targetId];
 	if (!target || target.ownerId === playerId) return { ok: false, error: "Invalid target." };
 	let assigned = false;
-	forOwnUnits(world, playerId, body.unitIds, (unit) => {
-		unit.command = { type: "attack", targetId: target.id, path: null };
+	forOwnUnitClusters(world, playerId, body.unitIds, (unit, cluster) => {
+		unit.command = { type: "attack", targetId: target.id, path: null, pathCrowd: cluster.length };
 		assigned = true;
 	});
 	return assigned ? { ok: true } : { ok: false, error: "Select units to command." };
@@ -611,6 +679,42 @@ function forOwnUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undef
 	});
 }
 
+function forOwnUnitClusters(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined, fn: (unit: Unit, cluster: Unit[]) => void) {
+	const units = ownUnits(world, playerId, unitIds);
+	for (const cluster of spatialUnitClusters(units)) {
+		for (const unit of cluster) fn(unit, cluster);
+	}
+}
+
+function ownUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined): Unit[] {
+	if (!Array.isArray(unitIds)) return [];
+	return unitIds
+		.map((unitId) => world.units[unitId])
+		.filter((unit): unit is Unit => unit?.ownerId === playerId);
+}
+
+function spatialUnitClusters(units: Unit[]): Unit[][] {
+	const remaining = new Set(units);
+	const clusters: Unit[][] = [];
+	for (const seed of units) {
+		if (!remaining.has(seed)) continue;
+		const cluster = [];
+		const queue = [seed];
+		remaining.delete(seed);
+		for (let index = 0; index < queue.length; index += 1) {
+			const unit = queue[index]!;
+			cluster.push(unit);
+			for (const other of remaining) {
+				if (distance(unit, other) > COMMAND_CLUSTER_DISTANCE) continue;
+				remaining.delete(other);
+				queue.push(other);
+			}
+		}
+		clusters.push(cluster);
+	}
+	return clusters;
+}
+
 function stepBuilding(world: World, building: Building, dt: number) {
 	building.cooldown = Math.max(0, building.cooldown - dt);
 	building.attackFlash = Math.max(0, (building.attackFlash || 0) - dt);
@@ -624,7 +728,7 @@ function stepBuilding(world: World, building: Building, dt: number) {
 			if (!item) return;
 			const unit = createUnit(world, building.ownerId, item.unitType, building.x + building.size + 0.4, building.y + building.size + 0.2);
 			if (building.rallyPoint) {
-				unit.command = { type: "move", ...building.rallyPoint, path: findPath(world, unit, building.rallyPoint) };
+				unit.command = { type: "move", ...building.rallyPoint, path: null };
 			}
 		}
 	}

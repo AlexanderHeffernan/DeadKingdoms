@@ -1,4 +1,4 @@
-import { enableAdminAccess, enableFullMapVision as requestFullMapVision, enableSoundDebug, getStatus, join, leave, logClientMessage, reportPing, sendCommand, spawnZombieHorde } from "./api.js";
+import { enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, sendCommand, spawnZombieHorde } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
@@ -66,6 +66,9 @@ let adminAccessEnabled = false;
 let godModeCheckPending = false;
 let soundDebugEnabled = false;
 let soundDebugCheckPending = false;
+let pathDebugEnabled = false;
+let pathDebugCheckPending = false;
+let zombieHordePending = false;
 let lastFrameAt = performance.now();
 let smoothedFps = 60;
 let lastPingReportAt = 0;
@@ -110,6 +113,13 @@ const ui = new UI(state, {
 		if (!result.ok) return result.error || "Could not spawn hostile horde.";
 		ui.showToast(`Spawned ${result.spawned ?? 500} hostile units.`);
 		return `Spawned ${result.spawned ?? 500} hostile units.`;
+	},
+	async grantSoldiers() {
+		if (!state.playerId) return "No active player.";
+		const result = await requestGrantSoldiers(state.playerId, 100);
+		if (!result.ok) return result.error || "Could not grant soldiers.";
+		ui.showToast(`Granted ${result.granted ?? 100} soldiers.`);
+		return `Granted ${result.granted ?? 100} soldiers.`;
 	},
 });
 
@@ -274,6 +284,8 @@ function onDevShortcutKeyDown(event: KeyboardEvent) {
 	devCommandInput = `${devCommandInput}${event.key}`.slice(-DEV_COMMAND_BUFFER_LENGTH);
 	void maybeEnableAdminAccess();
 	void maybeEnableSoundDebug();
+	void maybeEnablePathDebug();
+	void maybeSpawnZombieHorde();
 }
 
 async function maybeEnableAdminAccess() {
@@ -311,6 +323,38 @@ async function maybeEnableSoundDebug() {
 	} finally {
 		soundDebugCheckPending = false;
 		if (!soundDebugEnabled && checkedInput !== devCommandInput) void maybeEnableSoundDebug();
+	}
+}
+
+async function maybeEnablePathDebug() {
+	if (pathDebugEnabled || pathDebugCheckPending || !state.playerId || devCommandInput.length < 3) return;
+	const checkedInput = devCommandInput;
+	pathDebugCheckPending = true;
+	try {
+		const result = await enablePathDebug(state.playerId, checkedInput);
+		if (result.ok) {
+			pathDebugEnabled = true;
+			ui.showToast("Pathfinding debug enabled.");
+			connectEvents();
+		}
+	} catch {
+		// Keep this shortcut silent unless it succeeds.
+	} finally {
+		pathDebugCheckPending = false;
+		if (!pathDebugEnabled && checkedInput !== devCommandInput) void maybeEnablePathDebug();
+	}
+}
+
+async function maybeSpawnZombieHorde() {
+	if (!adminAccessEnabled || zombieHordePending || !state.playerId || !devCommandInput.endsWith("zombiehorde")) return;
+	zombieHordePending = true;
+	try {
+		const result = await spawnZombieHorde(state.playerId, 500);
+		if (result.ok) ui.showToast(`Spawned ${result.spawned ?? 500} zombies.`);
+	} catch {
+		// Keep this shortcut silent unless it succeeds.
+	} finally {
+		zombieHordePending = false;
 	}
 }
 

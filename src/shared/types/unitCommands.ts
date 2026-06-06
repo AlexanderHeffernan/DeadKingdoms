@@ -4,6 +4,7 @@ import type { BuildingId, EntityId, PathNode, ResourceType, Vec2 } from "./core.
 export interface UnitCommandBase {
 	type: UnitCommandType;
 	path?: PathNode[] | null;
+	pathCrowd?: number;
 }
 
 /** Unit command discriminants understood by the world simulation. */

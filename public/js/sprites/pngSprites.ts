@@ -8,6 +8,9 @@ import berryBush from "./berry_bush.png";
 import townCenterBase from "./town_centre_base_v2.png";
 import townCenterFlag from "./town_centre_flag_v2.png";
 
+import soldierBase from "./soldier_base.png";
+import soldierFlag from "./soldier_flag.png";
+
 import type { SpriteName } from "../../../src/shared/types.js";
 
 // PNG-based sprites. Each sprite is composited from up to two layers:
@@ -28,5 +31,6 @@ export const pngSprites: Partial<Record<SpriteName, PngSprite>> = {
   ore: { base: rock, width: 16, height: 16 },
   tree: { base: pine, width: 16, height: 24 },
   berry: { base: berryBush, width: 16, height: 16 },
-  townCenter: { base: townCenterBase, flag: townCenterFlag, width: 64, height: 64 }
+  townCenter: { base: townCenterBase, flag: townCenterFlag, width: 64, height: 64 },
+  soldier: { base: soldierBase, flag: soldierFlag, width: 16, height: 16 }
 };

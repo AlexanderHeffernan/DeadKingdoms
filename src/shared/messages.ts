@@ -79,6 +79,7 @@ export function makeSnapshot(
 		leaderboard: world.leaderboard,
 		notices: world.notices.slice(-8),
 		soundDebug: player?.soundDebug ? buildSoundDebugSources(world) : null,
+		pathDebug: player?.pathDebug === true,
 		serverPerf: {
 			tps: world.serverPerf.tps,
 			tickMs: world.serverPerf.tickMs,

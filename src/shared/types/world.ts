@@ -19,6 +19,17 @@ export interface ZombieHorde {
 	wanderTarget: Vec2 | null;
 }
 
+export interface PathingWorldState {
+	occupancyVersion: number;
+	flowFields: Map<string, unknown>;
+	clearanceFields: Map<number, unknown>;
+	arrivalGroups: Map<string, unknown>;
+	movingUnitGrid?: unknown;
+	movingUnitGridTick?: number;
+	pathRequestsThisTick: number;
+	lastRequestTick: number;
+}
+
 /** Authoritative server-side simulation state for one running arena. */
 export interface World {
 	map: MapDef;
@@ -35,5 +46,6 @@ export interface World {
 	spawnTimers: Record<string, number>;
 	serverPerf: ServerPerfStats & { lastTickAt?: number; samples: ServerPerfSample[] };
 	_occupancy?: Uint8Array;
+	_pathing?: PathingWorldState;
 	_zombieHordes?: Record<string, ZombieHorde>;
 }

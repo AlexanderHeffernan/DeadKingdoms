@@ -41,6 +41,7 @@ export interface Player {
 	godMode?: boolean;
 	adminLevel?: AdminLevel;
 	soundDebug?: boolean;
+	pathDebug?: boolean;
 	connection?: PlayerConnection;
 	_visCache?: VisibilityCache;
 }
