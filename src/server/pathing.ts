@@ -20,6 +20,9 @@ const WAYPOINT_REACHED_DISTANCE = 0.28;
 const STUCK_MOVEMENT_EPSILON = 0.015;
 const GROUP_ARRIVAL_BASE_RADIUS = 0.8;
 const GROUP_ARRIVAL_MAX_RADIUS = 5.5;
+const MOVING_COHESION_CELL_SIZE = 1.4;
+const MOVING_COHESION_RADIUS = 0.75;
+const MOVING_COHESION_STRENGTH = 0.7;
 
 type FlowField = {
 	goalId: number;
@@ -199,7 +202,7 @@ export function moveWithPath(world: World, unit: Unit, command: Extract<UnitComm
 	if (isGroupArrived(world, unit, command, target)) return true;
 	if (occupied(world, Math.floor(unit.x), Math.floor(unit.y)) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
 	if (shouldRefreshPath(world, unit, command, target)) command.path = budgetedPath(world, unit, target);
-	followPathStep(world, unit, command, target, target, maxStep);
+	followPathStep(world, unit, command, target, target, maxStep, movingUnitGrid(world));
 	return isGroupArrived(world, unit, command, target);
 }
 
@@ -208,7 +211,7 @@ export function moveNearTarget(world: World, unit: Unit, command: UnitCommand, t
 	const goal = nearestWalkableAround(world, target);
 	if (occupied(world, Math.floor(unit.x), Math.floor(unit.y)) && escapeOccupiedTile(world, unit, goal, maxStep)) return false;
 	if (shouldRefreshPath(world, unit, command, goal)) command.path = budgetedPath(world, unit, goal);
-	followPathStep(world, unit, command, target, target, maxStep);
+	followPathStep(world, unit, command, target, target, maxStep, movingUnitGrid(world));
 	return false;
 }
 
@@ -248,9 +251,9 @@ function exactArrivalRadius(command: UnitCommand): number {
 	return commandCrowd(command) >= 8 ? 0.45 : 0.35;
 }
 
-function followPathStep(world: World, unit: Unit, command: UnitCommand, fallback: Vec2, finalTarget: Vec2, maxStep: number) {
+function followPathStep(world: World, unit: Unit, command: UnitCommand, fallback: Vec2, finalTarget: Vec2, maxStep: number, movingGrid: SpatialGrid<Unit>) {
 	pruneReachablePathPrefix(world, unit, command.path);
-	const waypoint = movementWaypoint(world, unit, command, command.path, fallback, finalTarget);
+	const waypoint = movementWaypoint(world, unit, command, command.path, fallback, finalTarget, movingGrid);
 	unit.facing = waypoint.target.x < unit.x ? "left" : "right";
 	const before = { x: unit.x, y: unit.y };
 	moveAroundSmallObstacle(world, unit, waypoint.target, maxStep);
@@ -287,7 +290,7 @@ function isStuckAgainstObstacle(before: Vec2, unit: Unit, waypoint: Vec2): boole
 	return distance(before, unit) < STUCK_MOVEMENT_EPSILON && distance(before, waypoint) > WAYPOINT_REACHED_DISTANCE;
 }
 
-function movementWaypoint(world: World, unit: Unit, command: UnitCommand, path: PathNode[] | null | undefined, fallback: Vec2, finalTarget: Vec2): { target: Vec2; base: Vec2 } {
+function movementWaypoint(world: World, unit: Unit, command: UnitCommand, path: PathNode[] | null | undefined, fallback: Vec2, finalTarget: Vec2, movingGrid: SpatialGrid<Unit>): { target: Vec2; base: Vec2 } {
 	if (!path || path.length === 0) return { target: fallback, base: fallback };
 	const base = path[0]!;
 	const lookahead = path[Math.min(path.length - 1, FLOW_LOOKAHEAD_NODES)]!;
@@ -303,17 +306,54 @@ function movementWaypoint(world: World, unit: Unit, command: UnitCommand, path: 
 		x: lookahead.x + (-dy / length) * offset,
 		y: lookahead.y + (dx / length) * offset,
 	};
-	if (canUseMovementWaypoint(world, unit, candidate)) return { target: candidate, base };
+	const spacedCandidate = movingSpacingWaypoint(world, unit, candidate, movingGrid);
+	if (canUseMovementWaypoint(world, unit, spacedCandidate)) return { target: spacedCandidate, base };
 	const halfCandidate = {
 		x: lookahead.x + (-dy / length) * offset * 0.5,
 		y: lookahead.y + (dx / length) * offset * 0.5,
 	};
-	return canUseMovementWaypoint(world, unit, halfCandidate) ? { target: halfCandidate, base } : { target: lookahead, base };
+	const spacedHalfCandidate = movingSpacingWaypoint(world, unit, halfCandidate, movingGrid);
+	if (canUseMovementWaypoint(world, unit, spacedHalfCandidate)) return { target: spacedHalfCandidate, base };
+	const spacedLookahead = movingSpacingWaypoint(world, unit, lookahead, movingGrid);
+	return canUseMovementWaypoint(world, unit, spacedLookahead) ? { target: spacedLookahead, base } : { target: lookahead, base };
 }
 
 function canUseMovementWaypoint(world: World, unit: Unit, point: Vec2): boolean {
 	if (!isWalkable(world, Math.floor(point.x), Math.floor(point.y))) return false;
 	return hasClearMovementLine(world, unit, point);
+}
+
+function movingSpacingWaypoint(world: World, unit: Unit, target: Vec2, movingGrid: SpatialGrid<Unit>): Vec2 {
+	let pushX = 0;
+	let pushY = 0;
+	for (const entry of movingGrid.nearby(unit, MOVING_COHESION_RADIUS)) {
+		const other = entry.item;
+		if (other === unit || other.ownerId !== unit.ownerId) continue;
+		const dx = unit.x - other.x;
+		const dy = unit.y - other.y;
+		const dist = Math.hypot(dx, dy);
+		if (dist <= 0.001 || dist >= MOVING_COHESION_RADIUS) continue;
+		const strength = (MOVING_COHESION_RADIUS - dist) / MOVING_COHESION_RADIUS;
+		pushX += (dx / dist) * strength;
+		pushY += (dy / dist) * strength;
+	}
+	if (pushX === 0 && pushY === 0) return target;
+	const length = Math.hypot(pushX, pushY) || 1;
+	const adjusted = {
+		x: target.x + (pushX / length) * MOVING_COHESION_STRENGTH,
+		y: target.y + (pushY / length) * MOVING_COHESION_STRENGTH,
+	};
+	return canUseMovementWaypoint(world, unit, adjusted) ? adjusted : target;
+}
+
+function movingUnitGrid(world: World): SpatialGrid<Unit> {
+	const state = pathingState(world);
+	if (state.movingUnitGridTick === world.tick && state.movingUnitGrid) return state.movingUnitGrid as SpatialGrid<Unit>;
+	const movingUnits = Object.values(world.units).filter((unit) => isMovingCommand(unit.command));
+	const grid = new SpatialGrid(movingUnits, MOVING_COHESION_CELL_SIZE);
+	state.movingUnitGrid = grid;
+	state.movingUnitGridTick = world.tick;
+	return grid;
 }
 
 function hasClearMovementLine(world: World, unit: Unit, point: Vec2): boolean {

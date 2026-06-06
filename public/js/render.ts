@@ -389,8 +389,6 @@ export class Renderer {
         center.y,
         ownerColor || "#f4efe6",
       );
-    if (entity.kind === "unit")
-      this.drawTeamAccent(entity, center.x, y, visualWidth, ownerColor);
     if ("attackFlash" in entity && entity.attackFlash > 0)
       this.drawAttackFlash(center.x, center.y, ownerColor || "#f4efe6");
     if (entity.kind === "unit") {
@@ -704,26 +702,6 @@ export class Renderer {
       g.drawRect(Math.round(x + width * px), Math.round(y + row * px), px, px);
     }
     g.endFill();
-  }
-
-  private drawTeamAccent(
-    entity: RenderEntity,
-    centerX: number,
-    topY: number,
-    visualWidth: number,
-    color: string | undefined,
-  ) {
-    if (!color || !entity.ownerId) return;
-    const px = worldPixel(this.currentZoom || 1);
-    this.overlayLayer.beginFill(hexToNumber(color));
-    if (entity.kind === "unit")
-      this.overlayLayer.drawRect(
-        Math.round(centerX - px * 3),
-        Math.round(topY + px * 7),
-        px * 5,
-        px * 2,
-      );
-    this.overlayLayer.endFill();
   }
 
   private drawAttackFlash(x: number, y: number, color: string) {
