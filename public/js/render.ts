@@ -41,11 +41,14 @@ export class Renderer {
 	background: Graphics;
 	terrainLayer: Container;
 	selectionLayer: Graphics;
+	selectionSpriteLayer: Container;
 	entityLayer: Container;
 	overlayLayer: Graphics;
 	currentZoom: number;
 
 	private tilePool: Sprite[] = [];
+	private selectionSprites: Sprite[] = [];
+	private activeSelectionSprites = 0;
 	private entitySprites = new Map<string, Sprite>();
 	private flashSprites = new Map<string, Sprite>();
 	private textureCache = new Map<string, Texture>();
@@ -73,6 +76,7 @@ export class Renderer {
 		this.background = new Graphics();
 		this.terrainLayer = new Container();
 		this.selectionLayer = new Graphics();
+		this.selectionSpriteLayer = new Container();
 		this.entityLayer = new Container();
 		this.entityLayer.sortableChildren = true;
 		this.overlayLayer = new Graphics();
@@ -80,6 +84,7 @@ export class Renderer {
 			this.background,
 			this.terrainLayer,
 			this.selectionLayer,
+			this.selectionSpriteLayer,
 			this.entityLayer,
 			this.overlayLayer,
 		);
@@ -106,6 +111,7 @@ export class Renderer {
 		this.drawBackground(state);
 		this.overlayLayer.clear();
 		this.selectionLayer.clear();
+		this.activeSelectionSprites = 0;
 		if (!state.snapshot) {
 			this.hideAllEntitySprites(new Set());
 			this.hideUnusedTiles(0);
@@ -122,6 +128,7 @@ export class Renderer {
 		this.drawLastSeen(state, view, active);
 		this.drawEntities(state, view, active);
 		this.hideAllEntitySprites(active);
+		this.hideUnusedSelectionSprites();
 		this.drawPathDebug(state, view);
 		this.drawSoundDebug(state, view);
 		this.drawEffects(state, view);
@@ -646,7 +653,72 @@ export class Renderer {
 		const px = worldPixel(this.currentZoom || 1);
 		const rx = Math.max(5, Math.round((entity.size || 0.8) * 8));
 		const ry = Math.max(3, Math.round((entity.size || 0.8) * 4));
-		this.drawPixelDiamond(x, y, rx, ry, px, hexToNumber(color));
+		this.placeSelectionDiamond(x, y, rx, ry, px, hexToNumber(color));
+	}
+
+	private placeSelectionDiamond(
+		x: number,
+		y: number,
+		rx: number,
+		ry: number,
+		px: number,
+		edge: number,
+	) {
+		const sprite = this.selectionSpriteAt(this.activeSelectionSprites++);
+		sprite.texture = this.selectionDiamondTexture(rx, ry, edge);
+		sprite.scale.set(px);
+		sprite.x = Math.round(x - rx * px);
+		sprite.y = Math.round(y - ry * px);
+		sprite.visible = true;
+	}
+
+	private selectionSpriteAt(index: number) {
+		let sprite = this.selectionSprites[index];
+		if (!sprite) {
+			sprite = new Sprite();
+			this.selectionSprites[index] = sprite;
+			this.selectionSpriteLayer.addChild(sprite);
+		}
+		return sprite;
+	}
+
+	private hideUnusedSelectionSprites() {
+		for (let i = this.activeSelectionSprites; i < this.selectionSprites.length; i += 1)
+			this.selectionSprites[i]!.visible = false;
+	}
+
+	private selectionDiamondTexture(rx: number, ry: number, edge: number) {
+		const key = `selection:${rx}:${ry}:${edge}`;
+		const cached = this.textureCache.get(key);
+		if (cached) return cached;
+		const canvas = document.createElement("canvas");
+		canvas.width = rx * 2 + 1;
+		canvas.height = ry * 2 + 1;
+		const ctx = canvas.getContext("2d")!;
+		ctx.fillStyle = "#111813";
+		ctx.globalAlpha = 0.9;
+		for (let row = -ry; row <= ry; row += 1) {
+			if (Math.abs(row) === ry) continue;
+			const width = Math.round(rx * (1 - Math.abs(row) / (ry + 1)));
+			for (let col = -width + 1; col <= width - 1; col += 1)
+				ctx.fillRect(rx + col, ry + row, 1, 1);
+		}
+		ctx.globalAlpha = 1;
+		ctx.fillStyle = numberToHex(edge);
+		for (let row = -ry; row <= ry; row += 1) {
+			const width = Math.round(rx * (1 - Math.abs(row) / (ry + 1)));
+			if (Math.abs(row) === ry) {
+				for (let col = -width; col <= width; col += 1)
+					ctx.fillRect(rx + col, ry + row, 1, 1);
+				continue;
+			}
+			ctx.fillRect(rx - width, ry + row, 1, 1);
+			ctx.fillRect(rx + width, ry + row, 1, 1);
+		}
+		const texture = Texture.from(canvas);
+		texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+		this.textureCache.set(key, texture);
+		return texture;
 	}
 
 	private drawPixelFootprint(
@@ -1200,4 +1272,8 @@ function soundColor(source: SoundDebugSource) {
 function hexToNumber(color = "#ffffff") {
 	if (!color.startsWith("#")) return 0xffffff;
 	return Number.parseInt(color.slice(1), 16);
+}
+
+function numberToHex(color: number) {
+	return `#${color.toString(16).padStart(6, "0")}`;
 }
