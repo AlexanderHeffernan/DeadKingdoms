@@ -1,6 +1,6 @@
 import type { Building, Player, ResourceNode, Ruin, Unit } from "./entities.js";
 import type { BuildingId, MapDef, PlayerId, ResourceId, RuinId, UnitId, Vec2 } from "./core.js";
-import type { LeaderboardEntry, Notice, ServerPerfStats } from "./snapshot.js";
+import type { AdminLogEntry, LeaderboardEntry, Notice, ServerPerfSample, ServerPerfStats } from "./snapshot.js";
 
 export interface ActionNoise extends Vec2 {
 	id: string;
@@ -28,11 +28,12 @@ export interface World {
 	resources: Record<ResourceId, ResourceNode>;
 	ruins: Record<RuinId, Ruin>;
 	notices: Notice[];
+	adminLogs: AdminLogEntry[];
 	actionNoises: ActionNoise[];
 	leaderboard: LeaderboardEntry[];
 	tick: number;
 	spawnTimers: Record<string, number>;
-	serverPerf: ServerPerfStats & { lastTickAt?: number };
+	serverPerf: ServerPerfStats & { lastTickAt?: number; samples: ServerPerfSample[] };
 	_occupancy?: Uint8Array;
 	_zombieHordes?: Record<string, ZombieHorde>;
 }

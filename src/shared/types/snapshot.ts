@@ -37,6 +37,47 @@ export interface ServerPerfStats {
 	tickMs: number;
 }
 
+export type AdminLevel = "observer" | "moderator" | "operator";
+
+export interface ServerPerfSample {
+	tick: number;
+	tps: number;
+	tickMs: number;
+	at: number;
+}
+
+export interface AdminLogEntry {
+	id: string;
+	at: number;
+	source: string;
+	message: string;
+}
+
+export interface AdminPlayerSnapshot {
+	id: PlayerId;
+	name: string;
+	color: string;
+	defeated: boolean;
+	score: number;
+	population: number;
+	popCap: number;
+	joinedAt: number;
+	connected: boolean;
+	lastSeenAt: number | null;
+	pingMs: number | null;
+	ipAddress?: string;
+}
+
+export interface AdminSnapshot {
+	level: AdminLevel;
+	serverPerf: ServerPerfStats & {
+		samples: ServerPerfSample[];
+	};
+	players: AdminPlayerSnapshot[];
+	events: Notice[];
+	logs: AdminLogEntry[];
+}
+
 /** Sanitized player state sent to clients in snapshots. */
 export type SnapshotPlayer = Pick<
 Player,
@@ -61,4 +102,5 @@ export interface Snapshot {
 	notices: Notice[];
 	soundDebug: SoundDebugSource[] | null;
 	serverPerf: ServerPerfStats;
+	admin: AdminSnapshot | null;
 }
