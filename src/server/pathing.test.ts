@@ -291,7 +291,7 @@ test("moveWithPath accepts joining an arrived group edge", () => {
 	const arrived = makeUnit(20.8, 20.5, "u-arrived");
 	arrived.command = { type: "idle" };
 	const joining = makeUnit(21.3, 20.5, "u-joining");
-	const command = { type: "move" as const, x: 20.5, y: 20.5, path: null, pathCrowd: 30 };
+	const command = { type: "move" as const, x: 20.5, y: 20.5, path: null, pathCrowd: 30, formationOffset: { x: 1, y: 0 } };
 	joining.command = command;
 	addUnits(world, [arrived, joining]);
 
@@ -337,6 +337,27 @@ test("moveWithPath uses the real target even when it is unexplored", () => {
 	moveWithPath(world, unit, command, 0.25);
 
 	assert.deepEqual(command.path?.at(-1), { x: 20.5, y: 4.5 });
+});
+
+test("moveWithPath lets formation slots settle away from the clicked center", () => {
+	const world = makeWorld();
+	const unit = makeUnit(22.0, 21.5, "u-slot");
+	const command: Extract<UnitCommand, { type: "move" }> = {
+		type: "move",
+		x: 20.5,
+		y: 20.5,
+		path: null,
+		pathCrowd: 20,
+		formationOffset: { x: 1.5, y: 1.0 },
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	const done = moveWithPath(world, unit, command, 0.25);
+
+	assert.equal(done, true);
+	assert.equal(unit.x, 22.0);
+	assert.equal(unit.y, 21.5);
 });
 
 test("resolveUnitSeparation spreads units after they become idle at destination", () => {

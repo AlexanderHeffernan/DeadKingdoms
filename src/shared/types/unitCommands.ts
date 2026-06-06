@@ -5,6 +5,7 @@ export interface UnitCommandBase {
 	type: UnitCommandType;
 	path?: PathNode[] | null;
 	pathCrowd?: number;
+	formationOffset?: Vec2;
 }
 
 /** Unit command discriminants understood by the world simulation. */

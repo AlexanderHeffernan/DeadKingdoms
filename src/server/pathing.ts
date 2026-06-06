@@ -19,9 +19,13 @@ const WAYPOINT_REACHED_DISTANCE = 0.28;
 const STUCK_MOVEMENT_EPSILON = 0.015;
 const GROUP_ARRIVAL_BASE_RADIUS = 0.8;
 const GROUP_ARRIVAL_MAX_RADIUS = 5.5;
+const FORMATION_SLOT_SETTLE_RADIUS = 0.65;
 const MOVING_COHESION_CELL_SIZE = 1.4;
 const MOVING_COHESION_RADIUS = 0.75;
 const MOVING_COHESION_STRENGTH = 0.7;
+const MOVING_COHESION_NEIGHBORS_PER_UNIT = 8;
+const SEPARATION_MAX_PAIRS_PER_TICK = 4500;
+const SEPARATION_NEIGHBORS_PER_UNIT = 10;
 
 type FlowField = {
 	goalId: number;
@@ -29,11 +33,6 @@ type FlowField = {
 	clearanceRadius: number;
 	distance: Uint32Array;
 	next: Int32Array;
-};
-
-type ArrivalGroupCache = {
-	tick: number;
-	grid: SpatialGrid<Unit>;
 };
 
 export function moveUnit(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
@@ -151,13 +150,17 @@ const SEPARATION_CELL_SIZE = 1;
 const MIN_SEPARATION_DISTANCE = 0.48;
 
 export function resolveUnitSeparation(world: World) {
-	const units = Object.values(world.units);
+	const units = Object.values(world.units).filter((unit) => !isMovingCommand(unit.command));
 	const grid = new SpatialGrid(units, SEPARATION_CELL_SIZE);
+	let pairs = 0;
 
 	for (const entry of grid.entries) {
-		for (const other of grid.nearby(entry.item, MIN_SEPARATION_DISTANCE)) {
+		if (pairs >= SEPARATION_MAX_PAIRS_PER_TICK) break;
+		for (const other of grid.nearby(entry.item, MIN_SEPARATION_DISTANCE, SEPARATION_NEIGHBORS_PER_UNIT)) {
 			if (other.index <= entry.index) continue;
+			pairs += 1;
 			resolveUnitSeparationPair(world, entry.item, other.item, separationDistance(entry.item, other.item));
+			if (pairs >= SEPARATION_MAX_PAIRS_PER_TICK) break;
 		}
 	}
 }
@@ -197,10 +200,11 @@ function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {
 }
 
 export function moveWithPath(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number): boolean {
-	const target = command;
+	const baseTarget = moveCommandTarget(world, command);
+	const target = formationTarget(world, command, baseTarget);
 	if (isGroupArrived(world, unit, command, target)) return true;
 	if (occupied(world, Math.floor(unit.x), Math.floor(unit.y)) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
-	if (shouldRefreshPath(world, unit, command, target)) command.path = budgetedPath(world, unit, target);
+	if (shouldRefreshPath(world, unit, command, baseTarget)) command.path = budgetedPath(world, unit, baseTarget);
 	followPathStep(world, unit, command, target, target, maxStep, movingUnitGrid(world));
 	return isGroupArrived(world, unit, command, target);
 }
@@ -215,31 +219,9 @@ export function moveNearTarget(world: World, unit: Unit, command: UnitCommand, t
 }
 
 function isGroupArrived(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, target: Vec2): boolean {
-	if (distance(unit, target) <= exactArrivalRadius(command)) return true;
-	if (commandCrowd(command) < 8) return false;
-	const arrived = arrivedGroupGrid(world, unit, command, target);
-	if (arrived.entries.length === 0) return false;
-	for (const entry of arrived.nearby(unit, MIN_SEPARATION_DISTANCE + 0.35)) {
-		const other = entry.item;
-		if (other === unit) continue;
-		if (distance(unit, other) <= MIN_SEPARATION_DISTANCE + 0.35) return true;
-	}
-	return false;
-}
-
-function arrivedGroupGrid(world: World, unit: Unit, command: UnitCommand, target: Vec2): SpatialGrid<Unit> {
-	const state = pathingState(world);
-	if (state.arrivalGroups.size > 32) state.arrivalGroups.clear();
-	const key = `${world.tick}:${unit.ownerId}:${Math.floor(target.x)}:${Math.floor(target.y)}:${Math.round(arrivalRadius(command) * 10)}`;
-	const cached = state.arrivalGroups.get(key) as ArrivalGroupCache | undefined;
-	if (cached?.tick === world.tick) return cached.grid;
-	const radius = arrivalRadius(command) + 2.2;
-	const arrived = Object.values(world.units).filter((other) => {
-		return other.ownerId === unit.ownerId && other.command.type === "idle" && distance(other, target) <= radius;
-	});
-	const grid = new SpatialGrid(arrived, 1);
-	state.arrivalGroups.set(key, { tick: world.tick, grid });
-	return grid;
+	if (!command.formationOffset) return distance(unit, target) <= exactArrivalRadius(command);
+	if (distance(unit, target) <= FORMATION_SLOT_SETTLE_RADIUS) return true;
+	return command.path === null && distance(unit, command) <= arrivalRadius(command);
 }
 
 function arrivalRadius(command: UnitCommand): number {
@@ -248,6 +230,21 @@ function arrivalRadius(command: UnitCommand): number {
 
 function exactArrivalRadius(command: UnitCommand): number {
 	return commandCrowd(command) >= 8 ? 0.45 : 0.35;
+}
+
+function moveCommandTarget(world: World, command: Extract<UnitCommand, { type: "move" }>): Vec2 {
+	const goal = nearestWalkableAround(world, command);
+	return { x: goal.x + 0.5, y: goal.y + 0.5 };
+}
+
+function formationTarget(world: World, command: Extract<UnitCommand, { type: "move" }>, baseTarget: Vec2): Vec2 {
+	const offset = command.formationOffset;
+	if (!offset) return baseTarget;
+	const target = {
+		x: clamp(baseTarget.x + offset.x, 0.2, MAP_SIZE - 0.2),
+		y: clamp(baseTarget.y + offset.y, 0.2, MAP_SIZE - 0.2),
+	};
+	return isWalkable(world, Math.floor(target.x), Math.floor(target.y)) ? target : baseTarget;
 }
 
 function followPathStep(world: World, unit: Unit, command: UnitCommand, fallback: Vec2, finalTarget: Vec2, maxStep: number, movingGrid: SpatialGrid<Unit>) {
@@ -325,7 +322,7 @@ function canUseMovementWaypoint(world: World, unit: Unit, point: Vec2): boolean 
 function movingSpacingWaypoint(world: World, unit: Unit, target: Vec2, movingGrid: SpatialGrid<Unit>): Vec2 {
 	let pushX = 0;
 	let pushY = 0;
-	for (const entry of movingGrid.nearby(unit, MOVING_COHESION_RADIUS)) {
+	for (const entry of movingGrid.nearby(unit, MOVING_COHESION_RADIUS, MOVING_COHESION_NEIGHBORS_PER_UNIT)) {
 		const other = entry.item;
 		if (other === unit || other.ownerId !== unit.ownerId) continue;
 		const dx = unit.x - other.x;

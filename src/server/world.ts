@@ -285,6 +285,7 @@ function smoothMetric(current: number, next: number) {
 }
 
 function createSimulationContext(world: World): UnitSimulationContext & import("./zombieSpawning.js").ZombieSpawnContext {
+	const unitGridsByOwner = unitTargetGridsByOwner(world);
 	const targetUnitGrid = new SpatialGrid(
 		Object.values(world.units).filter((unit) => unit.type !== "zombie" && unit.hp > 0),
 		TARGET_UNIT_GRID_CELL_SIZE,
@@ -301,7 +302,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		moveAroundSmallObstacle: (unit, target, maxStep) => moveAroundSmallObstacle(world, unit, target, maxStep),
 		centerOf,
 		distance,
-		nearestEnemy: (source, range) => nearestEnemy(world, source, range),
+		nearestEnemy: (source, range) => nearestEnemy(world, unitGridsByOwner, source, range),
 		nearbyTargetUnits: (source, range) =>
 			targetUnitGrid
 			.nearby(source, range)
@@ -539,12 +540,19 @@ function pointInsideEntity(x: number, y: number, entity: { x: number; y: number;
 }
 
 function commandMove(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "move" }>): CommandResult {
-	forOwnUnitClusters(world, playerId, body.unitIds, (unit, cluster) => {
+	forOwnUnitClusters(world, playerId, body.unitIds, (unit, cluster, index) => {
 		const target = {
 			x: clamp(Number(body.x), 0, MAP_SIZE - 1),
 			y: clamp(Number(body.y), 0, MAP_SIZE - 1),
 		};
-		unit.command = {
+		const formationOffset = formationOffsetForCluster(cluster, index);
+		unit.command = formationOffset ? {
+			type: "move",
+			...target,
+			path: null,
+			pathCrowd: cluster.length,
+			formationOffset,
+		} : {
 			type: "move",
 			...target,
 			path: null,
@@ -679,11 +687,48 @@ function forOwnUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undef
 	});
 }
 
-function forOwnUnitClusters(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined, fn: (unit: Unit, cluster: Unit[]) => void) {
+function forOwnUnitClusters(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined, fn: (unit: Unit, cluster: Unit[], index: number) => void) {
 	const units = ownUnits(world, playerId, unitIds);
 	for (const cluster of spatialUnitClusters(units)) {
-		for (const unit of cluster) fn(unit, cluster);
+		const ordered = orderFormationCluster(cluster);
+		ordered.forEach((unit, index) => fn(unit, ordered, index));
 	}
+}
+
+function orderFormationCluster(cluster: Unit[]): Unit[] {
+	const center = clusterCenter(cluster);
+	return [...cluster].sort((a, b) => {
+		const ay = a.y - center.y;
+		const by = b.y - center.y;
+		if (Math.abs(ay - by) > 0.001) return ay - by;
+		return (a.x - center.x) - (b.x - center.x);
+	});
+}
+
+function clusterCenter(cluster: Unit[]) {
+	const total = cluster.reduce((sum, unit) => ({ x: sum.x + unit.x, y: sum.y + unit.y }), { x: 0, y: 0 });
+	return { x: total.x / Math.max(1, cluster.length), y: total.y / Math.max(1, cluster.length) };
+}
+
+function formationOffsetForCluster(cluster: Unit[], index: number) {
+	if (cluster.length < 2) return undefined;
+	const spacing = formationSpacing(cluster.length);
+	const columns = Math.max(1, Math.ceil(Math.sqrt(cluster.length)));
+	const rows = Math.max(1, Math.ceil(cluster.length / columns));
+	const row = Math.floor(index / columns);
+	const column = index % columns;
+	const rowShift = row % 2 === 0 ? 0 : 0.5;
+	const x = (column - (columns - 1) / 2 + rowShift) * spacing;
+	const y = (row - (rows - 1) / 2) * spacing;
+	if (index === 0) return undefined;
+	return isFinite(x) && isFinite(y) ? { x, y } : undefined;
+}
+
+function formationSpacing(count: number) {
+	if (count >= 120) return 0.64;
+	if (count >= 40) return 0.6;
+	if (count >= 12) return 0.56;
+	return 0.56;
 }
 
 function ownUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined): Unit[] {
@@ -734,7 +779,7 @@ function stepBuilding(world: World, building: Building, dt: number) {
 	}
 	const attack = building.attackStats();
 	if (attack) {
-		const target = nearestEnemy(world, building, attack.range);
+		const target = nearestEnemy(world, unitTargetGridsByOwner(world), building, attack.range);
 		if (target && building.cooldown <= 0) {
 			damage(world, target, attack.attack, building.ownerId);
 			emitActionSound(world, "towerAttack", centerOf(building));
@@ -936,14 +981,38 @@ function replenishFarm(world: World, building: Building): boolean {
 	return building.maybeReplenish((cost) => spend(player, cost), true);
 }
 
-function nearestEnemy(world: World, source: Unit | Building, range: number) {
+function unitTargetGridsByOwner(world: World): Map<PlayerId, SpatialGrid<Unit>> {
+	const unitsByOwner = new Map<PlayerId, Unit[]>();
+	for (const unit of Object.values(world.units)) {
+		if (unit.hp <= 0) continue;
+		const units = unitsByOwner.get(unit.ownerId);
+		if (units) units.push(unit);
+			else unitsByOwner.set(unit.ownerId, [unit]);
+	}
+	return new Map([...unitsByOwner.entries()].map(([ownerId, units]) => [ownerId, new SpatialGrid(units, TARGET_UNIT_GRID_CELL_SIZE)]));
+}
+
+function nearestEnemy(world: World, unitGridsByOwner: Map<PlayerId, SpatialGrid<Unit>>, source: Unit | Building, range: number) {
 	let best = null;
 	let bestDist = range;
-	for (const entity of [...Object.values(world.units), ...Object.values(world.buildings)]) {
-		if (entity.ownerId === source.ownerId || entity.hp <= 0) continue;
-		const d = distance(centerOf(source), centerOf(entity));
+	const sourceCenter = centerOf(source);
+	for (const [ownerId, unitGrid] of unitGridsByOwner) {
+		if (ownerId === source.ownerId) continue;
+		for (const entry of unitGrid.nearby(sourceCenter, range, 24)) {
+			const unit = entry.item;
+			if (unit.hp <= 0 || world.units[unit.id] !== unit) continue;
+			const d = distance(sourceCenter, unit);
+			if (d < bestDist) {
+				best = unit;
+				bestDist = d;
+			}
+		}
+	}
+	for (const building of Object.values(world.buildings)) {
+		if (building.ownerId === source.ownerId || building.hp <= 0) continue;
+		const d = distance(sourceCenter, centerOf(building));
 		if (d < bestDist) {
-			best = entity;
+			best = building;
 			bestDist = d;
 		}
 	}
