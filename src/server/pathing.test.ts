@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
-import type { Unit, World } from "../shared/types.js";
+import type { Unit, UnitCommand, World } from "../shared/types.js";
 import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
@@ -312,6 +312,31 @@ test("moveWithPath requires the first group unit to reach the exact target", () 
 
 	assert.equal(done, false);
 	assert.ok(unit.x < 22.0);
+});
+
+test("moveWithPath uses the real target even when it is unexplored", () => {
+	const world = makeWorld();
+	world.players["p-test"] = {
+		id: "p-test",
+		name: "Tester",
+		color: "#ffffff",
+		resources: { wood: 0, food: 0, ore: 0 },
+		autoReplenishFarms: true,
+		explored: new Set([4 * MAP_SIZE + 4]),
+		population: 1,
+		popCap: 10,
+		defeated: false,
+		score: 0,
+		joinedAt: Date.now(),
+	};
+	const unit = makeUnit(4.5, 4.5, "u-scout");
+	const command: Extract<UnitCommand, { type: "move" }> = { type: "move", x: 20.5, y: 4.5, path: null, pathCrowd: 1 };
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	moveWithPath(world, unit, command, 0.25);
+
+	assert.deepEqual(command.path?.at(-1), { x: 20.5, y: 4.5 });
 });
 
 test("resolveUnitSeparation spreads units after they become idle at destination", () => {

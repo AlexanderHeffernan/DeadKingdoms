@@ -6,7 +6,6 @@ import { SpatialGrid } from "./utils/SpatialGrid.js";
 
 const PATH_REPLAN_TICKS = 25;
 const PATH_REQUESTS_PER_TICK = 120;
-const FRONTIER_STEP = 6;
 const FLOW_FIELD_CACHE_TICKS = 8;
 const FLOW_UNREACHED = 0xffffffff;
 const FLOW_BASE_COST = 10;
@@ -198,7 +197,7 @@ function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {
 }
 
 export function moveWithPath(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number): boolean {
-	const target = explorationAwareTarget(world, unit, command);
+	const target = command;
 	if (isGroupArrived(world, unit, command, target)) return true;
 	if (occupied(world, Math.floor(unit.x), Math.floor(unit.y)) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
 	if (shouldRefreshPath(world, unit, command, target)) command.path = budgetedPath(world, unit, target);
@@ -424,25 +423,6 @@ function unitHash(unit: Unit): number {
 	let hash = 0;
 	for (let i = 0; i < unit.id.length; i += 1) hash = (hash * 31 + unit.id.charCodeAt(i)) | 0;
 	return Math.abs(hash);
-}
-
-function explorationAwareTarget(world: World, unit: Unit, target: Vec2): Vec2 {
-	const player = world.players[unit.ownerId];
-	if (!player || player.godMode || player.explored.size === 0) return target;
-	const targetTile = tileId(Math.floor(target.x), Math.floor(target.y));
-	if (player.explored.has(targetTile)) return target;
-	const start = { x: Math.floor(unit.x), y: Math.floor(unit.y) };
-	const end = { x: Math.floor(target.x), y: Math.floor(target.y) };
-	let best = start;
-	const steps = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y), 1);
-	for (let i = 1; i <= steps; i += 1) {
-		const x = Math.round(start.x + ((end.x - start.x) * i) / steps);
-		const y = Math.round(start.y + ((end.y - start.y) * i) / steps);
-		if (!isInMap(x, y)) break;
-		if (!player.explored.has(tileId(x, y)) && i > FRONTIER_STEP) break;
-		if (isWalkable(world, x, y)) best = { x, y };
-	}
-	return { x: best.x + 0.5, y: best.y + 0.5 };
 }
 
 function isUnitBlocked(world: World, unit: Unit, target: { x: number; y: number }): boolean {
