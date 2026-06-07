@@ -29,6 +29,7 @@ export class AdminDashboard {
 	private readonly playerTableBody: HTMLTableSectionElement;
 	private readonly logTableBody: HTMLTableSectionElement;
 	private readonly enableVisionButton: HTMLButtonElement;
+	private readonly enableSoundDebugButton: HTMLButtonElement;
 	private readonly spawnHordeButton: HTMLButtonElement;
 	private readonly grantSoldiersButton: HTMLButtonElement;
 	private readonly commandStatus: HTMLElement;
@@ -68,6 +69,7 @@ export class AdminDashboard {
 		this.playerTableBody = elements.playerTableBody;
 		this.logTableBody = elements.logTableBody;
 		this.enableVisionButton = elements.enableVisionButton;
+		this.enableSoundDebugButton = elements.enableSoundDebugButton;
 		this.spawnHordeButton = elements.spawnHordeButton;
 		this.grantSoldiersButton = elements.grantSoldiersButton;
 		this.commandStatus = elements.commandStatus;
@@ -145,6 +147,7 @@ export class AdminDashboard {
 			if (this.currentAdmin) this.drawChart(this.currentAdmin.serverPerf.samples);
 		});
 		this.enableVisionButton.addEventListener("click", () => this.runCommand(this.enableVisionButton, this.actions.enableFullMapVision));
+		this.enableSoundDebugButton.addEventListener("click", () => this.runCommand(this.enableSoundDebugButton, this.actions.enableSoundDebug));
 		this.spawnHordeButton.addEventListener("click", () => this.runCommand(this.spawnHordeButton, this.actions.spawnHostileHorde));
 		this.grantSoldiersButton.addEventListener("click", () => this.runCommand(this.grantSoldiersButton, this.actions.grantSoldiers));
 	}
@@ -442,6 +445,7 @@ export type AdminDashboardElements = {
 	playerTableBody: HTMLTableSectionElement;
 	logTableBody: HTMLTableSectionElement;
 	enableVisionButton: HTMLButtonElement;
+	enableSoundDebugButton: HTMLButtonElement;
 	spawnHordeButton: HTMLButtonElement;
 	grantSoldiersButton: HTMLButtonElement;
 	commandStatus: HTMLElement;
@@ -449,6 +453,7 @@ export type AdminDashboardElements = {
 
 export type AdminDashboardActions = {
 	enableFullMapVision: () => Promise<string>;
+	enableSoundDebug: () => Promise<string>;
 	spawnHostileHorde: () => Promise<string>;
 	grantSoldiers: () => Promise<string>;
 };

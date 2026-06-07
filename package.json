@@ -11,6 +11,7 @@
     "dev:client": "node -e \"require('node:fs').rmSync('dist/client', { recursive: true, force: true })\" && esbuild public/js/app.ts --bundle --format=esm --target=es2020 --sourcemap --loader:.png=dataurl --outfile=dist/client/public/js/app.js",
     "dev": "npm run build:server && npm run dev:client && node dist/server/index.js",
     "test:pathing": "npm run build:server && node --test dist/server/pathing.test.js",
+    "test:zombies": "npm run build:server && node --test dist/server/zombieDirector.test.js",
     "bench:pathing": "npm run build:server && node dist/server/pathing.benchmark.js",
     "bench:zombies": "npm run build:server && node dist/server/zombieDirector.benchmark.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",

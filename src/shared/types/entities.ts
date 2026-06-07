@@ -4,6 +4,7 @@ import type {
 	EntityId,
 	Facing,
 	PlayerId,
+	PathNode,
 	ResourceId,
 	ResourceNodeType,
 	ResourceType,
@@ -73,6 +74,9 @@ export interface Unit extends BaseEntity {
 	vision?: number;
 	soundTarget?: Vec2 | null;
 	wanderTarget?: Vec2 | null;
+	zombiePath?: PathNode[] | null;
+	zombiePathTarget?: Vec2 | null;
+	zombieStuckTicks?: number;
 	retargetIn?: number;
 	hordeId?: string | null;
 	hordeOffset?: Vec2 | null;

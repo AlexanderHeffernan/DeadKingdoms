@@ -31,8 +31,8 @@ export async function enableFullMapVision(playerId: PlayerId) {
 	return post("/api/dev/full-map-vision", { playerId });
 }
 
-export async function enableSoundDebug(playerId: PlayerId, secret: string) {
-	return post("/api/dev/sound-debug", { playerId, secret });
+export async function enableSoundDebug(playerId: PlayerId) {
+	return post("/api/dev/sound-debug", { playerId });
 }
 
 export async function enablePathDebug(playerId: PlayerId, secret: string) {

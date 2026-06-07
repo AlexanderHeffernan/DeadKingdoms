@@ -17,6 +17,10 @@ export interface ZombieHorde {
 	target: Vec2 | null;
 	targetMemory: number;
 	wanderTarget: Vec2 | null;
+	soundMemory: {
+		direction: Vec2;
+		significance: number;
+	} | null;
 }
 
 export interface PathingWorldState {
