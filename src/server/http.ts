@@ -207,13 +207,11 @@ async function enableFullMapVision(req: import("node:http").IncomingMessage, res
 }
 
 async function enableSoundDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const secret = process.env.DEV_SOUND_DEBUG_SECRET || "revealsound";
-	const body = (await readJson(req)) as { playerId?: unknown; secret?: unknown };
-	if (typeof body.playerId !== "string" || typeof body.secret !== "string" || !body.secret.endsWith(secret)) {
-		return json(res, { ok: false, error: "Invalid sound debug secret." }, 403);
-	}
+	const body = (await readJson(req)) as { playerId?: unknown };
+	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
 	const player = world.players[body.playerId];
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
 	player.soundDebug = true;
 	json(res, { ok: true });
 }

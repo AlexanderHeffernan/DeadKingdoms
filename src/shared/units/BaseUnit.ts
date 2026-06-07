@@ -37,6 +37,9 @@ export type UnitSimulationContext = {
 	/** Moves a unit directly toward a target point and reports whether movement was blocked or arrived. */
 	moveUnit(unit: Unit, target: { x: number; y: number }, maxStep: number): boolean;
 
+	/** Moves a zombie with normal pathing capped to a short local lookahead. */
+	moveZombieWithPath(unit: Unit, target: { x: number; y: number }, maxStep: number): boolean;
+
 	/** Moves directly, with a tiny local sidestep only around isolated obstacles. */
 	moveAroundSmallObstacle(unit: Unit, target: { x: number; y: number }, maxStep: number): boolean;
 

@@ -26,6 +26,9 @@ const MOVING_COHESION_STRENGTH = 0.7;
 const MOVING_COHESION_NEIGHBORS_PER_UNIT = 8;
 const SEPARATION_MAX_PAIRS_PER_TICK = 4500;
 const SEPARATION_NEIGHBORS_PER_UNIT = 10;
+export const ZOMBIE_PATH_LOOKAHEAD_DISTANCE = 10;
+const ZOMBIE_PATH_MAX_NODES = ZOMBIE_PATH_LOOKAHEAD_DISTANCE + 2;
+const ZOMBIE_MAX_PATHED_OBSTACLE_TILES = 4;
 
 type PathFollowMode = "tight" | "flow";
 
@@ -121,11 +124,8 @@ function isSmallObstacleAhead(world: World, from: { x: number; y: number }, targ
 	const dx = target.x - from.x;
 	const dy = target.y - from.y;
 	const length = Math.hypot(dx, dy) || 1;
-	const ahead = {
-		x: Math.round(from.x + (dx / length) * 0.75),
-		y: Math.round(from.y + (dy / length) * 0.75),
-	};
-	if (!isHardOccupied(world, undefined, ahead.x, ahead.y)) return false;
+	const ahead = firstObstacleAhead(world, from, { x: dx / length, y: dy / length });
+	if (!ahead) return false;
 	let occupiedNeighbors = 0;
 	for (let y = ahead.y - 1; y <= ahead.y + 1; y += 1) {
 		for (let x = ahead.x - 1; x <= ahead.x + 1; x += 1) {
@@ -133,6 +133,15 @@ function isSmallObstacleAhead(world: World, from: { x: number; y: number }, targ
 		}
 	}
 	return occupiedNeighbors <= 2;
+}
+
+function firstObstacleAhead(world: World, from: { x: number; y: number }, direction: { x: number; y: number }) {
+	for (let distanceAhead = 0.2; distanceAhead <= 0.95; distanceAhead += 0.15) {
+		const x = Math.round(from.x + direction.x * distanceAhead);
+		const y = Math.round(from.y + direction.y * distanceAhead);
+		if (isHardOccupied(world, undefined, x, y)) return { x, y };
+	}
+	return null;
 }
 
 function sidestepTargets(from: { x: number; y: number }, target: { x: number; y: number }) {
@@ -204,7 +213,7 @@ function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {
 	}
 }
 
-export function moveWithPath(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number): boolean {
+export function moveWithPath(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number, maxPathNodes = FOLLOW_PATH_MAX_NODES): boolean {
 	const baseTarget = moveCommandTarget(world, command);
 	const target = formationTarget(world, command, baseTarget);
 	const forming = tryApproachFormationTarget(world, unit, command, baseTarget, maxStep);
@@ -213,7 +222,7 @@ export function moveWithPath(world: World, unit: Unit, command: Extract<UnitComm
 	const unitTile = worldTile(unit);
 	if (isHardOccupied(world, unit, unitTile.x, unitTile.y) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
 	if (shouldRefreshPath(world, unit, command, baseTarget)) {
-		const path = budgetedPath(world, unit, baseTarget);
+		const path = budgetedPath(world, unit, baseTarget, maxPathNodes);
 		if (!path) return false;
 		if (path.length === 0 && distance(unit, baseTarget) > exactArrivalRadius(command)) return false;
 		command.path = path;
@@ -222,6 +231,85 @@ export function moveWithPath(world: World, unit: Unit, command: Extract<UnitComm
 	const arrived = tryApproachFormationTarget(world, unit, command, baseTarget, maxStep);
 	if (arrived !== null) return arrived;
 	return isGroupArrived(world, unit, command, target);
+}
+
+export function moveZombieWithPath(world: World, unit: Unit, target: Vec2, maxStep: number): boolean {
+	const localTarget = zombiePathTarget(unit, target);
+	const obstacle = firstObstacleBetween(world, unit, localTarget);
+	if (obstacle && obstacleComponentSize(world, obstacle, ZOMBIE_MAX_PATHED_OBSTACLE_TILES + 1) > ZOMBIE_MAX_PATHED_OBSTACLE_TILES) {
+		unit.zombiePath = null;
+		unit.zombiePathTarget = null;
+		return moveAroundSmallObstacle(world, unit, target, maxStep);
+	}
+	const command: Extract<UnitCommand, { type: "move" }> = {
+		type: "move",
+		x: localTarget.x,
+		y: localTarget.y,
+		path: reusableZombiePath(unit, localTarget),
+		pathCrowd: 1,
+	};
+	const arrived = moveWithPath(world, unit, command, maxStep, ZOMBIE_PATH_MAX_NODES);
+	unit.zombiePath = command.path || null;
+	unit.zombiePathTarget = localTarget;
+	return arrived || distance(unit, target) <= WAYPOINT_REACHED_DISTANCE;
+}
+
+function zombiePathTarget(unit: Unit, target: Vec2): Vec2 {
+	const dx = target.x - unit.x;
+	const dy = target.y - unit.y;
+	const length = Math.hypot(dx, dy);
+	if (length <= ZOMBIE_PATH_LOOKAHEAD_DISTANCE) return target;
+	return {
+		x: unit.x + (dx / length) * ZOMBIE_PATH_LOOKAHEAD_DISTANCE,
+		y: unit.y + (dy / length) * ZOMBIE_PATH_LOOKAHEAD_DISTANCE,
+	};
+}
+
+function reusableZombiePath(unit: Unit, target: Vec2): PathNode[] | null {
+	if (!unit.zombiePathTarget || !unit.zombiePath) return null;
+	const previousTarget = worldTile(unit.zombiePathTarget);
+	const nextTarget = worldTile(target);
+	if (previousTarget.x !== nextTarget.x || previousTarget.y !== nextTarget.y) return null;
+	return unit.zombiePath;
+}
+
+function firstObstacleBetween(world: World, from: Vec2, target: Vec2): { x: number; y: number } | null {
+	const dx = target.x - from.x;
+	const dy = target.y - from.y;
+	const length = Math.hypot(dx, dy);
+	if (length <= 0.001) return null;
+	for (let distanceAhead = 0.2; distanceAhead <= length; distanceAhead += 0.25) {
+		const x = Math.round(from.x + (dx / length) * distanceAhead);
+		const y = Math.round(from.y + (dy / length) * distanceAhead);
+		if (isHardOccupied(world, undefined, x, y)) return { x, y };
+	}
+	return null;
+}
+
+function obstacleComponentSize(world: World, origin: { x: number; y: number }, limit: number): number {
+	const queue = [origin];
+	const visited = new Set<number>([tileId(origin.x, origin.y)]);
+	for (let index = 0; index < queue.length && visited.size < limit; index += 1) {
+		const tile = queue[index]!;
+		for (const neighbor of cardinalNeighbors(tile)) {
+			if (!isHardOccupied(world, undefined, neighbor.x, neighbor.y)) continue;
+			const id = tileId(neighbor.x, neighbor.y);
+			if (visited.has(id)) continue;
+			visited.add(id);
+			queue.push(neighbor);
+			if (visited.size >= limit) break;
+		}
+	}
+	return visited.size;
+}
+
+function cardinalNeighbors(tile: { x: number; y: number }) {
+	return [
+		{ x: tile.x + 1, y: tile.y },
+		{ x: tile.x - 1, y: tile.y },
+		{ x: tile.x, y: tile.y + 1 },
+		{ x: tile.x, y: tile.y - 1 },
+	];
 }
 
 export function moveNearTarget(world: World, unit: Unit, command: UnitCommand, target: { x: number; y: number }, range: number, maxStep: number): boolean {
@@ -476,10 +564,10 @@ function shouldRefreshPath(world: World, unit: Unit, command: UnitCommand, targe
 	return finalTile.x !== targetTile.x || finalTile.y !== targetTile.y;
 }
 
-function budgetedPath(world: World, unit: Unit, target: Vec2): PathNode[] | null {
+function budgetedPath(world: World, unit: Unit, target: Vec2, maxNodes = FOLLOW_PATH_MAX_NODES): PathNode[] | null {
 	if (!canRequestPath(world, unit)) return null;
 	consumePathRequest(world);
-	return findSharedPath(world, unit, target, FOLLOW_PATH_MAX_NODES, commandCrowd(unit.command));
+	return findSharedPath(world, unit, target, maxNodes, commandCrowd(unit.command));
 }
 
 function canRequestPath(world: World, unit: Unit): boolean {

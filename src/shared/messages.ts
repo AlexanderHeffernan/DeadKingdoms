@@ -1,5 +1,4 @@
-import { SOUND_HEARING_BASE_RANGE, SOUND_HEARING_RANGE_PER_SOUND } from "./config.js";
-import { unitBehaviorFor } from "./unitRegistry.js";
+import { buildSoundField, collectWorldSoundSources, SOUND_FIELD_CELL_SIZE } from "./soundField.js";
 import type { AdminLevel, AdminSnapshot, PlayerId, Snapshot, SoundDebugSource, Unit, VisibilityCache, World } from "./types.js";
 import { isVisible } from "./visibility.js";
 
@@ -139,44 +138,24 @@ function serializeUnit(unit: Unit): Unit {
 }
 
 function buildSoundDebugSources(world: World): SoundDebugSource[] {
-	const sources: SoundDebugSource[] = [];
-	const add = (
-		id: string,
-		kind: SoundDebugSource["kind"],
-		soundKind: SoundDebugSource["soundKind"],
-		label: string,
-		point: { x: number; y: number },
-		strength: number,
-	) => {
-		if (strength <= 0) return;
-		sources.push({
-			id,
-			kind,
-			soundKind,
-			label,
-			x: point.x,
-			y: point.y,
-			strength,
-			range: SOUND_HEARING_BASE_RANGE + strength * SOUND_HEARING_RANGE_PER_SOUND,
-		});
-	};
-	for (const unit of Object.values(world.units)) {
-		if (unit.ownerId === ZOMBIE_OWNER_ID) continue;
-		const behavior = unitBehaviorFor(unit.type);
-		add(unit.id, "unit", "world", unit.type, unit, behavior.soundLevel());
-	}
-	for (const building of Object.values(world.buildings)) {
-		add(building.id, "building", "world", building.type, centerOf(building), building.soundLevel());
-	}
-	for (const noise of world.actionNoises) {
-		add(noise.id, "action", "world", noise.action, noise, noise.sound);
-	}
-	return sources;
-}
-
-function centerOf(entity: { x: number; y: number; size?: number }) {
-	const size = entity.size || 1;
-	return { x: entity.x + (size - 1) / 2, y: entity.y + (size - 1) / 2 };
+	return buildSoundField(collectWorldSoundSources(world, ZOMBIE_OWNER_ID, { includeZombies: true })).map((cell) => ({
+		id: cell.id,
+		kind: "field",
+		soundKind: cell.zombieStrength > cell.worldStrength ? "zombie" : "world",
+		label: `${cell.sourceCount} source${cell.sourceCount === 1 ? "" : "s"}`,
+		x: cell.x,
+		y: cell.y,
+		strength: cell.strength,
+		range: SOUND_FIELD_CELL_SIZE,
+		cellX: cell.cellX,
+		cellY: cell.cellY,
+		cellSize: SOUND_FIELD_CELL_SIZE,
+		rawStrength: cell.rawStrength,
+		sourceCount: cell.sourceCount,
+		overflow: cell.overflow,
+		worldStrength: cell.worldStrength,
+		zombieStrength: cell.zombieStrength,
+	}));
 }
 
 function cachedVisibility(world: World, playerId: PlayerId): VisibilityCache | null {

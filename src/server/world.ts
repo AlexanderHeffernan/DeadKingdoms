@@ -9,12 +9,13 @@ import {
 	TICK_RATE,
 } from "../shared/config.js";
 import { BUILDING_DEFS, createBuildingEntity } from "../shared/buildingRegistry.js";
+import { buildSoundField, collectWorldSoundSources } from "../shared/soundField.js";
 import { unitBehaviorFor } from "../shared/unitRegistry.js";
 import type { UnitSimulationContext } from "../shared/units/index.js";
 import type { GatherTarget } from "../shared/buildingDefinitions.js";
 import { id } from "./id.js";
 import { clamp, distance, rectsOverlap } from "./math.js";
-import { isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, resolveUnitSeparation } from "./pathing.js";
+import { isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { stepZombieDirector } from "./zombieDirector.js";
@@ -300,6 +301,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		moveWithPath: (unit, command, maxStep) => moveWithPath(world, unit, command, maxStep),
 		moveNearTarget: (unit, command, target, range, maxStep) => moveNearTarget(world, unit, command, target, range, maxStep),
 		moveUnit: (unit, target, maxStep) => moveUnit(world, unit, target, maxStep),
+		moveZombieWithPath: (unit, target, maxStep) => moveZombieWithPath(world, unit, target, maxStep),
 		moveAroundSmallObstacle: (unit, target, maxStep) => moveAroundSmallObstacle(world, unit, target, maxStep),
 		centerOf,
 		distance,
@@ -888,23 +890,9 @@ function stepRuinDecay(world: World, dt: number) {
 }
 
 function weightedWorldSound(world: World): { point: { x: number; y: number }; strength: number } | null {
-	const sources: { point: { x: number; y: number }; strength: number }[] = [];
+	const sources = buildSoundField(collectWorldSoundSources(world, ZOMBIE_OWNER_ID)).map((cell) => ({ point: { x: cell.x, y: cell.y }, strength: cell.strength }));
 	let total = 0;
-	const consider = (point: { x: number; y: number }, strength: number) => {
-		if (strength <= 0) return;
-		sources.push({ point, strength });
-		total += strength;
-	};
-	for (const unit of Object.values(world.units)) {
-		if (unit.ownerId === ZOMBIE_OWNER_ID) continue;
-		consider(unit, unitBehavior(unit).soundLevel());
-	}
-	for (const building of Object.values(world.buildings)) {
-		consider(centerOf(building), building.soundLevel());
-	}
-	for (const noise of world.actionNoises) {
-		consider(noise, noise.sound);
-	}
+	for (const source of sources) total += source.strength;
 	if (sources.length === 0) return null;
 	let roll = Math.random() * total;
 	for (const source of sources) {

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
 import type { ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
-import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, resolveUnitSeparation } from "./pathing.js";
+import { ZombieUnit, type UnitSimulationContext } from "../shared/units/index.js";
+import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 	const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -217,6 +218,100 @@ test("moveAroundSmallObstacle sidesteps an isolated blocked tile", () => {
 	assert.equal(blocked, false);
 	assert.notEqual(unit.y, 10);
 	assert.equal(isWalkable(world, Math.round(unit.x), Math.round(unit.y)), true);
+});
+
+test("moveAroundSmallObstacle keeps sliding past a tree corner", () => {
+	const world = makeWorld([{ x: 10, y: 10 }]);
+	const unit = makeUnit(9.49, 9.49, "u-corner");
+	const target = { x: 12, y: 12 };
+	let stalledTicks = 0;
+
+	for (let tick = 0; tick < 60 && distanceBetween(unit, target) > 0.45; tick += 1) {
+		const before = { x: unit.x, y: unit.y };
+		moveAroundSmallObstacle(world, unit, target, 0.135);
+		if (Math.hypot(unit.x - before.x, unit.y - before.y) < 0.001) stalledTicks += 1;
+	}
+
+	assert.equal(stalledTicks, 0);
+	assert.ok(distanceBetween(unit, target) <= 0.45);
+	assert.equal(isWalkable(world, Math.round(unit.x), Math.round(unit.y)), true);
+});
+
+test("moveZombieWithPath routes around a small cluster of trees", () => {
+	const world = makeWorld([
+		{ x: 10, y: 10 },
+		{ x: 11, y: 10 },
+	]);
+	const zombie = makeUnit(8, 10, "z-cluster");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	const target = { x: 14, y: 10 };
+
+	for (let tick = 0; tick < 80 && distanceBetween(zombie, target) > 0.45; tick += 1) {
+		world.tick = tick + 1;
+		moveZombieWithPath(world, zombie, target, 0.135);
+	}
+
+	assert.ok(zombie.x > 12);
+	assert.ok(distanceBetween(zombie, target) <= ZOMBIE_PATH_LOOKAHEAD_DISTANCE);
+	assert.equal(isWalkable(world, Math.round(zombie.x), Math.round(zombie.y)), true);
+});
+
+test("zombie movement escalates to pathing when sidesteps do not make progress", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-progress-stuck");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.soundTarget = { x: 14, y: 10 };
+	let sidestepCalls = 0;
+	let pathCalls = 0;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveAroundSmallObstacle: (unit: Unit) => {
+			sidestepCalls += 1;
+			unit.y += 0.04;
+			return false;
+		},
+		moveZombieWithPath: (unit: Unit) => {
+			pathCalls += 1;
+			unit.x += 0.2;
+			return false;
+		},
+	} as unknown as UnitSimulationContext;
+
+	for (let tick = 0; tick < 4; tick += 1) behavior.step(context, zombie, 0.1);
+
+	assert.equal(sidestepCalls, 3);
+	assert.equal(pathCalls, 1);
+	assert.equal(zombie.zombieStuckTicks, 0);
+});
+
+test("moveZombieWithPath does not solve a wall-length detour", () => {
+	const world = makeWorld([
+		{ x: 10, y: 7 },
+		{ x: 10, y: 8 },
+		{ x: 10, y: 9 },
+		{ x: 10, y: 10 },
+		{ x: 10, y: 11 },
+		{ x: 10, y: 12 },
+		{ x: 10, y: 13 },
+	]);
+	const zombie = makeUnit(8, 10, "z-wall");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	const target = { x: 16, y: 10 };
+
+	for (let tick = 0; tick < 80; tick += 1) {
+		world.tick = tick + 1;
+		moveZombieWithPath(world, zombie, target, 0.135);
+	}
+
+	assert.ok(zombie.x < 10);
+	assert.equal(isWalkable(world, Math.round(zombie.x), Math.round(zombie.y)), true);
 });
 
 test("moveAroundSmallObstacle escapes when a unit starts inside an occupied tile", () => {
@@ -616,6 +711,6 @@ test("resolveUnitSeparation spreads units after they become idle at destination"
 	assert.ok(distanceBetween(a, b) >= 0.47);
 });
 
-function distanceBetween(a: Unit, b: Unit) {
+function distanceBetween(a: { x: number; y: number }, b: { x: number; y: number }) {
 	return Math.hypot(a.x - b.x, a.y - b.y);
 }

@@ -572,6 +572,10 @@ export class Renderer {
 		const sources = state.snapshot?.soundDebug;
 		if (!sources?.length) return;
 		for (const source of sources) {
+			if (source.kind === "field" && source.cellX !== undefined && source.cellY !== undefined && source.cellSize) {
+				this.drawSoundDebugCell(source, view);
+				continue;
+			}
 			const center = isoToScreen(source.x, source.y, view.camera);
 			const zoom = view.camera.zoom || 1;
 			const rx = (source.range * TILE_W * zoom) / 2;
@@ -599,6 +603,33 @@ export class Renderer {
 			this.overlayLayer.drawCircle(center.x, center.y, dot);
 			this.overlayLayer.endFill();
 		}
+	}
+
+	private drawSoundDebugCell(source: SoundDebugSource, view: ViewState) {
+		const cellSize = source.cellSize || 1;
+		const x = (source.cellX || 0) * cellSize;
+		const y = (source.cellY || 0) * cellSize;
+		const top = isoToScreen(x, y, view.camera);
+		const right = isoToScreen(x + cellSize, y, view.camera);
+		const bottom = isoToScreen(x + cellSize, y + cellSize, view.camera);
+		const left = isoToScreen(x, y + cellSize, view.camera);
+		const minX = Math.min(top.x, right.x, bottom.x, left.x);
+		const maxX = Math.max(top.x, right.x, bottom.x, left.x);
+		const minY = Math.min(top.y, right.y, bottom.y, left.y);
+		const maxY = Math.max(top.y, right.y, bottom.y, left.y);
+		if (maxX < -80 || minX > window.innerWidth + 80 || maxY < -80 || minY > window.innerHeight + 80) return;
+		const color = soundColor(source);
+		const intensity = Math.min(1, source.strength / 12);
+		const alpha = 0.08 + intensity * 0.28;
+		const zoom = view.camera.zoom || 1;
+		this.overlayLayer.lineStyle(Math.max(1, Math.round(1.5 * zoom)), color, source.overflow ? 0.9 : 0.55);
+		this.overlayLayer.beginFill(color, alpha);
+		this.overlayLayer.moveTo(top.x, top.y);
+		this.overlayLayer.lineTo(right.x, right.y);
+		this.overlayLayer.lineTo(bottom.x, bottom.y);
+		this.overlayLayer.lineTo(left.x, left.y);
+		this.overlayLayer.lineTo(top.x, top.y);
+		this.overlayLayer.endFill();
 	}
 
 	private drawPathDebug(state: GameState, view: ViewState) {
@@ -1264,6 +1295,7 @@ function worldPixel(zoom: number) {
 
 function soundColor(source: SoundDebugSource) {
 	if (source.soundKind === "zombie") return 0x8a71d6;
+	if (source.kind === "field") return source.overflow ? 0xf06f47 : 0x73d879;
 	if (source.kind === "action") return 0xe9bd59;
 	if (source.kind === "building") return 0x4da3ff;
 	return 0x73d879;

@@ -43,11 +43,13 @@ export class UI {
 			playerTableBody: mustGet("adminPlayerTableBody") as HTMLTableSectionElement,
 			logTableBody: mustGet("adminLogTableBody") as HTMLTableSectionElement,
 			enableVisionButton: mustGet("adminEnableVisionButton") as HTMLButtonElement,
+			enableSoundDebugButton: mustGet("adminEnableSoundDebugButton") as HTMLButtonElement,
 			spawnHordeButton: mustGet("adminSpawnHordeButton") as HTMLButtonElement,
 			grantSoldiersButton: mustGet("adminGrantSoldiersButton") as HTMLButtonElement,
 			commandStatus: mustGet("adminCommandStatus"),
 		}, {
 			enableFullMapVision: actions.enableFullMapVision,
+			enableSoundDebug: actions.enableSoundDebug,
 			spawnHostileHorde: actions.spawnHostileHorde,
 			grantSoldiers: actions.grantSoldiers,
 		});

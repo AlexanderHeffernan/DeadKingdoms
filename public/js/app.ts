@@ -1,4 +1,4 @@
-import { enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, sendCommand, spawnZombieHorde } from "./api.js";
+import { enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, sendCommand, spawnZombieHorde } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
@@ -64,8 +64,6 @@ let eventStream: EventSource | null = null;
 let devCommandInput = "";
 let adminAccessEnabled = false;
 let godModeCheckPending = false;
-let soundDebugEnabled = false;
-let soundDebugCheckPending = false;
 let pathDebugEnabled = false;
 let pathDebugCheckPending = false;
 let zombieHordePending = false;
@@ -106,6 +104,14 @@ const ui = new UI(state, {
 		connectEvents();
 		ui.showToast("Full-map admin vision enabled.");
 		return "Full-map admin vision enabled.";
+	},
+	async enableSoundDebug() {
+		if (!state.playerId) return "No active player.";
+		const result = await requestSoundDebug(state.playerId);
+		if (!result.ok) return result.error || "Could not enable sound field overlay.";
+		connectEvents();
+		ui.showToast("Sound field overlay enabled.");
+		return "Sound field overlay enabled.";
 	},
 	async spawnHostileHorde() {
 		if (!state.playerId) return "No active player.";
@@ -283,7 +289,6 @@ function onDevShortcutKeyDown(event: KeyboardEvent) {
 	if (event.key.length !== 1) return;
 	devCommandInput = `${devCommandInput}${event.key}`.slice(-DEV_COMMAND_BUFFER_LENGTH);
 	void maybeEnableAdminAccess();
-	void maybeEnableSoundDebug();
 	void maybeEnablePathDebug();
 	void maybeSpawnZombieHorde();
 }
@@ -304,25 +309,6 @@ async function maybeEnableAdminAccess() {
 	} finally {
 		godModeCheckPending = false;
 		if (!adminAccessEnabled && checkedInput !== devCommandInput) void maybeEnableAdminAccess();
-	}
-}
-
-async function maybeEnableSoundDebug() {
-	if (soundDebugEnabled || soundDebugCheckPending || !state.playerId || devCommandInput.length < 3) return;
-	const checkedInput = devCommandInput;
-	soundDebugCheckPending = true;
-	try {
-		const result = await enableSoundDebug(state.playerId, checkedInput);
-		if (result.ok) {
-			soundDebugEnabled = true;
-			ui.showToast("Sound debug enabled: sound ranges visible.");
-			connectEvents();
-		}
-	} catch {
-		// Keep this shortcut silent unless it succeeds.
-	} finally {
-		soundDebugCheckPending = false;
-		if (!soundDebugEnabled && checkedInput !== devCommandInput) void maybeEnableSoundDebug();
 	}
 }
 

@@ -49,6 +49,7 @@ export type UIActions = {
 	setRallyMode: (buildingId: string) => void;
 	respawn: () => Promise<void>;
 	enableFullMapVision: () => Promise<string>;
+	enableSoundDebug: () => Promise<string>;
 	spawnHostileHorde: () => Promise<string>;
 	grantSoldiers: () => Promise<string>;
 };

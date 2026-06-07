@@ -22,13 +22,21 @@ export interface LeaderboardEntry {
 /** Debug-only sound source sent to clients that enable the sound overlay. */
 export interface SoundDebugSource {
 	id: string;
-	kind: "unit" | "building" | "action";
+	kind: "unit" | "building" | "action" | "field";
 	soundKind: "world" | "zombie";
 	label: string;
 	x: number;
 	y: number;
 	strength: number;
 	range: number;
+	cellX?: number;
+	cellY?: number;
+	cellSize?: number;
+	rawStrength?: number;
+	sourceCount?: number;
+	overflow?: boolean;
+	worldStrength?: number;
+	zombieStrength?: number;
 }
 
 /** Backend simulation performance sent with snapshots. */
