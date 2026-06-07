@@ -347,8 +347,8 @@ function rebuildOccupancy(world: World) {
 	}
 	const grid = world._occupancy;
 	for (const resource of Object.values(world.resources)) {
-		const x = Math.floor(resource.x);
-		const y = Math.floor(resource.y);
+		const x = Math.round(resource.x);
+		const y = Math.round(resource.y);
 		if (x >= 0 && y >= 0 && x < size && y < size) grid[y * size + x] = 1;
 	}
 	for (const building of Object.values(world.buildings)) {
@@ -846,7 +846,7 @@ function blockingBuildingToward(world: World, zombie: Unit, targetPoint: { x: nu
 	const length = Math.hypot(dx, dy) || 1;
 	const x = zombie.x + (dx / length) * 0.65;
 	const y = zombie.y + (dy / length) * 0.65;
-	return Object.values(world.buildings).find((building) => pointInsideEntity(Math.floor(x), Math.floor(y), building)) || null;
+	return Object.values(world.buildings).find((building) => pointInsideEntity(Math.round(x), Math.round(y), building)) || null;
 }
 
 function stepResourceDecay(world: World, dt: number) {

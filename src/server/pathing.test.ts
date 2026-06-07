@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
 import type { ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
-import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveWithPath, resolveUnitSeparation } from "./pathing.js";
+import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, resolveUnitSeparation } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 	const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -53,10 +53,10 @@ function addUnits(world: World, units: Unit[]) {
 
 test("findPath returns a direct path on an open map", () => {
 	const world = makeWorld();
-	const path = findPath(world, makeUnit(4.5, 4.5), { x: 12.5, y: 4.5 });
+	const path = findPath(world, makeUnit(4, 4), { x: 12, y: 4 });
 
 	assert.ok(path.length > 0);
-	assert.deepEqual(path.at(-1), { x: 12.5, y: 4.5 });
+	assert.deepEqual(path.at(-1), { x: 12, y: 4 });
 });
 
 test("findPath routes around a wall with a gap", () => {
@@ -65,7 +65,7 @@ test("findPath routes around a wall with a gap", () => {
 		if (y !== 9) blocked.push({ x: 8, y });
 	}
 	const world = makeWorld(blocked);
-	const path = findPath(world, makeUnit(4.5, 9.5), { x: 14.5, y: 9.5 });
+	const path = findPath(world, makeUnit(4, 9), { x: 14, y: 9 });
 
 	assert.ok(path.length > 0);
 	assert.ok(path.some((point) => Math.floor(point.x) === 8 && Math.floor(point.y) === 9));
@@ -80,14 +80,14 @@ test("findSharedPath reuses a destination field for nearby units", () => {
 		if (y !== 9) blocked.push({ x: 8, y });
 	}
 	const world = makeWorld(blocked);
-	const target = { x: 14.5, y: 9.5 };
-	const first = findSharedPath(world, makeUnit(4.5, 8.5), target);
-	const second = findSharedPath(world, makeUnit(4.5, 10.5), target);
+	const target = { x: 14, y: 9 };
+	const first = findSharedPath(world, makeUnit(4, 8), target);
+	const second = findSharedPath(world, makeUnit(4, 10), target);
 
 	assert.ok(first.length > 0);
 	assert.ok(second.length > 0);
-	assert.deepEqual(first.at(-1), { x: 14.5, y: 9.5 });
-	assert.deepEqual(second.at(-1), { x: 14.5, y: 9.5 });
+	assert.deepEqual(first.at(-1), { x: 14, y: 9 });
+	assert.deepEqual(second.at(-1), { x: 14, y: 9 });
 });
 
 test("findSharedPath prefers a wider opening for very large crowds", () => {
@@ -97,7 +97,7 @@ test("findSharedPath prefers a wider opening for very large crowds", () => {
 		blocked.push({ x: 18, y });
 	}
 	const world = makeWorld(blocked);
-	const path = findSharedPath(world, makeUnit(10.5, 5.5), { x: 26.5, y: 5.5 }, MAP_SIZE, 220);
+	const path = findSharedPath(world, makeUnit(10, 5), { x: 26, y: 5 }, MAP_SIZE, 220);
 
 	assert.ok(path.some((point) => Math.floor(point.x) === 18 && Math.floor(point.y) >= 18 && Math.floor(point.y) <= 24));
 });
@@ -109,17 +109,17 @@ test("findSharedPath can use a narrow opening for a small crowd", () => {
 		blocked.push({ x: 18, y });
 	}
 	const world = makeWorld(blocked);
-	const path = findSharedPath(world, makeUnit(10.5, 5.5), { x: 26.5, y: 5.5 }, MAP_SIZE, 1);
+	const path = findSharedPath(world, makeUnit(10, 5), { x: 26, y: 5 }, MAP_SIZE, 1);
 
 	assert.ok(path.some((point) => Math.floor(point.x) === 18 && Math.floor(point.y) === 5));
 });
 
 test("findPath targets the nearest walkable tile around a blocked destination", () => {
 	const world = makeWorld([{ x: 20, y: 20 }]);
-	const path = findPath(world, makeUnit(15.5, 20.5), { x: 20.5, y: 20.5 });
+	const path = findPath(world, makeUnit(15, 20), { x: 20, y: 20 });
 
 	assert.ok(path.length > 0);
-	assert.notDeepEqual(path.at(-1), { x: 20.5, y: 20.5 });
+	assert.notDeepEqual(path.at(-1), { x: 20, y: 20 });
 	assert.equal(isWalkable(world, Math.floor(path.at(-1)!.x), Math.floor(path.at(-1)!.y)), true);
 });
 
@@ -210,23 +210,23 @@ test("resolveUnitSeparation does not move a single unit by comparing it with its
 
 test("moveAroundSmallObstacle sidesteps an isolated blocked tile", () => {
 	const world = makeWorld([{ x: 11, y: 10 }]);
-	const unit = makeUnit(10.5, 10.5, "u-a");
+	const unit = makeUnit(10, 10, "u-a");
 
-	const blocked = moveAroundSmallObstacle(world, unit, { x: 14.5, y: 10.5 }, 1);
+	const blocked = moveAroundSmallObstacle(world, unit, { x: 14, y: 10 }, 1);
 
 	assert.equal(blocked, false);
-	assert.notEqual(unit.y, 10.5);
-	assert.equal(isWalkable(world, Math.floor(unit.x), Math.floor(unit.y)), true);
+	assert.notEqual(unit.y, 10);
+	assert.equal(isWalkable(world, Math.round(unit.x), Math.round(unit.y)), true);
 });
 
 test("moveAroundSmallObstacle escapes when a unit starts inside an occupied tile", () => {
 	const world = makeWorld([{ x: 10, y: 10 }]);
-	const unit = makeUnit(10.5, 10.5, "u-a");
+	const unit = makeUnit(10, 10, "u-a");
 
-	const blocked = moveAroundSmallObstacle(world, unit, { x: 14.5, y: 10.5 }, 1);
+	const blocked = moveAroundSmallObstacle(world, unit, { x: 14, y: 10 }, 1);
 
 	assert.equal(blocked, false);
-	assert.equal(isWalkable(world, Math.floor(unit.x), Math.floor(unit.y)), true);
+	assert.equal(isWalkable(world, Math.round(unit.x), Math.round(unit.y)), true);
 });
 
 test("moveAroundSmallObstacle does not path around a wall-like blockage", () => {
@@ -235,27 +235,27 @@ test("moveAroundSmallObstacle does not path around a wall-like blockage", () => 
 		{ x: 11, y: 10 },
 		{ x: 11, y: 11 },
 	]);
-	const unit = makeUnit(10.5, 10.5, "u-a");
+	const unit = makeUnit(10, 10, "u-a");
 
-	const blocked = moveAroundSmallObstacle(world, unit, { x: 14.5, y: 10.5 }, 1);
+	const blocked = moveAroundSmallObstacle(world, unit, { x: 14, y: 10 }, 1);
 
 	assert.equal(blocked, true);
-	assert.equal(unit.x, 10.5);
-	assert.equal(unit.y, 10.5);
+	assert.equal(unit.x, 10);
+	assert.equal(unit.y, 10);
 });
 
 test("moveAroundSmallObstacle lets moving units pass through idle friendly units", () => {
 	const world = makeWorld([{ x: 11, y: 10 }]);
-	const idle = makeUnit(11.5, 10.5, "u-idle");
-	const moving = makeUnit(10.5, 10.5, "u-moving");
-	moving.command = { type: "move", x: 12.5, y: 10.5, path: [{ x: 12.5, y: 10.5 }] };
+	const idle = makeUnit(11, 10, "u-idle");
+	const moving = makeUnit(10, 10, "u-moving");
+	moving.command = { type: "move", x: 12, y: 10, path: [{ x: 12, y: 10 }] };
 	addUnits(world, [idle, moving]);
 
-	const blocked = moveAroundSmallObstacle(world, moving, { x: 12.5, y: 10.5 }, 1);
+	const blocked = moveAroundSmallObstacle(world, moving, { x: 12, y: 10 }, 1);
 
 	assert.equal(blocked, false);
-	assert.equal(moving.x, 11.5);
-	assert.equal(moving.y, 10.5);
+	assert.equal(moving.x, 11);
+	assert.equal(moving.y, 10);
 });
 
 test("moveAroundSmallObstacle still blocks resources under idle friendly units", () => {
@@ -265,42 +265,42 @@ test("moveAroundSmallObstacle still blocks resources under idle friendly units",
 		kind: "resource",
 		type: "tree",
 		resource: "wood",
-		x: 11.5,
-		y: 10.5,
+		x: 11,
+		y: 10,
 		amount: 100,
 		maxAmount: 100,
 	};
 	world.resources[resource.id] = resource;
-	const idle = makeUnit(11.5, 10.5, "u-idle");
-	const moving = makeUnit(10.5, 10.5, "u-moving");
-	moving.command = { type: "move", x: 14.5, y: 10.5, path: [{ x: 14.5, y: 10.5 }] };
+	const idle = makeUnit(11, 10, "u-idle");
+	const moving = makeUnit(10, 10, "u-moving");
+	moving.command = { type: "move", x: 14, y: 10, path: [{ x: 14, y: 10 }] };
 	addUnits(world, [idle, moving]);
 
-	const blocked = moveAroundSmallObstacle(world, moving, { x: 14.5, y: 10.5 }, 1);
+	const blocked = moveAroundSmallObstacle(world, moving, { x: 14, y: 10 }, 1);
 
 	assert.equal(blocked, false);
-	assert.notEqual(moving.x, 11.5);
+	assert.notEqual(moving.x, 11);
 });
 
 test("moveWithPath does not consume a waypoint when blocked by an obstacle", () => {
 	const world = makeWorld([{ x: 11, y: 10 }]);
 	world.tick = 1;
-	const unit = makeUnit(10.5, 10.5, "u-a");
+	const unit = makeUnit(10, 10, "u-a");
 	const command = {
 		type: "move" as const,
-		x: 14.5,
-		y: 10.5,
+		x: 14,
+		y: 10,
 		path: [
-			{ x: 11.5, y: 10.5 },
-			{ x: 12.5, y: 10.5 },
+			{ x: 11, y: 10 },
+			{ x: 12, y: 10 },
 		],
 	};
 
 	moveWithPath(world, unit, command, 1);
 
-	assert.notDeepEqual(command.path?.[0], { x: 12.5, y: 10.5 });
-	assert.equal(unit.x, 10.5);
-	assert.equal(unit.y, 10.5);
+	assert.notDeepEqual(command.path?.[0], { x: 12, y: 10 });
+	assert.equal(unit.x, 10);
+	assert.equal(unit.y, 10);
 });
 
 test("moveWithPath prunes stale reachable path nodes", () => {
@@ -311,6 +311,7 @@ test("moveWithPath prunes stale reachable path nodes", () => {
 		type: "move" as const,
 		x: 18.5,
 		y: 10.5,
+		pathCrowd: 20,
 		path: [
 			{ x: 10.5, y: 11.5 },
 			{ x: 12.5, y: 10.5 },
@@ -322,6 +323,169 @@ test("moveWithPath prunes stale reachable path nodes", () => {
 
 	assert.notDeepEqual(command.path?.[0], { x: 10.5, y: 11.5 });
 	assert.ok(unit.x > 10.5);
+});
+
+test("moveNearTarget approaches a blocked resource without walking into its tile", () => {
+	const world = makeWorld([{ x: 11, y: 10 }]);
+	world.tick = 1;
+	const unit = makeUnit(9.5, 10.5, "u-gather");
+	const command: Extract<UnitCommand, { type: "gather" }> = {
+		type: "gather",
+		targetId: "r-tree",
+		resourceKind: "wood",
+		path: null,
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	const arrived = moveNearTarget(world, unit, command, { x: 11, y: 10 }, 1.1, 1);
+
+	assert.equal(arrived, true);
+	assert.ok(unit.x > 9.5);
+	assert.equal(Math.floor(unit.x), 10);
+	assert.equal(Math.floor(unit.y), 10);
+	assert.notEqual(Math.floor(unit.x), 11);
+});
+
+test("moveNearTarget with no path does not fallback into a blocked resource center", () => {
+	const world = makeWorld([{ x: 11, y: 10 }]);
+	world.tick = 1;
+	const unit = makeUnit(9.7, 10, "u-near-tree");
+	const command: Extract<UnitCommand, { type: "gather" }> = {
+		type: "gather",
+		targetId: "r-tree",
+		resourceKind: "wood",
+		path: null,
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	moveNearTarget(world, unit, command, { x: 11, y: 10 }, 1.1, 1);
+
+	assert.equal(Math.floor(unit.x), 10);
+	assert.equal(Math.floor(unit.y), 10);
+	assert.ok(unit.x <= 10);
+	assert.notEqual(Math.floor(unit.x), 11);
+});
+
+test("moveNearTarget exits a tight resource pocket through the open tile center", () => {
+	const world = makeWorld([
+		{ x: 9, y: 10 },
+		{ x: 11, y: 10 },
+		{ x: 9, y: 11 },
+		{ x: 10, y: 11 },
+		{ x: 11, y: 11 },
+	]);
+	world.tick = 1;
+	const unit = makeUnit(10, 10, "u-pocket");
+	const command: Extract<UnitCommand, { type: "gather" }> = {
+		type: "gather",
+		targetId: "r-target",
+		resourceKind: "wood",
+		path: null,
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	moveNearTarget(world, unit, command, { x: 10, y: 8 }, 0.2, 1);
+
+	assert.ok(unit.y < 10);
+	assert.equal(Math.round(unit.x), 10);
+	assert.equal(Math.round(unit.y), 9);
+	assert.notEqual(command.path, null);
+});
+
+test("moveWithPath follows a centered one-tile gap between resources", () => {
+	const world = makeWorld([
+		{ x: 9, y: 10 },
+		{ x: 11, y: 10 },
+		{ x: 9, y: 11 },
+		{ x: 10, y: 11 },
+		{ x: 11, y: 11 },
+	]);
+	world.tick = 1;
+	const unit = makeUnit(10, 10, "u-gap");
+	const command: Extract<UnitCommand, { type: "move" }> = {
+		type: "move",
+		x: 10,
+		y: 8,
+		path: [
+			{ x: 10, y: 9 },
+			{ x: 10, y: 8 },
+		],
+		pathCrowd: 1,
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	moveWithPath(world, unit, command, 0.5);
+
+	assert.ok(unit.y < 10);
+	assert.equal(Math.round(unit.x), 10);
+	assert.equal(Math.round(unit.y), 10);
+	assert.notEqual(command.path, null);
+});
+
+test("single-unit move follows the next path node without sidestepping off path", () => {
+	const world = makeWorld([{ x: 11, y: 10 }]);
+	const resource: ResourceNode = {
+		id: "r-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 11,
+		y: 10,
+		amount: 100,
+		maxAmount: 100,
+	};
+	world.resources[resource.id] = resource;
+	world.tick = 1;
+	const unit = makeUnit(10, 10, "u-single-tight");
+	const command: Extract<UnitCommand, { type: "move" }> = {
+		type: "move",
+		x: 12,
+		y: 10,
+		path: [
+			{ x: 11, y: 10 },
+			{ x: 12, y: 10 },
+		],
+		pathCrowd: 1,
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	moveWithPath(world, unit, command, 1);
+
+	assert.equal(unit.x, 10);
+	assert.equal(unit.y, 10);
+	assert.equal(command.path, null);
+});
+
+test("gather path follows the next path node without lookahead or spacing offsets", () => {
+	const world = makeWorld();
+	world.tick = 1;
+	const unit = makeUnit(10, 10, "u-gather-tight");
+	const blocker = makeUnit(10.3, 10, "u-nearby-moving");
+	const command: Extract<UnitCommand, { type: "gather" }> = {
+		type: "gather",
+		targetId: "r-tree",
+		resourceKind: "wood",
+		path: [
+			{ x: 10, y: 9 },
+			{ x: 10, y: 8 },
+		],
+		pathCrowd: 20,
+	};
+	unit.command = command;
+	blocker.command = { type: "move", x: 18, y: 10, path: [{ x: 18, y: 10 }], pathCrowd: 20 };
+	addUnits(world, [unit, blocker]);
+
+	moveNearTarget(world, unit, command, { x: 10, y: 8 }, 0.2, 0.5);
+
+	assert.equal(unit.x, 10);
+	assert.ok(unit.y < 10);
+	assert.ok(unit.y > 9);
+	assert.deepEqual(command.path?.[0], { x: 10, y: 9 });
 });
 
 test("moveWithPath accepts joining an arrived group edge", () => {
@@ -367,14 +531,14 @@ test("moveWithPath uses the real target even when it is unexplored", () => {
 		score: 0,
 		joinedAt: Date.now(),
 	};
-	const unit = makeUnit(4.5, 4.5, "u-scout");
-	const command: Extract<UnitCommand, { type: "move" }> = { type: "move", x: 20.5, y: 4.5, path: null, pathCrowd: 1 };
+	const unit = makeUnit(4, 4, "u-scout");
+	const command: Extract<UnitCommand, { type: "move" }> = { type: "move", x: 20, y: 4, path: null, pathCrowd: 1 };
 	unit.command = command;
 	addUnits(world, [unit]);
 
 	moveWithPath(world, unit, command, 0.25);
 
-	assert.deepEqual(command.path?.at(-1), { x: 20.5, y: 4.5 });
+	assert.deepEqual(command.path?.at(-1), { x: 20, y: 4 });
 });
 
 test("moveWithPath lets formation slots settle away from the clicked center", () => {
@@ -400,11 +564,11 @@ test("moveWithPath lets formation slots settle away from the clicked center", ()
 
 test("moveWithPath follows the shared group path before deploying to a formation target", () => {
 	const world = makeWorld();
-	const unit = makeUnit(4.5, 4.5, "u-slot-path");
+	const unit = makeUnit(4, 4, "u-slot-path");
 	const command: Extract<UnitCommand, { type: "move" }> = {
 		type: "move",
-		x: 20.5,
-		y: 4.5,
+		x: 20,
+		y: 4,
 		path: null,
 		pathCrowd: 80,
 		formationTarget: { x: 20.5, y: 20.5 },
@@ -414,7 +578,7 @@ test("moveWithPath follows the shared group path before deploying to a formation
 
 	moveWithPath(world, unit, command, 0.25);
 
-	assert.deepEqual(command.path?.at(-1), { x: 20.5, y: 4.5 });
+	assert.deepEqual(command.path?.at(-1), { x: 20, y: 4 });
 });
 
 test("moveWithPath walks toward formation slots instead of teleporting", () => {
