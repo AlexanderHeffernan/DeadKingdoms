@@ -283,14 +283,48 @@ test("zombie movement escalates to pathing when sidesteps do not make progress",
 		},
 	} as unknown as UnitSimulationContext;
 
-	for (let tick = 0; tick < 4; tick += 1) behavior.step(context, zombie, 0.1);
+	for (let tick = 0; tick < 11; tick += 1) behavior.step(context, zombie, 0.1);
 
-	assert.equal(sidestepCalls, 3);
+	assert.equal(sidestepCalls, 10);
 	assert.equal(pathCalls, 1);
 	assert.equal(zombie.zombieStuckTicks, 0);
 });
 
-test("moveZombieWithPath does not solve a wall-length detour", () => {
+test("zombie sound goals override nearby combat aggro", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-sound-priority");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.soundTarget = { x: 14, y: 10 };
+	zombie.zombieGoalKind = "sound";
+	const target = makeUnit(8.5, 10, "u-target");
+	let moved = false;
+	let damaged = false;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [target],
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveAroundSmallObstacle: (unit: Unit) => {
+			moved = true;
+			unit.x += 0.2;
+			return false;
+		},
+		moveZombieWithPath: () => false,
+		damage: () => {
+			damaged = true;
+		},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.equal(moved, true);
+	assert.equal(damaged, false);
+	assert.ok(zombie.x > 8);
+});
+
+test("moveZombieWithPath routes around a wall-length detour", () => {
 	const world = makeWorld([
 		{ x: 10, y: 7 },
 		{ x: 10, y: 8 },
@@ -310,7 +344,8 @@ test("moveZombieWithPath does not solve a wall-length detour", () => {
 		moveZombieWithPath(world, zombie, target, 0.135);
 	}
 
-	assert.ok(zombie.x < 10);
+	assert.ok(zombie.x > 10);
+	assert.ok(distanceBetween(zombie, target) <= ZOMBIE_PATH_LOOKAHEAD_DISTANCE);
 	assert.equal(isWalkable(world, Math.round(zombie.x), Math.round(zombie.y)), true);
 });
 
@@ -351,6 +386,42 @@ test("moveAroundSmallObstacle lets moving units pass through idle friendly units
 	assert.equal(blocked, false);
 	assert.equal(moving.x, 11);
 	assert.equal(moving.y, 10);
+});
+
+test("moveAroundSmallObstacle lets sound-moving zombies pass through idle friendly zombies", () => {
+	const world = makeWorld([{ x: 11, y: 10 }]);
+	const idle = makeUnit(11, 10, "z-idle");
+	idle.type = "zombie";
+	idle.ownerId = "zombies" as Unit["ownerId"];
+	const moving = makeUnit(10, 10, "z-moving");
+	moving.type = "zombie";
+	moving.ownerId = idle.ownerId;
+	moving.soundTarget = { x: 12, y: 10 };
+	addUnits(world, [idle, moving]);
+
+	const blocked = moveAroundSmallObstacle(world, moving, moving.soundTarget, 1);
+
+	assert.equal(blocked, false);
+	assert.equal(moving.x, 11);
+	assert.equal(moving.y, 10);
+});
+
+test("resolveUnitSeparation does not push sound-moving zombies as idle blockers", () => {
+	const world = makeWorld();
+	const a = makeUnit(10, 10, "z-a");
+	a.type = "zombie";
+	a.ownerId = "zombies" as Unit["ownerId"];
+	a.soundTarget = { x: 12, y: 10 };
+	const b = makeUnit(10.1, 10, "z-b");
+	b.type = "zombie";
+	b.ownerId = a.ownerId;
+	b.soundTarget = { x: 12, y: 10 };
+	addUnits(world, [a, b]);
+
+	resolveUnitSeparation(world);
+
+	assert.equal(a.x, 10);
+	assert.equal(b.x, 10.1);
 });
 
 test("moveAroundSmallObstacle still blocks resources under idle friendly units", () => {

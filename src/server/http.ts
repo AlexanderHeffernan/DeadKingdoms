@@ -2,7 +2,7 @@ import { createReadStream, promises as fs } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { makeSnapshot } from "../shared/messages.js";
 import { MAX_PLAYERS } from "../shared/config.js";
-import { addAdminLog, addPlayer, command, grantPlayerSoldiers, removePlayer, spawnZombieHorde } from "./world.js";
+import { addAdminLog, addPlayer, command, emitDevBang, grantPlayerSoldiers, removePlayer, spawnZombieHorde, toggleTownCenterInvincibility } from "./world.js";
 import { Logs } from "../shared/logs.js";
 import type { AdminLevel, CommandPayload, Player, PlayerId, World } from "../shared/types.js";
 
@@ -32,9 +32,12 @@ export function createHandler(world: World, clients: Set<Client>) {
 		if (req.method === "POST" && url.pathname === "/api/dev/admin-access") return enableAdminAccess(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/dev/full-map-vision") return enableFullMapVision(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/dev/sound-debug") return enableSoundDebug(req, res, world);
+		if (req.method === "POST" && url.pathname === "/api/dev/zombie-debug") return enableZombieDebug(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/dev/path-debug") return enablePathDebug(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/dev/spawn-zombies") return spawnDevZombies(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/dev/grant-soldiers") return grantDevSoldiers(req, res, world);
+		if (req.method === "POST" && url.pathname === "/api/dev/town-center-invincible") return toggleTownCenterInvincible(req, res, world);
+		if (req.method === "POST" && url.pathname === "/api/dev/emit-noise") return emitDevNoise(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/log") return receiveClientLog(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/ping") return receiveClientPing(req, res, world);
 		if (req.method === "POST" && url.pathname === "/api/command") return receiveCommand(req, res, world);
@@ -216,6 +219,16 @@ async function enableSoundDebug(req: import("node:http").IncomingMessage, res: i
 	json(res, { ok: true });
 }
 
+async function enableZombieDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown };
+	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+	const player = world.players[body.playerId];
+	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	player.zombieDebug = true;
+	json(res, { ok: true });
+}
+
 async function enablePathDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
 	const secret = process.env.DEV_PATHFINDING_DEBUG_SECRET || "revealpathfinding";
 	const body = (await readJson(req)) as { playerId?: unknown; secret?: unknown };
@@ -250,6 +263,29 @@ async function grantDevSoldiers(req: import("node:http").IncomingMessage, res: i
 	const granted = grantPlayerSoldiers(world, body.playerId, count);
 	Logs.log(`${player.name} granted ${granted} soldiers.`);
 	json(res, { ok: true, granted });
+}
+
+async function toggleTownCenterInvincible(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown };
+	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+	const player = world.players[body.playerId];
+	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	const invincible = toggleTownCenterInvincibility(world, body.playerId);
+	if (invincible === null) return json(res, { ok: false, error: "No town center found." }, 404);
+	Logs.log(`${player.name} ${invincible ? "enabled" : "disabled"} town center invincibility.`);
+	json(res, { ok: true, invincible });
+}
+
+async function emitDevNoise(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown; x?: unknown; y?: unknown };
+	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+	const player = world.players[body.playerId];
+	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (typeof body.x !== "number" || typeof body.y !== "number") return json(res, { ok: false, error: "Noise position is required." }, 400);
+	emitDevBang(world, body.x, body.y);
+	json(res, { ok: true });
 }
 
 async function receiveClientLog(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {

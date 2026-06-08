@@ -19,7 +19,7 @@ export class VillagerUnit extends BaseUnit {
 		trainTime: 7,
 		cost: { food: 45 },
 		vision: 6,
-		sound: 1,
+		sound: 6,
 	} as const;
 
 	public step(context: UnitSimulationContext, unit: Unit, dt: number) {

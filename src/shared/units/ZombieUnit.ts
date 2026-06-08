@@ -1,11 +1,9 @@
 import { BaseUnit } from "./BaseUnit.js";
 import type { UnitCombatTarget, UnitSimulationContext } from "./BaseUnit.js";
 import type { Building, Unit, Vec2 } from "../types.js";
-import { MAP_SIZE } from "../config.js";
 
 const ZOMBIE_TARGET_SIGHT_RANGE = 5.5;
-const ZOMBIE_MOMENTUM_DISTANCE = 18;
-const ZOMBIE_PATH_STUCK_TICKS = 3;
+const ZOMBIE_PATH_STUCK_TICKS = 10;
 const ZOMBIE_PROGRESS_EPSILON = 0.03;
 
 export class ZombieUnit extends BaseUnit {
@@ -22,12 +20,16 @@ export class ZombieUnit extends BaseUnit {
 		trainTime: 0,
 		cost: {},
 		vision: 0,
-		sound: 1.2,
+		sound: 0,
 	} as const;
 
 	public step(context: UnitSimulationContext, zombie: Unit, dt: number) {
 		this.updateTimers(zombie, dt);
 		zombie.vision = this.stats.vision || 5;
+		if (zombie.zombieGoalKind === "sound" && zombie.soundTarget) {
+			this.followSound(context, zombie, zombie.soundTarget, dt);
+			return;
+		}
 		const target = this.findNearestTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
 		if (target) {
 			this.engageTarget(context, zombie, target, dt);
@@ -40,7 +42,7 @@ export class ZombieUnit extends BaseUnit {
 		const targetPoint = context.centerOf(target);
 		const range = this.stats.range + (target.size || 0.6);
 		zombie.facing = targetPoint.x < zombie.x ? "left" : "right";
-		zombie.soundTarget = this.extendDirection(zombie, targetPoint, ZOMBIE_MOMENTUM_DISTANCE);
+		zombie.soundTarget = targetPoint;
 		zombie.wanderTarget = null;
 		if (context.distance(zombie, targetPoint) > range) {
 			const movement = this.moveTowardGoal(context, zombie, targetPoint, dt);
@@ -60,16 +62,29 @@ export class ZombieUnit extends BaseUnit {
 	}
 
 	private moveTowardCurrentGoal(context: UnitSimulationContext, zombie: Unit, dt: number) {
-		const moveTarget = zombie.soundTarget;
-		if (!moveTarget) {
-			this.clearMovementState(zombie);
+		if (zombie.soundTarget) {
+			this.followSound(context, zombie, zombie.soundTarget, dt);
 			return;
 		}
-		zombie.facing = moveTarget.x < zombie.x ? "left" : "right";
-		this.moveTowardGoal(context, zombie, moveTarget, dt);
-		if (context.distance(zombie, moveTarget) >= 0.45) return;
-		zombie.soundTarget = this.extendDirection(zombie, moveTarget, ZOMBIE_MOMENTUM_DISTANCE);
+		if (zombie.wanderTarget) {
+			this.drift(context, zombie, zombie.wanderTarget, dt);
+			return;
+		}
+		this.clearMovementState(zombie);
+	}
+
+	private followSound(context: UnitSimulationContext, zombie: Unit, target: Vec2, dt: number) {
+		zombie.facing = target.x < zombie.x ? "left" : "right";
+		this.moveTowardGoal(context, zombie, target, dt);
+		if (context.distance(zombie, target) >= 0.45) return;
+		zombie.soundTarget = null;
 		zombie.retargetIn = 0;
+	}
+
+	private drift(context: UnitSimulationContext, zombie: Unit, target: Vec2, dt: number) {
+		// Idle drifting toward the horde's wander point; the director rerolls it on arrival.
+		zombie.facing = target.x < zombie.x ? "left" : "right";
+		this.moveTowardGoal(context, zombie, target, dt);
 	}
 
 	private findNearestTarget(context: UnitSimulationContext, zombie: Unit, range: number): UnitCombatTarget | null {
@@ -104,20 +119,6 @@ export class ZombieUnit extends BaseUnit {
 		return best;
 	}
 
-	private extendDirection(from: Vec2, toward: Vec2, distanceAhead: number) {
-		const dx = toward.x - from.x;
-		const dy = toward.y - from.y;
-		const length = Math.hypot(dx, dy) || 1;
-		return {
-			x: this.clamp(toward.x + (dx / length) * distanceAhead, 0.5, MAP_SIZE - 0.5),
-			y: this.clamp(toward.y + (dy / length) * distanceAhead, 0.5, MAP_SIZE - 0.5),
-		};
-	}
-
-	private clamp(value: number, min: number, max: number) {
-		return Math.max(min, Math.min(max, value));
-	}
-
 	private didNotMove(context: UnitSimulationContext, before: Vec2, zombie: Unit) {
 		return context.distance(before, zombie) <= 0.01;
 	}
@@ -142,6 +143,7 @@ export class ZombieUnit extends BaseUnit {
 
 	private clearMovementState(zombie: Unit) {
 		zombie.wanderTarget = null;
+		zombie.zombieGoalKind = null;
 		zombie.zombiePath = null;
 		zombie.zombiePathTarget = null;
 		zombie.zombieStuckTicks = 0;

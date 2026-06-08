@@ -65,6 +65,9 @@ type BuildingMeta = {
 };
 
 export interface BuildingEntity extends BuildingSnapshot, GatherTarget {
+	/** Debug-only flag set by dev tools; when true, damage() ignores all incoming damage. */
+	invincible?: boolean;
+
 	/** Converts this runtime building instance into JSON-safe data for network transfer. */
 	serialize(): BuildingSnapshot;
 
@@ -153,6 +156,7 @@ export abstract class Building implements BuildingEntity {
 	maxAmount?: number;
 	resource?: ResourceType;
 	exhausted?: boolean;
+	invincible?: boolean;
 
 	constructor(init: BuildingInit, meta: BuildingMeta) {
 		this.type = meta.type;
@@ -395,7 +399,7 @@ export class TownCenter extends ProductionDepotBuilding {
 			type: "townCenter",
 			label: "Town Center",
 			sprite: "townCenter",
-			stats: { maxHp: 520, size: 4, score: 120, cost: { wood: 0 }, vision: 8, sound: 10 },
+			stats: { maxHp: 520, size: 4, score: 120, cost: { wood: 0 }, vision: 8, sound: 0 },
 		});
 	}
 
@@ -413,7 +417,7 @@ export class House extends Building {
 			type: "house",
 			label: "House",
 			sprite: "house",
-			stats: { maxHp: 140, size: 2, score: 28, cost: { wood: 35 }, vision: 5, sound: 1.5 },
+			stats: { maxHp: 140, size: 2, score: 28, cost: { wood: 35 }, vision: 5, sound: 0 },
 		});
 	}
 
@@ -428,7 +432,7 @@ export class Barracks extends ProductionBuilding {
 			type: "barracks",
 			label: "Barracks",
 			sprite: "barracks",
-			stats: { maxHp: 260, size: 3, score: 70, cost: { wood: 120, ore: 30 }, vision: 6, sound: 5 },
+			stats: { maxHp: 260, size: 3, score: 70, cost: { wood: 120, ore: 30 }, vision: 6, sound: 0 },
 		});
 	}
 
@@ -441,7 +445,7 @@ export class WatchTower extends Building {
 			type: "watchTower",
 			label: "Watch Tower",
 			sprite: "watchTower",
-			stats: { maxHp: 210, size: 1, score: 55, cost: { wood: 80, ore: 45 }, vision: 11, sound: 3 },
+			stats: { maxHp: 210, size: 1, score: 55, cost: { wood: 80, ore: 45 }, vision: 11, sound: 0 },
 		});
 	}
 
@@ -458,7 +462,7 @@ export class Farm extends Building {
 			type: "farm",
 			label: "Farm",
 			sprite: "farm",
-			stats: { maxHp: 95, size: 4, score: 22, cost: { wood: 45 }, vision: 3, sound: 2 },
+			stats: { maxHp: 95, size: 4, score: 22, cost: { wood: 45 }, vision: 3, sound: 0 },
 		});
 		this.amount ??= 160;
 		this.maxAmount ??= 160;
@@ -516,7 +520,7 @@ export class LumberCamp extends DepotBuilding {
 			type: "lumberCamp",
 			label: "Lumber Camp",
 			sprite: "lumberCamp",
-			stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5, sound: 3 },
+			stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5, sound: 0 },
 		});
 	}
 
@@ -529,7 +533,7 @@ export class FoodDepot extends DepotBuilding {
 			type: "foodDepot",
 			label: "Food Depot",
 			sprite: "foodDepot",
-			stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5, sound: 3 },
+			stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5, sound: 0 },
 		});
 	}
 
@@ -542,7 +546,7 @@ export class MiningCamp extends DepotBuilding {
 			type: "miningCamp",
 			label: "Mining Camp",
 			sprite: "miningCamp",
-			stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5, sound: 3 },
+			stats: { maxHp: 150, size: 1, score: 32, cost: { wood: 70 }, vision: 5, sound: 0 },
 		});
 	}
 

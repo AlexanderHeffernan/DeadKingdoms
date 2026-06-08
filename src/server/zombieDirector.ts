@@ -1,6 +1,17 @@
 import { MAP_SIZE } from "../shared/config.js";
 import type { Building, Unit, Vec2, World, ZombieHorde } from "../shared/types.js";
-import { buildSoundField, collectWorldSoundSources, soundFieldCellAt, type SoundFieldCell } from "../shared/soundField.js";
+import {
+	SOUND_FIELD_CELL_SIZE,
+	SOUND_FIELD_MAX_STRENGTH,
+	SOUND_FIELD_MIN_SPREAD_STRENGTH,
+	SOUND_FIELD_OVERFLOW_DECAY,
+	SOUND_FIELD_OVERFLOW_KNEE,
+	buildSoundField,
+	collectWorldSoundSources,
+	soundFieldCellAt,
+	type SoundFieldCell,
+} from "../shared/soundField.js";
+import type { ActionNoise } from "../shared/types.js";
 import { id } from "./id.js";
 import { clamp, distance } from "./math.js";
 import { ZOMBIE_OWNER_ID } from "./zombieSpawning.js";
@@ -16,11 +27,15 @@ const HORDE_MAX_RADIUS = 18;
 const ZOMBIE_FORMATION_JITTER = 1.4;
 const SOUND_MEMORY_DECAY_PER_SECOND = 0.05;
 const SOUND_MEMORY_MIN_SIGNIFICANCE = 0.01;
-const SOUND_MEMORY_REPLACE_RATIO = 1.1;
 const SOUND_MEMORY_FOLLOW_DISTANCE = 18;
+const HORDE_WANDER_MIN_DISTANCE = 2;
+const HORDE_WANDER_MAX_DISTANCE = 6;
+const HORDE_WANDER_REACHED_DISTANCE = 2;
+const HORDE_HEARING_MEMBER_SAMPLES = 12;
 
 type HeardSound = {
 	direction: Vec2;
+	target: Vec2;
 	significance: number;
 	worldSignificance: number;
 };
@@ -43,22 +58,26 @@ export function stepZombieDirector(world: World, dt: number) {
 	for (const horde of hordes) {
 		horde.targetMemory = Math.max(0, horde.targetMemory - dt);
 		decaySoundMemory(horde, dt);
-		const directTarget = nearestPoint([...targetUnits, ...Object.values(world.buildings).filter((building) => building.hp > 0)], horde.center, horde.radius + 8);
-		const heardSound = directTarget ? null : heardSoundCell(soundField, horde);
+		const heardActionSound = heardActionSoundForHorde(horde, world);
+		const directTarget = heardActionSound ? null : nearestPoint([...targetUnits, ...Object.values(world.buildings).filter((building) => building.hp > 0)], horde.center, horde.radius + 8);
+		const heardSound = heardActionSound || (directTarget ? null : heardSoundForHorde(soundField, horde, world));
 
 		if (directTarget) {
 			horde.target = centerOf(directTarget);
 			horde.targetMemory = HORDE_TARGET_MEMORY_SECONDS;
 			horde.wanderTarget = null;
+			horde.targetKind = "target";
 		} else {
 			rememberHeardSound(horde, heardSound);
 			horde.target = rememberedSoundTarget(horde);
 			horde.targetMemory = 0;
-			horde.wanderTarget = null;
+			updateHordeWander(horde);
+			horde.targetKind = horde.target ? "sound" : "wander";
 		}
 
 		assignZombieGoals(world, horde);
 	}
+	assignDirectActionSoundGoals(world, zombies);
 }
 
 function buildHordes(world: World, zombies: Unit[]): Record<string, ZombieHorde> {
@@ -141,6 +160,7 @@ function makeHorde(idValue: string, members: Unit[], previous: ZombieHorde | nul
 		target: previous?.target || null,
 		targetMemory: previous?.targetMemory || 0,
 		wanderTarget: previous?.wanderTarget || null,
+		targetKind: previous?.targetKind || null,
 		soundMemory: previous?.soundMemory || null,
 	};
 }
@@ -152,6 +172,7 @@ function assignZombieGoals(world: World, horde: ZombieHorde) {
 		return;
 	}
 	const hasTarget = !!horde.target;
+	const goalKind = horde.targetKind || (hasTarget ? "target" : "wander");
 
 	for (const memberId of horde.memberIds) {
 		const zombie = world.units[memberId];
@@ -165,11 +186,31 @@ function assignZombieGoals(world: World, horde: ZombieHorde) {
 		if (hasTarget) {
 			zombie.soundTarget = personalTarget;
 			zombie.wanderTarget = null;
+			zombie.zombieGoalKind = goalKind;
 		} else {
 			zombie.soundTarget = null;
+			zombie.zombieGoalKind = "wander";
 			if (!zombie.wanderTarget || distance(zombie, zombie.wanderTarget) < 1.5) zombie.wanderTarget = personalTarget;
 		}
 	}
+}
+
+function updateHordeWander(horde: ZombieHorde) {
+	if (horde.target) {
+		horde.wanderTarget = null;
+		return;
+	}
+	if (horde.wanderTarget && distance(horde.center, horde.wanderTarget) > HORDE_WANDER_REACHED_DISTANCE) return;
+	horde.wanderTarget = randomWanderTarget(horde.center);
+}
+
+function randomWanderTarget(center: Vec2): Vec2 {
+	const angle = Math.random() * Math.PI * 2;
+	const distanceOut = HORDE_WANDER_MIN_DISTANCE + Math.random() * (HORDE_WANDER_MAX_DISTANCE - HORDE_WANDER_MIN_DISTANCE);
+	return {
+		x: clamp(center.x + Math.cos(angle) * distanceOut, 0.5, MAP_SIZE - 0.5),
+		y: clamp(center.y + Math.sin(angle) * distanceOut, 0.5, MAP_SIZE - 0.5),
+	};
 }
 
 function clearZombieGoals(world: World, horde: ZombieHorde) {
@@ -178,19 +219,131 @@ function clearZombieGoals(world: World, horde: ZombieHorde) {
 		if (!zombie) continue;
 		zombie.soundTarget = null;
 		zombie.wanderTarget = null;
+		zombie.zombieGoalKind = null;
 	}
 }
 
-function heardSoundCell(cells: SoundFieldCell[], horde: ZombieHorde): HeardSound | null {
-	const cell = soundFieldCellAt(cells, horde.center);
+function assignDirectActionSoundGoals(world: World, zombies: Unit[]) {
+	if (world.actionNoises.length === 0) return;
+	for (const zombie of zombies) {
+		const heardSound = heardActionSoundForPoint(world, zombie);
+		if (!heardSound) continue;
+		if (!zombie.soundTarget || distance(zombie.soundTarget, heardSound.target) > 0.2) {
+			zombie.zombiePath = null;
+			zombie.zombiePathTarget = null;
+			zombie.zombieStuckTicks = 0;
+		}
+		zombie.soundTarget = heardSound.target;
+		zombie.wanderTarget = null;
+		zombie.zombieGoalKind = "sound";
+	}
+}
+
+function heardActionSoundForPoint(world: World, point: Vec2): HeardSound | null {
+	for (let i = world.actionNoises.length - 1; i >= 0; i -= 1) {
+		const noise = world.actionNoises[i]!;
+		const signal = actionNoiseSignalAt(noise, point);
+		if (signal < SOUND_FIELD_MIN_SPREAD_STRENGTH) continue;
+		const dx = noise.x - point.x;
+		const dy = noise.y - point.y;
+		const length = Math.hypot(dx, dy);
+		return {
+			direction: length > 0.001 ? { x: dx / length, y: dy / length } : { x: 0, y: 0 },
+			target: { x: noise.x, y: noise.y },
+			significance: Math.min(SOUND_FIELD_MAX_STRENGTH, signal),
+			worldSignificance: Math.min(SOUND_FIELD_MAX_STRENGTH, signal),
+		};
+	}
+	return null;
+}
+
+function heardActionSoundForHorde(horde: ZombieHorde, world: World): HeardSound | null {
+	const points = [horde.center, ...sampleHordeMembers(horde, world)];
+	for (let i = world.actionNoises.length - 1; i >= 0; i -= 1) {
+		const noise = world.actionNoises[i]!;
+		const heard = heardActionNoise(noise, horde, points);
+		if (heard) return heard;
+	}
+	return null;
+}
+
+function heardActionNoise(noise: ActionNoise, horde: ZombieHorde, points: Vec2[]): HeardSound | null {
+	const bestSignal = bestActionNoiseSignal(noise, points);
+	if (bestSignal < SOUND_FIELD_MIN_SPREAD_STRENGTH) return null;
+	const dx = noise.x - horde.center.x;
+	const dy = noise.y - horde.center.y;
+	const length = Math.hypot(dx, dy);
+	const direction = length > 0.001 ? { x: dx / length, y: dy / length } : horde.soundMemory?.direction || null;
+	if (!direction) return null;
+	const significance = Math.min(SOUND_FIELD_MAX_STRENGTH, bestSignal);
+	return {
+		direction,
+		target: { x: noise.x, y: noise.y },
+		significance,
+		worldSignificance: significance,
+	};
+}
+
+function bestActionNoiseSignal(noise: ActionNoise, points: Vec2[]): number {
+	let bestSignal = 0;
+	for (const point of points) bestSignal = Math.max(bestSignal, actionNoiseSignalAt(noise, point));
+	return bestSignal;
+}
+
+function actionNoiseSignalAt(noise: ActionNoise, point: Vec2): number {
+	const dx = Math.abs(soundCellCoord(noise.x) - soundCellCoord(point.x));
+	const dy = Math.abs(soundCellCoord(noise.y) - soundCellCoord(point.y));
+	const cellDistance = Math.max(dx, dy);
+	if (cellDistance === 0) return Math.min(SOUND_FIELD_MAX_STRENGTH, noise.sound);
+	const overflowStrength = actionNoiseOverflowStrength(noise.sound);
+	if (overflowStrength <= 0) return 0;
+	return overflowStrength * SOUND_FIELD_OVERFLOW_DECAY ** (cellDistance - 1);
+}
+
+function actionNoiseOverflowStrength(sound: number): number {
+	const excess = Math.max(0, sound - SOUND_FIELD_MAX_STRENGTH);
+	if (excess <= 0) return 0;
+	const softenedExcess = (excess * excess) / (excess + SOUND_FIELD_OVERFLOW_KNEE);
+	return softenedExcess * SOUND_FIELD_OVERFLOW_DECAY;
+}
+
+function soundCellCoord(value: number) {
+	return Math.max(0, Math.min(Math.ceil(MAP_SIZE / SOUND_FIELD_CELL_SIZE) - 1, Math.floor(value / SOUND_FIELD_CELL_SIZE)));
+}
+
+function heardSoundForHorde(cells: SoundFieldCell[], horde: ZombieHorde, world: World): HeardSound | null {
+	const heard = [horde.center, ...sampleHordeMembers(horde, world)]
+		.map((point) => heardSoundAt(cells, horde, point))
+		.filter((sound): sound is HeardSound => !!sound);
+	if (heard.length === 0) return null;
+	return heard.reduce((best, sound) => (sound.worldSignificance > best.worldSignificance ? sound : best));
+}
+
+function sampleHordeMembers(horde: ZombieHorde, world: World): Vec2[] {
+	if (horde.memberIds.length <= HORDE_HEARING_MEMBER_SAMPLES) {
+		return horde.memberIds.map((memberId) => world.units[memberId]).filter((unit): unit is Unit => !!unit);
+	}
+	const samples: Vec2[] = [];
+	const stride = horde.memberIds.length / HORDE_HEARING_MEMBER_SAMPLES;
+	for (let i = 0; i < HORDE_HEARING_MEMBER_SAMPLES; i += 1) {
+		const memberId = horde.memberIds[Math.floor(i * stride)];
+		const member = memberId ? world.units[memberId] : null;
+		if (member) samples.push(member);
+	}
+	return samples;
+}
+
+function heardSoundAt(cells: SoundFieldCell[], horde: ZombieHorde, point: Vec2): HeardSound | null {
+	const cell = soundFieldCellAt(cells, point);
 	if (!cell) return null;
 	const significance = cellSignificanceForHorde(cell, horde);
 	const worldSignificance = Math.max(0, cell.worldStrength);
 	if (significance <= 0 && worldSignificance <= 0) return null;
-	const direction = soundDirectionFromHorde(horde, cell);
+	const direction = soundDirectionFromPoint(horde.center, cell, horde.soundMemory?.direction || null);
 	if (!direction) return null;
 	return {
 		direction,
+		target: { x: cell.x, y: cell.y },
 		significance,
 		worldSignificance,
 	};
@@ -203,6 +356,7 @@ function cellSignificanceForHorde(cell: SoundFieldCell, horde: ZombieHorde): num
 
 function decaySoundMemory(horde: ZombieHorde, dt: number) {
 	if (!horde.soundMemory) return;
+	horde.soundMemory.age += dt;
 	horde.soundMemory.significance = Math.max(SOUND_MEMORY_MIN_SIGNIFICANCE, horde.soundMemory.significance - SOUND_MEMORY_DECAY_PER_SECOND * dt);
 }
 
@@ -210,28 +364,25 @@ function rememberHeardSound(horde: ZombieHorde, heardSound: HeardSound | null) {
 	if (!heardSound || heardSound.significance <= 0) return;
 	const replacementSignificance = horde.soundMemory ? heardSound.worldSignificance : heardSound.significance;
 	if (replacementSignificance <= 0) return;
-	if (!horde.soundMemory || replacementSignificance >= horde.soundMemory.significance * SOUND_MEMORY_REPLACE_RATIO) {
-		horde.soundMemory = {
-			direction: heardSound.direction,
-			significance: replacementSignificance,
-		};
-	}
+	horde.soundMemory = {
+		direction: heardSound.direction,
+		target: heardSound.target,
+		significance: replacementSignificance,
+		age: 0,
+	};
 }
 
 function rememberedSoundTarget(horde: ZombieHorde): Vec2 | null {
 	if (!horde.soundMemory) return null;
-	return {
-		x: clamp(horde.center.x + horde.soundMemory.direction.x * SOUND_MEMORY_FOLLOW_DISTANCE, 0.5, MAP_SIZE - 0.5),
-		y: clamp(horde.center.y + horde.soundMemory.direction.y * SOUND_MEMORY_FOLLOW_DISTANCE, 0.5, MAP_SIZE - 0.5),
-	};
+	return horde.soundMemory.target;
 }
 
-function soundDirectionFromHorde(horde: ZombieHorde, cell: SoundFieldCell): Vec2 | null {
-	const dx = cell.x - horde.center.x;
-	const dy = cell.y - horde.center.y;
+function soundDirectionFromPoint(point: Vec2, cell: SoundFieldCell, fallback: Vec2 | null): Vec2 | null {
+	const dx = cell.x - point.x;
+	const dy = cell.y - point.y;
 	const len = Math.hypot(dx, dy);
 	if (len > 0.001) return { x: dx / len, y: dy / len };
-	return horde.soundMemory?.direction || null;
+	return fallback;
 }
 
 function nearestPoint<T extends Unit | Building>(entities: T[], point: Vec2, range: number): T | null {

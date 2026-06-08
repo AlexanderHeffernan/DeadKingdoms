@@ -1,4 +1,4 @@
-import { enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, sendCommand, spawnZombieHorde } from "./api.js";
+import { emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, sendCommand, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
@@ -49,6 +49,7 @@ const view: ViewState = {
 	selectedIds: state.selectedIds,
 	buildMode: null,
 	rallyModeBuildingId: null,
+	noiseMode: false,
 	hoverTile: null,
 	mouse: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
 };
@@ -113,6 +114,14 @@ const ui = new UI(state, {
 		ui.showToast("Sound field overlay enabled.");
 		return "Sound field overlay enabled.";
 	},
+	async enableZombieDebug() {
+		if (!state.playerId) return "No active player.";
+		const result = await requestZombieDebug(state.playerId);
+		if (!result.ok) return result.error || "Could not enable zombie state overlay.";
+		connectEvents();
+		ui.showToast("Zombie state overlay enabled.");
+		return "Zombie state overlay enabled.";
+	},
 	async spawnHostileHorde() {
 		if (!state.playerId) return "No active player.";
 		const result = await spawnZombieHorde(state.playerId, 500);
@@ -126,6 +135,22 @@ const ui = new UI(state, {
 		if (!result.ok) return result.error || "Could not grant soldiers.";
 		ui.showToast(`Granted ${result.granted ?? 100} soldiers.`);
 		return `Granted ${result.granted ?? 100} soldiers.`;
+	},
+	async toggleTownCenterInvincible() {
+		if (!state.playerId) return "No active player.";
+		const result = await requestTownCenterInvincible(state.playerId);
+		if (!result.ok) return result.error || "Could not toggle town center invincibility.";
+		const message = result.invincible ? "Town center is now invincible." : "Town center invincibility disabled.";
+		ui.showToast(message);
+		return message;
+	},
+	async toggleNoiseTool() {
+		view.noiseMode = !view.noiseMode;
+		const message = view.noiseMode
+			? "Noise tool ON — left-click the map to make a bang. Esc or right-click to stop."
+			: "Noise tool off.";
+		ui.showToast(message);
+		return message;
 	},
 });
 
@@ -485,6 +510,10 @@ function onMouseUp(event: MouseEvent) {
 	view.dragging = false;
 	const dx = Math.abs(view.dragCurrent!.x - view.dragStart!.x);
 	const dy = Math.abs(view.dragCurrent!.y - view.dragStart!.y);
+	if (view.noiseMode) {
+		emitNoiseFromScreen(event.clientX, event.clientY);
+		return;
+	}
 	if (view.buildMode) {
 		placeBuilding();
 		return;
@@ -501,6 +530,11 @@ function onMouseUp(event: MouseEvent) {
 function handleRightClick(event: MouseEvent) {
 	view.buildMode = null;
 	view.rallyModeBuildingId = null;
+	if (view.noiseMode) {
+		view.noiseMode = false;
+		ui.showToast("Noise tool off.");
+		return;
+	}
 	const hit = hitTest(event.clientX, event.clientY);
 	const ownUnits = [...state.selectedIds].filter((id) => state.snapshot?.units[id]?.ownerId === state.playerId);
 	if (ownUnits.length === 0 && selectedProductionBuilding()) {
@@ -526,6 +560,13 @@ function handleRightClick(event: MouseEvent) {
 			if (result.ok) addMoveCross(iso.x, iso.y);
 		});
 	}
+}
+
+function emitNoiseFromScreen(x: number, y: number) {
+	if (!state.playerId) return;
+	const iso = screenToIso(x, y, view.camera);
+	void requestEmitNoise(state.playerId, iso.x, iso.y);
+	addMoveCross(iso.x, iso.y);
 }
 
 function setRallyPointFromScreen(x: number, y: number, buildingId = view.rallyModeBuildingId) {
@@ -596,6 +637,10 @@ function onKeyDown(event: KeyboardEvent) {
 	const key = event.key.toLowerCase();
 	if (key === "escape") {
 		view.buildMode = null;
+		if (view.noiseMode) {
+			view.noiseMode = false;
+			ui.showToast("Noise tool off.");
+		}
 		state.selectedIds.clear();
 		ui.render();
 		return;

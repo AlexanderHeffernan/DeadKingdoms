@@ -60,7 +60,7 @@ export function makeSnapshot(
 				},
 			]),
 		),
-		units: Object.fromEntries(Object.entries(filterVisible(world.units)).map(([id, unit]) => [id, serializeUnit(unit)])),
+		units: Object.fromEntries(Object.entries(filterVisible(world.units)).map(([id, unit]) => [id, serializeUnit(unit, player?.zombieDebug === true)])),
 		buildings: Object.fromEntries(
 			Object.entries(filterVisible(world.buildings)).map(([id, building]) => [id, building.serialize()]),
 		),
@@ -116,7 +116,7 @@ function buildAdminSnapshot(world: World, level: AdminLevel | undefined): AdminS
 	};
 }
 
-function serializeUnit(unit: Unit): Unit {
+function serializeUnit(unit: Unit, includeZombieDebug: boolean): Unit {
 	return {
 		id: unit.id,
 		kind: unit.kind,
@@ -134,7 +134,18 @@ function serializeUnit(unit: Unit): Unit {
 		carried: unit.carried,
 		selected: unit.selected,
 		...(unit.vision !== undefined ? { vision: unit.vision } : {}),
+		...(includeZombieDebug && unit.type === "zombie" ? { zombieDebugState: zombieDebugState(unit) } : {}),
 	};
+}
+
+function zombieDebugState(unit: Unit) {
+	if (unit.zombieStuckTicks && unit.zombieStuckTicks >= 3) return "stuck";
+	if (unit.zombiePath?.length) return "pathing";
+	if (unit.zombieGoalKind === "target") return "aggro";
+	if (unit.zombieGoalKind === "sound" || unit.soundTarget) return "sound";
+	if (unit.zombieGoalKind === "wander" || unit.wanderTarget) return "wander";
+	if (unit.zombieStuckTicks && unit.zombieStuckTicks > 0) return "blocked";
+	return "idle";
 }
 
 function buildSoundDebugSources(world: World): SoundDebugSource[] {

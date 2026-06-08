@@ -18,6 +18,15 @@ import type { VisibilityCache } from "./visibility.js";
 import type { BuildingEntity, BuildingSnapshot } from "../buildingDefinitions.js";
 import type { AdminLevel } from "./snapshot.js";
 
+export type ZombieDebugState =
+	| "sound"
+	| "pathing"
+	| "stuck"
+	| "wander"
+	| "aggro"
+	| "idle"
+	| "blocked";
+
 export interface PlayerConnection {
 	ipAddress: string | null;
 	connectedAt: number;
@@ -43,6 +52,7 @@ export interface Player {
 	adminLevel?: AdminLevel;
 	soundDebug?: boolean;
 	pathDebug?: boolean;
+	zombieDebug?: boolean;
 	connection?: PlayerConnection;
 	_visCache?: VisibilityCache;
 }
@@ -74,6 +84,8 @@ export interface Unit extends BaseEntity {
 	vision?: number;
 	soundTarget?: Vec2 | null;
 	wanderTarget?: Vec2 | null;
+	zombieGoalKind?: "sound" | "target" | "wander" | null;
+	zombieDebugState?: ZombieDebugState;
 	zombiePath?: PathNode[] | null;
 	zombiePathTarget?: Vec2 | null;
 	zombieStuckTicks?: number;

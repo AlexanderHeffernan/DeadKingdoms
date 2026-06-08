@@ -17,9 +17,12 @@ export interface ZombieHorde {
 	target: Vec2 | null;
 	targetMemory: number;
 	wanderTarget: Vec2 | null;
+	targetKind: "sound" | "target" | "wander" | null;
 	soundMemory: {
 		direction: Vec2;
+		target: Vec2;
 		significance: number;
+		age: number;
 	} | null;
 }
 

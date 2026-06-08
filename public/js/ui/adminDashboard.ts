@@ -30,8 +30,11 @@ export class AdminDashboard {
 	private readonly logTableBody: HTMLTableSectionElement;
 	private readonly enableVisionButton: HTMLButtonElement;
 	private readonly enableSoundDebugButton: HTMLButtonElement;
+	private readonly enableZombieDebugButton: HTMLButtonElement;
 	private readonly spawnHordeButton: HTMLButtonElement;
 	private readonly grantSoldiersButton: HTMLButtonElement;
+	private readonly invincibleButton: HTMLButtonElement;
+	private readonly noiseToolButton: HTMLButtonElement;
 	private readonly commandStatus: HTMLElement;
 	private readonly actions: AdminDashboardActions;
 	private activeTab: AdminDashboardTab = "overview";
@@ -70,8 +73,11 @@ export class AdminDashboard {
 		this.logTableBody = elements.logTableBody;
 		this.enableVisionButton = elements.enableVisionButton;
 		this.enableSoundDebugButton = elements.enableSoundDebugButton;
+		this.enableZombieDebugButton = elements.enableZombieDebugButton;
 		this.spawnHordeButton = elements.spawnHordeButton;
 		this.grantSoldiersButton = elements.grantSoldiersButton;
+		this.invincibleButton = elements.invincibleButton;
+		this.noiseToolButton = elements.noiseToolButton;
 		this.commandStatus = elements.commandStatus;
 		this.rangeSeconds = Number(this.range.value) || 30;
 		this.setupEvents();
@@ -148,8 +154,14 @@ export class AdminDashboard {
 		});
 		this.enableVisionButton.addEventListener("click", () => this.runCommand(this.enableVisionButton, this.actions.enableFullMapVision));
 		this.enableSoundDebugButton.addEventListener("click", () => this.runCommand(this.enableSoundDebugButton, this.actions.enableSoundDebug));
+		this.enableZombieDebugButton.addEventListener("click", () => this.runCommand(this.enableZombieDebugButton, this.actions.enableZombieDebug));
 		this.spawnHordeButton.addEventListener("click", () => this.runCommand(this.spawnHordeButton, this.actions.spawnHostileHorde));
 		this.grantSoldiersButton.addEventListener("click", () => this.runCommand(this.grantSoldiersButton, this.actions.grantSoldiers));
+		this.invincibleButton.addEventListener("click", () => this.runCommand(this.invincibleButton, this.actions.toggleTownCenterInvincible));
+		this.noiseToolButton.addEventListener("click", async () => {
+			await this.runCommand(this.noiseToolButton, this.actions.toggleNoiseTool);
+			this.hide();
+		});
 	}
 
 	private setActiveTab(tab: AdminDashboardTab) {
@@ -446,16 +458,22 @@ export type AdminDashboardElements = {
 	logTableBody: HTMLTableSectionElement;
 	enableVisionButton: HTMLButtonElement;
 	enableSoundDebugButton: HTMLButtonElement;
+	enableZombieDebugButton: HTMLButtonElement;
 	spawnHordeButton: HTMLButtonElement;
 	grantSoldiersButton: HTMLButtonElement;
+	invincibleButton: HTMLButtonElement;
+	noiseToolButton: HTMLButtonElement;
 	commandStatus: HTMLElement;
 };
 
 export type AdminDashboardActions = {
 	enableFullMapVision: () => Promise<string>;
 	enableSoundDebug: () => Promise<string>;
+	enableZombieDebug: () => Promise<string>;
 	spawnHostileHorde: () => Promise<string>;
 	grantSoldiers: () => Promise<string>;
+	toggleTownCenterInvincible: () => Promise<string>;
+	toggleNoiseTool: () => Promise<string>;
 };
 
 type AdminDashboardTab = "overview" | "performance" | "players" | "logs" | "devCommands";

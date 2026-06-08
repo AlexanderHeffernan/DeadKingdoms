@@ -47,6 +47,9 @@ const STUMP_DECAY_SECONDS = 60;
 const RUIN_DECAY_SECONDS = 60;
 const ZOMBIE_INITIAL_RETARGET_SECONDS = 1.2;
 const MAX_ACTION_NOISES = 240;
+// Very loud so the sound field overflow spreads across roughly half the map (~100 tile radius).
+const DEV_BANG_SOUND = 13333.333333333334;
+const DEV_BANG_DURATION = 2.5;
 const MAX_ADMIN_LOGS = 500;
 const SERVER_PERF_SMOOTHING = 0.1;
 const SERVER_PERF_SAMPLE_LIMIT = TICK_RATE * 120;
@@ -160,6 +163,29 @@ export function grantPlayerSoldiers(world: World, playerId: PlayerId, count: num
 	recalcPlayer(world, playerId);
 	updateLeaderboard(world);
 	return granted;
+}
+
+/** Dev tool: toggles invincibility on the player's town center and returns the new state. */
+export function toggleTownCenterInvincibility(world: World, playerId: PlayerId): boolean | null {
+	const townCenter = Object.values(world.buildings).find((building) => building.ownerId === playerId && building.isTownCenter());
+	if (!townCenter) return null;
+	townCenter.invincible = !townCenter.invincible;
+	return townCenter.invincible;
+}
+
+/** Dev tool: emits a one-off loud "bang" at a map point so zombies are drawn to it. */
+export function emitDevBang(world: World, x: number, y: number): void {
+	const point = { x: clamp(x, 0, MAP_SIZE), y: clamp(y, 0, MAP_SIZE) };
+	const existing = world.actionNoises.find((noise) => noise.action === "devBang");
+	if (existing) {
+		existing.x = point.x;
+		existing.y = point.y;
+		existing.sound = DEV_BANG_SOUND;
+		existing.remaining = DEV_BANG_DURATION;
+		return;
+	}
+	world.actionNoises.push({ id: id("s"), action: "devBang", x: point.x, y: point.y, sound: DEV_BANG_SOUND, remaining: DEV_BANG_DURATION });
+	while (world.actionNoises.length > MAX_ACTION_NOISES) world.actionNoises.shift();
 }
 
 function playerSpawnCenter(world: World, playerId: PlayerId) {
@@ -1067,6 +1093,7 @@ function gatherTargetFor(entity: ResourceNode | Building): GatherTarget {
 }
 
 function damage(world: World, target: Unit | Building, amount: number, attackerId: PlayerId) {
+	if (target.kind === "building" && target.invincible) return;
 	target.hp -= amount;
 	if (target.hp > 0) return;
 	if (target.kind === "building") {

@@ -6,6 +6,7 @@ import { SpatialGrid } from "./utils/SpatialGrid.js";
 
 const PATH_REPLAN_TICKS = 25;
 const PATH_REQUESTS_PER_TICK = 120;
+const ZOMBIE_PATH_REQUESTS_PER_TICK = 6;
 const FLOW_FIELD_CACHE_TICKS = 8;
 const FLOW_UNREACHED = 0xffffffff;
 const FLOW_BASE_COST = 10;
@@ -28,7 +29,6 @@ const SEPARATION_MAX_PAIRS_PER_TICK = 4500;
 const SEPARATION_NEIGHBORS_PER_UNIT = 10;
 export const ZOMBIE_PATH_LOOKAHEAD_DISTANCE = 10;
 const ZOMBIE_PATH_MAX_NODES = ZOMBIE_PATH_LOOKAHEAD_DISTANCE + 2;
-const ZOMBIE_MAX_PATHED_OBSTACLE_TILES = 4;
 
 type PathFollowMode = "tight" | "flow";
 
@@ -163,7 +163,7 @@ const SEPARATION_CELL_SIZE = 1;
 const MIN_SEPARATION_DISTANCE = 0.48;
 
 export function resolveUnitSeparation(world: World) {
-	const units = Object.values(world.units).filter((unit) => !isMovingCommand(unit.command));
+	const units = Object.values(world.units).filter((unit) => !isMovingUnit(unit));
 	const grid = new SpatialGrid(units, SEPARATION_CELL_SIZE);
 	let pairs = 0;
 
@@ -179,8 +179,12 @@ export function resolveUnitSeparation(world: World) {
 }
 
 function separationDistance(a: Unit, b: Unit): number {
-	if (isMovingCommand(a.command) && isMovingCommand(b.command)) return 0;
+	if (isMovingUnit(a) && isMovingUnit(b)) return 0;
 	return MIN_SEPARATION_DISTANCE;
+}
+
+function isMovingUnit(unit: Unit): boolean {
+	return isMovingCommand(unit.command) || !!unit.soundTarget || !!unit.wanderTarget;
 }
 
 function isMovingCommand(command: UnitCommand): boolean {
@@ -234,13 +238,8 @@ export function moveWithPath(world: World, unit: Unit, command: Extract<UnitComm
 }
 
 export function moveZombieWithPath(world: World, unit: Unit, target: Vec2, maxStep: number): boolean {
-	const localTarget = zombiePathTarget(unit, target);
-	const obstacle = firstObstacleBetween(world, unit, localTarget);
-	if (obstacle && obstacleComponentSize(world, obstacle, ZOMBIE_MAX_PATHED_OBSTACLE_TILES + 1) > ZOMBIE_MAX_PATHED_OBSTACLE_TILES) {
-		unit.zombiePath = null;
-		unit.zombiePathTarget = null;
-		return moveAroundSmallObstacle(world, unit, target, maxStep);
-	}
+	const localTarget = zombiePathTarget(world, unit, target);
+	if (!unit.zombiePath && !canRequestZombiePath(world, unit)) return moveAroundSmallObstacle(world, unit, target, maxStep);
 	const command: Extract<UnitCommand, { type: "move" }> = {
 		type: "move",
 		x: localTarget.x,
@@ -254,15 +253,26 @@ export function moveZombieWithPath(world: World, unit: Unit, target: Vec2, maxSt
 	return arrived || distance(unit, target) <= WAYPOINT_REACHED_DISTANCE;
 }
 
-function zombiePathTarget(unit: Unit, target: Vec2): Vec2 {
+function canRequestZombiePath(world: World, unit: Unit): boolean {
+	const state = pathingState(world);
+	if (state.lastRequestTick !== world.tick) {
+		state.lastRequestTick = world.tick;
+		state.pathRequestsThisTick = 0;
+	}
+	if (world.tick % PATH_REPLAN_TICKS !== unitPathSlot(unit)) return false;
+	if (state.pathRequestsThisTick >= ZOMBIE_PATH_REQUESTS_PER_TICK) return false;
+	return true;
+}
+
+function zombiePathTarget(world: World, unit: Unit, target: Vec2): Vec2 {
 	const dx = target.x - unit.x;
 	const dy = target.y - unit.y;
 	const length = Math.hypot(dx, dy);
-	if (length <= ZOMBIE_PATH_LOOKAHEAD_DISTANCE) return target;
-	return {
+	const rawTarget = length <= ZOMBIE_PATH_LOOKAHEAD_DISTANCE ? target : {
 		x: unit.x + (dx / length) * ZOMBIE_PATH_LOOKAHEAD_DISTANCE,
 		y: unit.y + (dy / length) * ZOMBIE_PATH_LOOKAHEAD_DISTANCE,
 	};
+	return tileCenter(nearestWalkableAround(world, rawTarget));
 }
 
 function reusableZombiePath(unit: Unit, target: Vec2): PathNode[] | null {
@@ -271,45 +281,6 @@ function reusableZombiePath(unit: Unit, target: Vec2): PathNode[] | null {
 	const nextTarget = worldTile(target);
 	if (previousTarget.x !== nextTarget.x || previousTarget.y !== nextTarget.y) return null;
 	return unit.zombiePath;
-}
-
-function firstObstacleBetween(world: World, from: Vec2, target: Vec2): { x: number; y: number } | null {
-	const dx = target.x - from.x;
-	const dy = target.y - from.y;
-	const length = Math.hypot(dx, dy);
-	if (length <= 0.001) return null;
-	for (let distanceAhead = 0.2; distanceAhead <= length; distanceAhead += 0.25) {
-		const x = Math.round(from.x + (dx / length) * distanceAhead);
-		const y = Math.round(from.y + (dy / length) * distanceAhead);
-		if (isHardOccupied(world, undefined, x, y)) return { x, y };
-	}
-	return null;
-}
-
-function obstacleComponentSize(world: World, origin: { x: number; y: number }, limit: number): number {
-	const queue = [origin];
-	const visited = new Set<number>([tileId(origin.x, origin.y)]);
-	for (let index = 0; index < queue.length && visited.size < limit; index += 1) {
-		const tile = queue[index]!;
-		for (const neighbor of cardinalNeighbors(tile)) {
-			if (!isHardOccupied(world, undefined, neighbor.x, neighbor.y)) continue;
-			const id = tileId(neighbor.x, neighbor.y);
-			if (visited.has(id)) continue;
-			visited.add(id);
-			queue.push(neighbor);
-			if (visited.size >= limit) break;
-		}
-	}
-	return visited.size;
-}
-
-function cardinalNeighbors(tile: { x: number; y: number }) {
-	return [
-		{ x: tile.x + 1, y: tile.y },
-		{ x: tile.x - 1, y: tile.y },
-		{ x: tile.x, y: tile.y + 1 },
-		{ x: tile.x, y: tile.y - 1 },
-	];
 }
 
 export function moveNearTarget(world: World, unit: Unit, command: UnitCommand, target: { x: number; y: number }, range: number, maxStep: number): boolean {
@@ -512,7 +483,7 @@ function movingSpacingWaypoint(world: World, unit: Unit, target: Vec2, movingGri
 function movingUnitGrid(world: World): SpatialGrid<Unit> {
 	const state = pathingState(world);
 	if (state.movingUnitGridTick === world.tick && state.movingUnitGrid) return state.movingUnitGrid as SpatialGrid<Unit>;
-	const movingUnits = Object.values(world.units).filter((unit) => isMovingCommand(unit.command));
+	const movingUnits = Object.values(world.units).filter(isMovingUnit);
 	const grid = new SpatialGrid(movingUnits, MOVING_COHESION_CELL_SIZE);
 	state.movingUnitGrid = grid;
 	state.movingUnitGridTick = world.tick;
@@ -614,7 +585,7 @@ function isUnitBlocked(world: World, unit: Unit, target: { x: number; y: number 
 function isHardOccupied(world: World, unit: Unit | undefined, x: number, y: number): boolean {
 	if (!occupied(world, x, y)) return false;
 	if (hardBlockingTiles(world).has(tileId(x, y))) return true;
-	if (!unit || !isMovingCommand(unit.command)) return true;
+	if (!unit || !isMovingUnit(unit)) return true;
 	const idleOwners = idleUnitTiles(world).get(tileId(x, y));
 	if (!idleOwners || idleOwners.size !== 1) return true;
 	return idleOwners.get(unit.ownerId) !== 1;
@@ -648,7 +619,7 @@ function idleUnitTiles(world: World): Map<number, Map<string, number>> {
 	if (state.idleUnitTilesTick === world.tick && state.idleUnitTiles) return state.idleUnitTiles as Map<number, Map<string, number>>;
 	const tiles = new Map<number, Map<string, number>>();
 	for (const unit of Object.values(world.units)) {
-		if (isMovingCommand(unit.command)) continue;
+		if (isMovingUnit(unit)) continue;
 		const tile = worldTile(unit);
 		const id = tileId(tile.x, tile.y);
 		const owners = tiles.get(id) || new Map<string, number>();

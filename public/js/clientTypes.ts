@@ -36,6 +36,7 @@ export type ViewState = {
 	selectedIds: Set<string>;
 	buildMode: string | null;
 	rallyModeBuildingId: string | null;
+	noiseMode: boolean;
 	hoverTile: { x: number; y: number } | null;
 	mouse: { x: number; y: number };
 };
@@ -50,8 +51,11 @@ export type UIActions = {
 	respawn: () => Promise<void>;
 	enableFullMapVision: () => Promise<string>;
 	enableSoundDebug: () => Promise<string>;
+	enableZombieDebug: () => Promise<string>;
 	spawnHostileHorde: () => Promise<string>;
 	grantSoldiers: () => Promise<string>;
+	toggleTownCenterInvincible: () => Promise<string>;
+	toggleNoiseTool: () => Promise<string>;
 };
 
 export type SelectionEntity = Unit | Building | ResourceNode;

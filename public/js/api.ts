@@ -35,6 +35,10 @@ export async function enableSoundDebug(playerId: PlayerId) {
 	return post("/api/dev/sound-debug", { playerId });
 }
 
+export async function enableZombieDebug(playerId: PlayerId) {
+	return post("/api/dev/zombie-debug", { playerId });
+}
+
 export async function enablePathDebug(playerId: PlayerId, secret: string) {
 	return post("/api/dev/path-debug", { playerId, secret });
 }
@@ -53,6 +57,14 @@ export async function reportPing(playerId: PlayerId, pingMs: number) {
 
 export async function grantSoldiers(playerId: PlayerId, count = 100) {
 	return post("/api/dev/grant-soldiers", { playerId, count });
+}
+
+export async function toggleTownCenterInvincible(playerId: PlayerId) {
+	return post("/api/dev/town-center-invincible", { playerId });
+}
+
+export async function emitNoise(playerId: PlayerId, x: number, y: number) {
+	return post("/api/dev/emit-noise", { playerId, x, y });
 }
 
 async function post(url: string, payload: Record<string, unknown>) {

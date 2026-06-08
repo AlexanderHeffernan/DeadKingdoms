@@ -15,7 +15,7 @@ export class SoldierUnit extends BaseUnit {
 		trainTime: 8,
 		cost: { food: 45, ore: 20 },
 		vision: 7,
-		sound: 1.8,
+		sound: 8,
 	} as const;
 
 	public canAutoAcquireTargets() {

@@ -131,6 +131,7 @@ export class Renderer {
 		this.hideUnusedSelectionSprites();
 		this.drawPathDebug(state, view);
 		this.drawSoundDebug(state, view);
+		this.drawZombieDebug(state, view);
 		this.drawEffects(state, view);
 		this.drawPlacement(view, state);
 		this.drawSelectionBox(view);
@@ -651,6 +652,22 @@ export class Renderer {
 			this.overlayLayer.lineStyle();
 			this.overlayLayer.beginFill(0x4fd8c8, 0.75);
 			this.overlayLayer.drawCircle(end.x, end.y, Math.max(2, 3 * zoom));
+			this.overlayLayer.endFill();
+		}
+		this.overlayLayer.lineStyle();
+	}
+
+	private drawZombieDebug(state: GameState, view: ViewState) {
+		const zombies = Object.values(state.snapshot?.units || {}).filter((unit) => unit.type === "zombie" && unit.zombieDebugState);
+		if (!zombies.length) return;
+		const zoom = view.camera.zoom || 1;
+		const radius = Math.max(3, Math.round(5 * zoom));
+		this.overlayLayer.lineStyle(Math.max(1, Math.round(1.5 * zoom)), 0x101612, 0.85);
+		for (const zombie of zombies) {
+			const point = isoToScreen(zombie.x, zombie.y, view.camera);
+			if (point.x < -30 || point.x > window.innerWidth + 30 || point.y < -40 || point.y > window.innerHeight + 30) continue;
+			this.overlayLayer.beginFill(zombieDebugColor(zombie.zombieDebugState!), 0.9);
+			this.overlayLayer.drawCircle(point.x, point.y - Math.max(10, 18 * zoom), radius);
 			this.overlayLayer.endFill();
 		}
 		this.overlayLayer.lineStyle();
@@ -1299,6 +1316,19 @@ function soundColor(source: SoundDebugSource) {
 	if (source.kind === "action") return 0xe9bd59;
 	if (source.kind === "building") return 0x4da3ff;
 	return 0x73d879;
+}
+
+function zombieDebugColor(state: Unit["zombieDebugState"]) {
+	switch (state) {
+		case "sound": return 0x2ee86f;
+		case "pathing": return 0x4aa3ff;
+		case "stuck": return 0xff3434;
+		case "wander": return 0xf3d34a;
+		case "aggro": return 0xff8b2f;
+		case "blocked": return 0xd66cff;
+		case "idle": return 0xd8d0c0;
+		default: return 0xffffff;
+	}
 }
 
 function hexToNumber(color = "#ffffff") {
