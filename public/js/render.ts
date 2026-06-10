@@ -381,13 +381,14 @@ export class Renderer {
 			sprite.tint = flashTint;
 		}
 		active.add(key);
-		this.updateFlashOverlay(
-			key,
-			this.entitySprites.get(key)!,
-			texture,
-			flash,
-			active,
-		);
+			this.updateFlashOverlay(
+				key,
+				this.entitySprites.get(key)!,
+				texture,
+				flash,
+				active,
+			);
+			this.drawZombieHordeTint(entity, x, y, bounds.width * px, bounds.height * px);
 
 		if (view.selectedIds.has(entity.id))
 			this.drawSelectionMarker(
@@ -462,9 +463,9 @@ export class Renderer {
 	private hideAllEntitySprites(active: Set<string>) {
 		for (const [key, sprite] of this.entitySprites)
 		sprite.visible = active.has(key);
-		for (const [key, sprite] of this.flashSprites)
-		sprite.visible = active.has(key);
-	}
+			for (const [key, sprite] of this.flashSprites)
+			sprite.visible = active.has(key);
+		}
 
 	private placeSprite(
 		key: string,
@@ -657,9 +658,9 @@ export class Renderer {
 		this.overlayLayer.lineStyle();
 	}
 
-	private drawZombieDebug(state: GameState, view: ViewState) {
-		const zombies = Object.values(state.snapshot?.units || {}).filter((unit) => unit.type === "zombie" && unit.zombieDebugState);
-		if (!zombies.length) return;
+		private drawZombieDebug(state: GameState, view: ViewState) {
+			const zombies = Object.values(state.snapshot?.units || {}).filter((unit) => unit.type === "zombie" && unit.zombieDebugState);
+			if (!zombies.length) return;
 		const zoom = view.camera.zoom || 1;
 		const radius = Math.max(3, Math.round(5 * zoom));
 		this.overlayLayer.lineStyle(Math.max(1, Math.round(1.5 * zoom)), 0x101612, 0.85);
@@ -670,10 +671,18 @@ export class Renderer {
 			this.overlayLayer.drawCircle(point.x, point.y - Math.max(10, 18 * zoom), radius);
 			this.overlayLayer.endFill();
 		}
-		this.overlayLayer.lineStyle();
-	}
+			this.overlayLayer.lineStyle();
+		}
 
-	private drawHealth(x: number, y: number, pct: number) {
+		private drawZombieHordeTint(entity: RenderEntity, x: number, y: number, width: number, height: number) {
+			if (entity.kind !== "unit" || entity.type !== "zombie" || !entity.zombieHordeColor) return;
+			this.overlayLayer.lineStyle(0);
+			this.overlayLayer.beginFill(hexToNumber(entity.zombieHordeColor), 0.48);
+			this.overlayLayer.drawRect(x, y, width, height);
+			this.overlayLayer.endFill();
+		}
+
+		private drawHealth(x: number, y: number, pct: number) {
 		this.overlayLayer.beginFill(0x1b1715);
 		this.overlayLayer.drawRect(x - 18, y, 36, 5);
 		this.overlayLayer.beginFill(pct > 0.45 ? 0x5fbf64 : 0xd8714f);

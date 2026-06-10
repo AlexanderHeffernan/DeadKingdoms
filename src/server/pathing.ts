@@ -184,7 +184,7 @@ function separationDistance(a: Unit, b: Unit): number {
 }
 
 function isMovingUnit(unit: Unit): boolean {
-	return isMovingCommand(unit.command) || !!unit.soundTarget || !!unit.wanderTarget;
+	return isMovingCommand(unit.command) || !!unit.hordeTarget;
 }
 
 function isMovingCommand(command: UnitCommand): boolean {

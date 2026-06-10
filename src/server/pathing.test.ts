@@ -262,7 +262,7 @@ test("zombie movement escalates to pathing when sidesteps do not make progress",
 	const zombie = makeUnit(8, 10, "z-progress-stuck");
 	zombie.type = "zombie";
 	zombie.ownerId = "zombies" as Unit["ownerId"];
-	zombie.soundTarget = { x: 14, y: 10 };
+	zombie.hordeTarget = { x: 14, y: 10 };
 	let sidestepCalls = 0;
 	let pathCalls = 0;
 	const behavior = new ZombieUnit();
@@ -290,12 +290,12 @@ test("zombie movement escalates to pathing when sidesteps do not make progress",
 	assert.equal(zombie.zombieStuckTicks, 0);
 });
 
-test("zombie sound goals override nearby combat aggro", () => {
+test("nearby combat aggro overrides zombie horde goals", () => {
 	const world = makeWorld();
 	const zombie = makeUnit(8, 10, "z-sound-priority");
 	zombie.type = "zombie";
 	zombie.ownerId = "zombies" as Unit["ownerId"];
-	zombie.soundTarget = { x: 14, y: 10 };
+	zombie.hordeTarget = { x: 14, y: 10 };
 	zombie.zombieGoalKind = "sound";
 	const target = makeUnit(8.5, 10, "u-target");
 	let moved = false;
@@ -319,9 +319,31 @@ test("zombie sound goals override nearby combat aggro", () => {
 
 	behavior.step(context, zombie, 0.1);
 
-	assert.equal(moved, true);
-	assert.equal(damaged, false);
-	assert.ok(zombie.x > 8);
+	assert.equal(moved, false);
+	assert.equal(damaged, true);
+	assert.equal(zombie.x, 8);
+	assert.deepEqual(zombie.hordeTarget, { x: 14, y: 10 });
+});
+
+test("zombie unit does not clear director horde target after reaching it", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-preserve-horde-target");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.hordeTarget = { x: 8.1, y: 10 };
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(zombie.hordeTarget, { x: 8.1, y: 10 });
 });
 
 test("moveZombieWithPath routes around a wall-length detour", () => {
@@ -396,10 +418,10 @@ test("moveAroundSmallObstacle lets sound-moving zombies pass through idle friend
 	const moving = makeUnit(10, 10, "z-moving");
 	moving.type = "zombie";
 	moving.ownerId = idle.ownerId;
-	moving.soundTarget = { x: 12, y: 10 };
+	moving.hordeTarget = { x: 12, y: 10 };
 	addUnits(world, [idle, moving]);
 
-	const blocked = moveAroundSmallObstacle(world, moving, moving.soundTarget, 1);
+	const blocked = moveAroundSmallObstacle(world, moving, moving.hordeTarget, 1);
 
 	assert.equal(blocked, false);
 	assert.equal(moving.x, 11);
@@ -411,11 +433,11 @@ test("resolveUnitSeparation does not push sound-moving zombies as idle blockers"
 	const a = makeUnit(10, 10, "z-a");
 	a.type = "zombie";
 	a.ownerId = "zombies" as Unit["ownerId"];
-	a.soundTarget = { x: 12, y: 10 };
+	a.hordeTarget = { x: 12, y: 10 };
 	const b = makeUnit(10.1, 10, "z-b");
 	b.type = "zombie";
 	b.ownerId = a.ownerId;
-	b.soundTarget = { x: 12, y: 10 };
+	b.hordeTarget = { x: 12, y: 10 };
 	addUnits(world, [a, b]);
 
 	resolveUnitSeparation(world);

@@ -134,7 +134,7 @@ function serializeUnit(unit: Unit, includeZombieDebug: boolean): Unit {
 		carried: unit.carried,
 		selected: unit.selected,
 		...(unit.vision !== undefined ? { vision: unit.vision } : {}),
-		...(includeZombieDebug && unit.type === "zombie" ? { zombieDebugState: zombieDebugState(unit) } : {}),
+		...(includeZombieDebug && unit.type === "zombie" ? { zombieDebugState: zombieDebugState(unit), zombieHordeColor: zombieHordeColor(unit) } : {}),
 	};
 }
 
@@ -142,10 +142,32 @@ function zombieDebugState(unit: Unit) {
 	if (unit.zombieStuckTicks && unit.zombieStuckTicks >= 3) return "stuck";
 	if (unit.zombiePath?.length) return "pathing";
 	if (unit.zombieGoalKind === "target") return "aggro";
-	if (unit.zombieGoalKind === "sound" || unit.soundTarget) return "sound";
-	if (unit.zombieGoalKind === "wander" || unit.wanderTarget) return "wander";
+	if (unit.zombieGoalKind === "drift") return "sound";
+	if (unit.zombieGoalKind === "sound" || unit.hordeTarget) return "sound";
+	if (unit.zombieGoalKind === "wander") return "wander";
 	if (unit.zombieStuckTicks && unit.zombieStuckTicks > 0) return "blocked";
 	return "idle";
+}
+
+function zombieHordeColor(unit: Unit) {
+	if (!unit.hordeId) return "#d8d0c0";
+	const colors = [
+		"#f94144",
+		"#f3722c",
+		"#f9c74f",
+		"#90be6d",
+		"#43aa8b",
+		"#4d96ff",
+		"#7b61ff",
+		"#ff5da2",
+		"#00c2ff",
+		"#b8f23a",
+		"#ff9f1c",
+		"#c77dff",
+	];
+	let hash = 0;
+	for (let i = 0; i < unit.hordeId.length; i += 1) hash = (hash * 31 + unit.hordeId.charCodeAt(i)) >>> 0;
+	return colors[hash % colors.length]!;
 }
 
 function buildSoundDebugSources(world: World): SoundDebugSource[] {

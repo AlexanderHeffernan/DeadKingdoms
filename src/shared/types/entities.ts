@@ -82,16 +82,16 @@ export interface Unit extends BaseEntity {
 	carried: null | { resource: ResourceType; amount: number };
 	selected: boolean;
 	vision?: number;
-	soundTarget?: Vec2 | null;
-	wanderTarget?: Vec2 | null;
-	zombieGoalKind?: "sound" | "target" | "wander" | null;
+	hordeTarget?: Vec2 | null;
+	zombieGoalKind?: "sound" | "target" | "drift" | "wander" | null;
 	zombieDebugState?: ZombieDebugState;
+	zombieHordeColor?: string;
 	zombiePath?: PathNode[] | null;
 	zombiePathTarget?: Vec2 | null;
 	zombieStuckTicks?: number;
 	retargetIn?: number;
 	hordeId?: string | null;
-	hordeOffset?: Vec2 | null;
+	zombieDriftDirection?: Vec2 | null;
 }
 
 /** Pending unit-production entry for train-capable buildings. */

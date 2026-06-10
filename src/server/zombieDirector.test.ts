@@ -97,7 +97,7 @@ function assertRememberedSoundTarget(horde: ZombieHorde) {
 test("zombie hordes remember a sound after it stops", () => {
 	const world = makeWorld();
 	world.units["z-test" as Unit["id"]] = makeZombie();
-	addNoise(world, 121, 121, 4.8);
+	addNoise(world, 124, 124, 4.8);
 
 	step(world);
 	const remembered = onlyHorde(world).soundMemory;
@@ -119,7 +119,7 @@ test("zombie hordes remember a sound after it stops", () => {
 test("zombie hordes keep following remembered sound at minimum significance", () => {
 	const world = makeWorld();
 	world.units["z-test" as Unit["id"]] = makeZombie();
-	addNoise(world, 121, 121, 1.2);
+	addNoise(world, 124, 124, 1.2);
 
 	step(world);
 	assert.ok(onlyHorde(world).soundMemory);
@@ -131,7 +131,7 @@ test("zombie hordes keep following remembered sound at minimum significance", ()
 	assert.ok(horde.soundMemory);
 	assert.equal(horde.soundMemory.significance, 0.01);
 	assertRememberedSoundTarget(horde);
-	assert.ok(world.units["z-test" as Unit["id"]]?.soundTarget);
+	assert.ok(world.units["z-test" as Unit["id"]]?.hordeTarget);
 });
 
 test("zombie hordes do not replace sound memory with their own later noise", () => {
@@ -156,17 +156,17 @@ test("zombie hordes do not replace sound memory with their own later noise", () 
 	assert.equal(horde.soundMemory.significance, 0.01);
 });
 
-test("zombie hordes remember the sound origin instead of walking forever past it", () => {
+test("zombie hordes drift together after reaching remembered sound", () => {
 	const world = makeWorld();
 	const zombie = makeZombie();
 	world.units[zombie.id] = zombie;
-	addNoise(world, 121, 121, 1.2);
+	addNoise(world, 124, 124, 1.2);
 
 	step(world);
 	const rememberedTarget = onlyHorde(world).target;
-	const firstDirection = onlyHorde(world).soundMemory?.direction;
+	const rememberedDirection = onlyHorde(world).soundMemory?.direction;
 	assert.ok(rememberedTarget);
-	assert.ok(firstDirection);
+	assert.ok(rememberedDirection);
 
 	world.actionNoises = [];
 	zombie.x = rememberedTarget.x;
@@ -174,11 +174,13 @@ test("zombie hordes remember the sound origin instead of walking forever past it
 	step(world);
 
 	const horde = onlyHorde(world);
+	assert.equal(horde.soundMemory, null);
+	assert.ok(horde.driftDirection);
+	assertSameDirection(horde.driftDirection, rememberedDirection);
 	assert.ok(horde.target);
-	assertSameDirection(horde.soundMemory!.direction, firstDirection);
-	assertRememberedSoundTarget(horde);
-	assertClose(horde.target.x, rememberedTarget.x);
-	assertClose(horde.target.y, rememberedTarget.y);
+	assert.equal(horde.targetKind, "drift");
+	assert.ok(zombie.hordeTarget);
+	assert.ok(Math.hypot(horde.center.x - horde.target.x, horde.center.y - horde.target.y) > 1.5);
 });
 
 test("zombie hordes drift around when they have not heard any sound", () => {
@@ -192,15 +194,75 @@ test("zombie hordes drift around when they have not heard any sound", () => {
 	assert.equal(horde.soundMemory, null);
 	assert.equal(horde.target, null);
 	assert.ok(horde.wanderTarget);
-	assert.ok(zombie.wanderTarget);
-	assert.equal(zombie.soundTarget ?? null, null);
+	assert.ok(zombie.hordeTarget);
+	assert.equal(zombie.zombieGoalKind, "wander");
+});
+
+test("zombies in the same horde receive the same horde target", () => {
+	const world = makeWorld();
+	const first = makeZombie(120, 120, "z-first");
+	const second = makeZombie(120.4, 120, "z-second");
+	world.units[first.id] = first;
+	world.units[second.id] = second;
+
+	step(world);
+
+	assert.equal(first.hordeId, second.hordeId);
+	assert.ok(first.hordeTarget);
+	assert.deepEqual(first.hordeTarget, second.hordeTarget);
+	assert.equal(first.zombieGoalKind, second.zombieGoalKind);
+});
+
+test("merged hordes preserve drift momentum from any previous horde", () => {
+	const world = makeWorld();
+	const drifting = makeZombie(50, 80, "z-drifting");
+	const joining = makeZombie(52, 80, "z-joining");
+	world.units[drifting.id] = drifting;
+	world.units[joining.id] = joining;
+	world._zombieHordes = {
+		"a": {
+			id: "a" as ZombieHorde["id"],
+			memberIds: [drifting.id],
+			center: { x: 50, y: 80 },
+			radius: 1.5,
+			target: { x: 68, y: 80 },
+			targetMemory: 0,
+			wanderTarget: null,
+			targetKind: "drift",
+			driftDirection: { x: 1, y: 0 },
+			soundMemory: null,
+		},
+		"b": {
+			id: "b" as ZombieHorde["id"],
+			memberIds: [joining.id],
+			center: { x: 52, y: 80 },
+			radius: 1.5,
+			target: { x: 50, y: 80 },
+			targetMemory: 0,
+			wanderTarget: null,
+			targetKind: "sound",
+			driftDirection: null,
+			soundMemory: null,
+		},
+	};
+	drifting.hordeId = "a";
+	joining.hordeId = "b";
+	world.tick = 7;
+
+	step(world);
+
+	assert.equal(drifting.hordeId, joining.hordeId);
+	assert.equal(drifting.zombieGoalKind, "drift");
+	assert.deepEqual(drifting.hordeTarget, joining.hordeTarget);
+	assert.ok(drifting.hordeTarget);
+	assert.ok(drifting.hordeTarget.x > 60);
 });
 
 test("zombie hordes do not replace remembered world sound with zombie-only noise", () => {
 	const world = makeWorld();
 	const zombie = makeZombie();
 	world.units[zombie.id] = zombie;
-	addNoise(world, 121, 121, 1.2);
+	addNoise(world, 124, 124, 1.2);
 
 	step(world);
 	const firstDirection = onlyHorde(world).soundMemory?.direction;
@@ -301,38 +363,60 @@ test("zombie hordes prioritize loud bangs over nearby direct targets", () => {
 test("zombie hordes hear loud sounds through member positions, not only their center", () => {
 	const world = makeWorld();
 	for (let i = 0; i < 16; i += 1) {
-		const zombie = makeZombie(100 + i * 5, 100 + i * 5, `line-zombie-${i}`);
+		const zombie = makeZombie(100 + i * 2, 100 + i * 2, `line-zombie-${i}`);
 		world.units[zombie.id] = zombie;
 	}
-	addNoise(world, 104, 104, 2000);
+	addNoise(world, 105, 105, 2000);
 
 	step(world);
 
 	const horde = onlyHorde(world);
-	assert.ok(horde.center.x > 125);
+	assert.ok(horde.center.x > 110);
 	assert.ok(horde.soundMemory);
-	assert.ok(horde.soundMemory.direction.x < 0);
-	assert.ok(horde.soundMemory.direction.y < 0);
+	assert.ok(Math.hypot(horde.soundMemory.direction.x, horde.soundMemory.direction.y) > 0.9);
 	assertRememberedSoundTarget(horde);
 });
 
-test("individual zombies hear nearby action sounds even when horde sampling would miss them", () => {
+test("local action sounds unify the horde target", () => {
 	const world = makeWorld();
 	for (let i = 0; i < 18; i += 1) {
-		const zombie = makeZombie(40 + i * 5, 80, `line-zombie-${i}`);
+		const zombie = makeZombie(40 + i * 2.8, 80, `line-zombie-${i}`);
 		world.units[zombie.id] = zombie;
 	}
-	addNoise(world, 50, 80, 8, "local-noise");
+	addNoise(world, 52.6, 80, 8, "local-noise");
 
 	step(world);
 
-	const listener = world.units["line-zombie-2" as Unit["id"]];
-	const unsampledNeighbor = world.units["line-zombie-4" as Unit["id"]];
+	const listener = world.units["line-zombie-4" as Unit["id"]];
+	const unsampledNeighbor = world.units["line-zombie-5" as Unit["id"]];
 	assert.ok(listener);
 	assert.ok(unsampledNeighbor);
+	assert.equal(listener.hordeId, unsampledNeighbor.hordeId);
 	assert.equal(listener.zombieGoalKind, "sound");
-	assert.deepEqual(listener.soundTarget, { x: 50, y: 80 });
-	assert.notDeepEqual(unsampledNeighbor.soundTarget, { x: 50, y: 80 });
+	assert.deepEqual(listener.hordeTarget, { x: 52.6, y: 80 });
+	assert.deepEqual(unsampledNeighbor.hordeTarget, listener.hordeTarget);
+});
+
+test("hordes flow through reached action sounds instead of stacking on them", () => {
+	const world = makeWorld();
+	for (let i = 0; i < 4; i += 1) {
+		const zombie = makeZombie(50 + i * 2, 80, `flow-zombie-${i}`);
+		world.units[zombie.id] = zombie;
+	}
+	addNoise(world, 50, 80, 8, "reached-local-noise");
+
+	step(world);
+
+	const first = world.units["flow-zombie-0" as Unit["id"]];
+	const second = world.units["flow-zombie-1" as Unit["id"]];
+	assert.ok(first);
+	assert.ok(second);
+	assert.equal(first.hordeId, second.hordeId);
+	assert.equal(first.zombieGoalKind, "drift");
+	assert.deepEqual(first.hordeTarget, second.hordeTarget);
+	assert.ok(first.hordeTarget);
+	assert.ok(Math.hypot(first.hordeTarget.x - 50, first.hordeTarget.y - 80) > 1.5);
+	assert.notDeepEqual(first.hordeTarget, { x: 50, y: 80 });
 });
 
 test("zombie hordes replace stronger memory when a weaker world sound is heard", () => {

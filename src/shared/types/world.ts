@@ -17,7 +17,8 @@ export interface ZombieHorde {
 	target: Vec2 | null;
 	targetMemory: number;
 	wanderTarget: Vec2 | null;
-	targetKind: "sound" | "target" | "wander" | null;
+	targetKind: "sound" | "target" | "drift" | "wander" | null;
+	driftDirection: Vec2 | null;
 	soundMemory: {
 		direction: Vec2;
 		target: Vec2;

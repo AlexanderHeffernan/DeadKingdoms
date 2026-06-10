@@ -1,8 +1,8 @@
 import { BaseUnit } from "./BaseUnit.js";
 import type { UnitCombatTarget, UnitSimulationContext } from "./BaseUnit.js";
-import type { Building, Unit, Vec2 } from "../types.js";
+import type { Unit, Vec2 } from "../types.js";
 
-const ZOMBIE_TARGET_SIGHT_RANGE = 5.5;
+const ZOMBIE_TARGET_SIGHT_RANGE = 10.5;
 const ZOMBIE_PATH_STUCK_TICKS = 10;
 const ZOMBIE_PROGRESS_EPSILON = 0.03;
 
@@ -12,7 +12,7 @@ export class ZombieUnit extends BaseUnit {
 	public static readonly sprite = "zombie";
 	public static readonly stats = {
 		maxHp: 34,
-		speed: 1.35,
+		speed: 1,
 		attack: 5,
 		range: 0.55,
 		cooldown: 1.5,
@@ -25,25 +25,32 @@ export class ZombieUnit extends BaseUnit {
 
 	public step(context: UnitSimulationContext, zombie: Unit, dt: number) {
 		this.updateTimers(zombie, dt);
-		zombie.vision = this.stats.vision || 5;
-		if (zombie.zombieGoalKind === "sound" && zombie.soundTarget) {
-			this.followSound(context, zombie, zombie.soundTarget, dt);
-			return;
-		}
-		const target = this.findNearestTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
+
+		// Check for nearby units before following horde movement.
+		const target = this.findNearestUnitTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
 		if (target) {
 			this.engageTarget(context, zombie, target, dt);
 			return;
 		}
-		this.moveTowardCurrentGoal(context, zombie, dt);
+
+		if (zombie.hordeTarget) {
+			this.followHordeTarget(context, zombie, zombie.hordeTarget, dt);
+			return;
+		}
+
+		// Else, walk in last direction
+		if (zombie.zombieDriftDirection) {
+			this.driftForward(context, zombie, dt);
+			return;
+		}
+
+		this.clearMovementState(zombie);
 	}
 
 	private engageTarget(context: UnitSimulationContext, zombie: Unit, target: UnitCombatTarget, dt: number) {
 		const targetPoint = context.centerOf(target);
 		const range = this.stats.range + (target.size || 0.6);
 		zombie.facing = targetPoint.x < zombie.x ? "left" : "right";
-		zombie.soundTarget = targetPoint;
-		zombie.wanderTarget = null;
 		if (context.distance(zombie, targetPoint) > range) {
 			const movement = this.moveTowardGoal(context, zombie, targetPoint, dt);
 			if (!movement.moved && movement.usedPath && context.distance(zombie, targetPoint) > range) {
@@ -61,35 +68,11 @@ export class ZombieUnit extends BaseUnit {
 		zombie.attackFlash = 0.22;
 	}
 
-	private moveTowardCurrentGoal(context: UnitSimulationContext, zombie: Unit, dt: number) {
-		if (zombie.soundTarget) {
-			this.followSound(context, zombie, zombie.soundTarget, dt);
-			return;
-		}
-		if (zombie.wanderTarget) {
-			this.drift(context, zombie, zombie.wanderTarget, dt);
-			return;
-		}
-		this.clearMovementState(zombie);
-	}
-
-	private followSound(context: UnitSimulationContext, zombie: Unit, target: Vec2, dt: number) {
+	private followHordeTarget(context: UnitSimulationContext, zombie: Unit, target: Vec2, dt: number) {
 		zombie.facing = target.x < zombie.x ? "left" : "right";
 		this.moveTowardGoal(context, zombie, target, dt);
 		if (context.distance(zombie, target) >= 0.45) return;
-		zombie.soundTarget = null;
 		zombie.retargetIn = 0;
-	}
-
-	private drift(context: UnitSimulationContext, zombie: Unit, target: Vec2, dt: number) {
-		// Idle drifting toward the horde's wander point; the director rerolls it on arrival.
-		zombie.facing = target.x < zombie.x ? "left" : "right";
-		this.moveTowardGoal(context, zombie, target, dt);
-	}
-
-	private findNearestTarget(context: UnitSimulationContext, zombie: Unit, range: number): UnitCombatTarget | null {
-		const unit = this.findNearestUnitTarget(context, zombie, range);
-		return unit || this.findNearestTownCenterTarget(context, zombie, range);
 	}
 
 	private findNearestUnitTarget(context: UnitSimulationContext, zombie: Unit, range: number): Unit | null {
@@ -99,20 +82,6 @@ export class ZombieUnit extends BaseUnit {
 			const d = context.distance(context.centerOf(zombie), context.centerOf(unit));
 			if (d < bestDist) {
 				best = unit;
-				bestDist = d;
-			}
-		}
-		return best;
-	}
-
-	private findNearestTownCenterTarget(context: UnitSimulationContext, zombie: Unit, range: number): Building | null {
-		let best: Building | null = null;
-		let bestDist = range;
-		for (const building of Object.values(context.world.buildings)) {
-			if (!building.isTownCenter() || building.hp <= 0) continue;
-			const d = context.distance(context.centerOf(zombie), context.centerOf(building));
-			if (d < bestDist) {
-				best = building;
 				bestDist = d;
 			}
 		}
@@ -136,16 +105,42 @@ export class ZombieUnit extends BaseUnit {
 		const afterDistance = context.distance(zombie, target);
 		const moved = !this.didNotMove(context, before, zombie);
 		const madeProgress = afterDistance < beforeDistance - ZOMBIE_PROGRESS_EPSILON;
+		if (moved) {
+			this.rememberDriftDirection(context, zombie, before);
+		}
 		if (madeProgress) zombie.zombieStuckTicks = 0;
 		else zombie.zombieStuckTicks = (zombie.zombieStuckTicks || 0) + 1;
 		return { moved, usedPath };
 	}
 
+	private rememberDriftDirection(context: UnitSimulationContext, zombie: Unit, before: Vec2) {
+		const dx = zombie.x - before.x;
+		const dy = zombie.y - before.y;
+		const length = Math.hypot(dx, dy);
+
+		zombie.zombieDriftDirection = {
+			x: dx / length,
+			y: dy / length,
+		};
+	}
+
+	private driftForward(context: UnitSimulationContext, zombie: Unit, dt: number) {
+		const direction = zombie.zombieDriftDirection;
+		if (!direction) return;
+
+		const target = {
+			x: zombie.x + direction.x * 10,
+			y: zombie.y + direction.y * 10,
+		};
+		zombie.facing = direction.x < 0 ? "left" : "right";
+		this.moveTowardGoal(context, zombie, target, dt);
+	}
+
 	private clearMovementState(zombie: Unit) {
-		zombie.wanderTarget = null;
 		zombie.zombieGoalKind = null;
 		zombie.zombiePath = null;
 		zombie.zombiePathTarget = null;
 		zombie.zombieStuckTicks = 0;
+		zombie.zombieDriftDirection = null;
 	}
 }
