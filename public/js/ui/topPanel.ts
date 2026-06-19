@@ -49,7 +49,7 @@ export class TopPanel implements GameUiComponent {
 	private renderLeaderboardEntry(entry: ClientSnapshot["leaderboard"][number], index: number, now: number) {
 		const rank = index + 1;
 		const rankClass = rank <= 3 ? `rank-${rank}` : "rank-other";
-		const timer = entry.firstPlaceSince ? ` <em class="leader-time" tabindex="0">${aliveTime(entry.firstPlaceSince, now)}<span class="leader-time-popup" role="tooltip">time #1</span></em>` : "";
+		const timer = entry.firstPlaceSince ? ` <em class="leader-time" tabindex="0">[${aliveTime(entry.firstPlaceSince, now)}]<span class="leader-time-popup" role="tooltip">time #1</span></em>` : "";
 		return `<li><span class="leader-rank ${rankClass}" title="${rankLabel(rank)}" aria-label="${rankLabel(rank)}">#${rank}</span> <span style="color:${entry.color}">${escapeHtml(entry.name)}</span> <strong>${entry.score}</strong>${timer}</li>`;
 	}
 }

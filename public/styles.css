@@ -230,8 +230,15 @@ button:disabled {
 
 .top-right h2 {
 	margin: 0 0 8px;
-	font-size: 15px;
+	font-size: 18px;
 	font-weight: 700;
+}
+
+.leaderboard-subtitle {
+	margin: -4px 34px 8px 0;
+	color: #cfc7b7;
+	font-size: 14px;
+	line-height: 1.25;
 }
 
 .top-right ol {
@@ -251,13 +258,12 @@ button:disabled {
 	display: flex;
 	align-items: baseline;
 	gap: 6px;
-	font-size: 13px;
+	font-size: 16px;
 }
 
 .top-right li em {
 	color: #cfc7b7;
 	font-style: normal;
-	font-size: 12px;
 }
 
 .leader-time {
@@ -276,7 +282,6 @@ button:disabled {
 	border: 1px solid rgb(233 189 89 / 0.45);
 	background: rgb(17 24 19 / 0.96);
 	color: #f4efe6;
-	font-size: 11px;
 	opacity: 0;
 	transform: translateY(4px);
 	transition: opacity 160ms ease, transform 160ms ease;
@@ -299,7 +304,6 @@ button:disabled {
 
 .leader-rank {
 	color: #e9bd59;
-	font-size: 11px;
 	font-weight: 800;
 	letter-spacing: 0;
 }
