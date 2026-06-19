@@ -235,8 +235,8 @@ function visibleTiles(world: World, playerId: PlayerId): VisibilityCache {
 	for (const building of Object.values(world.buildings)) {
 		if (building.ownerId !== playerId) continue;
 		const radius = building.vision || 5;
-		const cx = Math.round(building.x + ((building.size || 1) - 1) / 2);
-		const cy = Math.round(building.y + ((building.size || 1) - 1) / 2);
+		const cx = Math.round(building.x + ((building.width || building.size || 1) - 1) / 2);
+		const cy = Math.round(building.y + ((building.height || building.size || 1) - 1) / 2);
 		addCircle(cx, cy, radius);
 	}
 	player.explored = explored;

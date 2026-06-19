@@ -458,7 +458,8 @@ function averagePoint(units: Unit[]): Vec2 {
 	return { x: total.x / units.length, y: total.y / units.length };
 }
 
-function centerOf(entity: { x: number; y: number; size?: number }) {
-	const offset = entity.size ? (entity.size - 1) / 2 : 0;
-	return { x: entity.x + offset, y: entity.y + offset };
+function centerOf(entity: { x: number; y: number; size?: number; width?: number; height?: number }) {
+	const width = entity.width ?? entity.size ?? 1;
+	const height = entity.height ?? entity.size ?? 1;
+	return { x: entity.x + (width - 1) / 2, y: entity.y + (height - 1) / 2 };
 }

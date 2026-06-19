@@ -15,6 +15,8 @@ export type BuildingType =
 	| "house"
 	| "barracks"
 	| "watchTower"
+	| "wall"
+	| "gate"
 	| "farm"
 	| "lumberCamp"
 	| "foodDepot"
@@ -27,6 +29,11 @@ export type ResourceNodeType = keyof typeof RESOURCE_DEFS;
 export type SpriteName =
 	| UnitType
 	| BuildingType
+	| "wallPillar"
+	| "wallNorthEast"
+	| "wallNorthWest"
+	| "wallSouthEast"
+	| "wallSouthWest"
 	| "tree"
 	| "ore"
 	| "berry"

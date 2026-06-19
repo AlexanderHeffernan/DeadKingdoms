@@ -14,7 +14,7 @@ import { unitBehaviorFor } from "../shared/unitRegistry.js";
 import type { UnitSimulationContext } from "../shared/units/index.js";
 import type { GatherTarget } from "../shared/buildings/base/index.js";
 import { id } from "./id.js";
-import { clamp, distance, rectsOverlap } from "./math.js";
+import { clamp, distance, footprintHeight, footprintWidth, rectsOverlap, type Footprint } from "./math.js";
 import { isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
@@ -385,8 +385,8 @@ function rebuildOccupancy(world: World) {
 	}
 	for (const building of Object.values(world.buildings)) {
 		if (!building.walkBlocking) continue;
-		for (let dy = 0; dy < building.size; dy += 1) {
-			for (let dx = 0; dx < building.size; dx += 1) {
+		for (let dy = 0; dy < building.height; dy += 1) {
+			for (let dx = 0; dx < building.width; dx += 1) {
 				const x = building.x + dx;
 				const y = building.y + dy;
 				if (x >= 0 && y >= 0 && x < size && y < size) grid[y * size + x] = 1;
@@ -563,13 +563,14 @@ function createRuin(world: World, building: Building) {
 		x: building.x,
 		y: building.y,
 		size: building.size,
+		width: building.width,
+		height: building.height,
 		age: 0,
 	};
 }
 
-function pointInsideEntity(x: number, y: number, entity: { x: number; y: number; size?: number }): boolean {
-	const size = entity.size || 1;
-	return x >= Math.floor(entity.x) && x < Math.floor(entity.x) + size && y >= Math.floor(entity.y) && y < Math.floor(entity.y) + size;
+function pointInsideEntity(x: number, y: number, entity: Footprint): boolean {
+	return x >= Math.floor(entity.x) && x < Math.floor(entity.x) + footprintWidth(entity) && y >= Math.floor(entity.y) && y < Math.floor(entity.y) + footprintHeight(entity);
 }
 
 function commandMove(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "move" }>): CommandResult {
@@ -653,13 +654,20 @@ function commandReplenishFarm(world: World, playerId: PlayerId, body: Extract<Co
 function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "build" }>): CommandResult {
 	const def = BUILDING_TYPES[body.buildingType];
 	if (!def) return { ok: false, error: "Unknown building." };
-	const x = clamp(Math.round(Number(body.x)), 0, MAP_SIZE - def.size);
-	const y = clamp(Math.round(Number(body.y)), 0, MAP_SIZE - def.size);
-	if (!canPlace(world, x, y, def.size)) return { ok: false, error: "Blocked tile." };
+	const footprint = {
+		width: ("width" in def ? def.width : def.size) as number,
+		height: ("height" in def ? def.height : def.size) as number,
+	};
+	const x = clamp(Math.round(Number(body.x)), 0, MAP_SIZE - footprint.width);
+	const y = clamp(Math.round(Number(body.y)), 0, MAP_SIZE - footprint.height);
+	const replacementWall = ownWallAt(world, playerId, x, y);
+	if (body.buildingType === "wall" && replacementWall) return { ok: true };
+	if (!canPlace(world, x, y, footprint.width, footprint.height, replacementWall)) return { ok: false, error: "Blocked tile." };
 	const builders = Object.values(world.units).filter(
 		(unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild,
 	);
 	if (builders.length === 0) return { ok: false, error: "Select build-capable units." };
+	if (body.buildingType === "gate" && replacementWall) return replaceWallWithGate(world, playerId, replacementWall, builders);
 	const building = createBuilding(world, playerId, body.buildingType, x, y);
 	if (!building) return { ok: false, error: "Not enough resources." };
 	building.hp = Math.max(12, Math.floor(building.maxHp * 0.25));
@@ -667,6 +675,30 @@ function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPay
 	const resourceKind = building.depotGatherKind();
 	for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild };
 	return { ok: true };
+}
+
+function replaceWallWithGate(world: World, playerId: PlayerId, wall: Building, builders: Unit[]): CommandResult {
+	const player = world.players[playerId];
+	if (!player) return { ok: false, error: "Player not found." };
+	const refund = wall.isComplete() ? {} : wall.cost;
+	const cost = netCost(BUILDING_TYPES.gate.cost, refund);
+	if (!spend(player, cost)) return { ok: false, error: "Not enough resources." };
+	delete world.buildings[wall.id];
+	const gate = createBuilding(world, playerId, "gate", wall.x, wall.y, true);
+	if (!gate) return { ok: false, error: "Could not place gate." };
+	gate.hp = Math.max(12, Math.floor(gate.maxHp * 0.25));
+	gate.builderIds = builders.map((unit) => unit.id);
+	for (const unit of builders) unit.command = { type: "build", targetId: gate.id, path: null, resourceKind: null, gatherBuiltFarm: false };
+	return { ok: true };
+}
+
+function ownWallAt(world: World, playerId: PlayerId, x: number, y: number) {
+	return Object.values(world.buildings).find((building) => (
+		building.ownerId === playerId &&
+		building.type === "wall" &&
+		building.x === x &&
+		building.y === y
+	)) || null;
 }
 
 function commandFinishBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "finishBuild" }>): CommandResult {
@@ -846,7 +878,7 @@ function stepBuilding(world: World, building: Building, dt: number) {
 		if (current && current.remaining <= 0) {
 			const item = building.queue.shift();
 			if (!item) return;
-			const unit = createUnit(world, building.ownerId, item.unitType, building.x + building.size + 0.4, building.y + building.size + 0.2);
+			const unit = createUnit(world, building.ownerId, item.unitType, building.x + building.width + 0.4, building.y + building.height + 0.2);
 			if (building.rallyPoint) {
 				unit.command = { type: "move", ...building.rallyPoint, path: null };
 			}
@@ -1134,22 +1166,23 @@ function destroyPlayerStuff(world: World, playerId: PlayerId) {
 	}
 }
 
-function canPlace(world: World, x: number, y: number, size: number): boolean {
-	if (x < 0 || y < 0 || x + size > MAP_SIZE || y + size > MAP_SIZE) return false;
+function canPlace(world: World, x: number, y: number, width: number, height: number, ignoredBuilding: Building | null = null): boolean {
+	if (x < 0 || y < 0 || x + width > MAP_SIZE || y + height > MAP_SIZE) return false;
 	for (const building of Object.values(world.buildings)) {
-		if (rectsOverlap({ x, y, size }, building)) return false;
+		if (building === ignoredBuilding) continue;
+		if (rectsOverlap({ x, y, width, height }, building)) return false;
 	}
-	for (let dy = 0; dy < size; dy += 1) {
-		for (let dx = 0; dx < size; dx += 1) {
+	for (let dy = 0; dy < height; dy += 1) {
+		for (let dx = 0; dx < width; dx += 1) {
+			if (ignoredBuilding && pointInsideEntity(x + dx, y + dy, ignoredBuilding)) continue;
 			if (occupied(world, x + dx, y + dy)) return false;
 		}
 	}
 	return true;
 }
 
-function centerOf(entity: { x: number; y: number; size?: number }) {
-	const offset = entity.size ? (entity.size - 1) / 2 : 0;
-	return { x: entity.x + offset, y: entity.y + offset };
+function centerOf(entity: Footprint) {
+	return { x: entity.x + (footprintWidth(entity) - 1) / 2, y: entity.y + (footprintHeight(entity) - 1) / 2 };
 }
 
 function spend(player: Player, cost: Partial<Record<ResourceType, number>> = {}): boolean {
@@ -1159,6 +1192,14 @@ function spend(player: Player, cost: Partial<Record<ResourceType, number>> = {})
 	}
 	for (const [resource, amount] of entries) player.resources[resource] -= amount;
 	return true;
+}
+
+function netCost(cost: Partial<Record<ResourceType, number>>, refund: Partial<Record<ResourceType, number>>) {
+	const result: Partial<Record<ResourceType, number>> = { ...cost };
+	for (const [resource, amount] of Object.entries(refund) as [ResourceType, number][]) {
+		result[resource] = Math.max(0, (result[resource] || 0) - amount);
+	}
+	return result;
 }
 
 function recalcPlayer(world: World, playerId: PlayerId) {

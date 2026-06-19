@@ -14,6 +14,8 @@ export type BuildingSnapshot = {
 	x: number;
 	y: number;
 	size: number;
+	width: number;
+	height: number;
 	hp: number;
 	maxHp: number;
 	vision?: number | undefined;
@@ -42,6 +44,8 @@ export type BuildingClass = {
 	readonly sprite: string;
 	readonly maxHp: number;
 	readonly size: number;
+	readonly width?: number;
+	readonly height?: number;
 	readonly score: number;
 	readonly cost: ResourceCost;
 	readonly vision: number;
@@ -69,6 +73,8 @@ export interface BuildingEntity extends GatherTarget {
 	readonly sprite: string;
 	readonly maxHp: number;
 	readonly size: number;
+	readonly width: number;
+	readonly height: number;
 	readonly score: number;
 	readonly cost: ResourceCost;
 	readonly vision: number;

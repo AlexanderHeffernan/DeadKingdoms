@@ -13,6 +13,8 @@ const BUILD_SHORTCUTS = {
 	farm: "F",
 	barracks: "B",
 	watchTower: "T",
+	wall: "W",
+	gate: "G",
 	lumberCamp: "L",
 	foodDepot: "D",
 	miningCamp: "M",

@@ -64,6 +64,8 @@ export interface BaseEntity extends Vec2 {
 	type: string;
 	ownerId?: PlayerId;
 	size?: number;
+	width?: number;
+	height?: number;
 }
 
 /** Simulated mobile unit with command, combat, worker, and render state. */
@@ -125,5 +127,7 @@ export interface Ruin extends BaseEntity {
 	kind: "ruin";
 	type: BuildingType;
 	size: number;
+	width?: number;
+	height?: number;
 	age: number;
 }

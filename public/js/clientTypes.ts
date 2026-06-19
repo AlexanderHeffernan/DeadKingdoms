@@ -38,6 +38,7 @@ export type ViewState = {
 	rallyModeBuildingId: string | null;
 	noiseMode: boolean;
 	hoverTile: { x: number; y: number } | null;
+	wallDragStartTile: { x: number; y: number } | null;
 	mouse: { x: number; y: number };
 };
 

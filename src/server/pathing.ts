@@ -1,6 +1,6 @@
 import { MAP_SIZE } from "../shared/config.js";
 import type { PathNode, Unit, UnitCommand, Vec2, World } from "../shared/types.js";
-import { clamp, distance, moveToward } from "./math.js";
+import { clamp, distance, footprintHeight, footprintWidth, moveToward, type Footprint } from "./math.js";
 import { MinPriorityQueue } from "./utils/MinPriorityQueue.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 
@@ -218,7 +218,7 @@ function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {
 }
 
 export function moveWithPath(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number, maxPathNodes = FOLLOW_PATH_MAX_NODES): boolean {
-	const baseTarget = moveCommandTarget(world, command);
+	const baseTarget = moveCommandTarget(world, unit, command);
 	const target = formationTarget(world, command, baseTarget);
 	const forming = tryApproachFormationTarget(world, unit, command, baseTarget, maxStep);
 	if (forming !== null) return forming;
@@ -333,8 +333,8 @@ function exactArrivalRadius(command: UnitCommand): number {
 	return commandCrowd(command) >= 8 ? 0.45 : 0.35;
 }
 
-function moveCommandTarget(world: World, command: Extract<UnitCommand, { type: "move" }>): Vec2 {
-	const goal = nearestWalkableAround(world, command);
+function moveCommandTarget(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>): Vec2 {
+	const goal = nearestWalkableAround(world, command, unit);
 	return tileCenter(goal);
 }
 
@@ -453,7 +453,7 @@ function movementWaypoint(world: World, unit: Unit, command: UnitCommand, path: 
 
 function canUseMovementWaypoint(world: World, unit: Unit, point: Vec2): boolean {
 	const tile = worldTile(point);
-	if (!isWalkable(world, tile.x, tile.y)) return false;
+	if (!isWalkableForUnit(world, unit, tile.x, tile.y)) return false;
 	return hasClearMovementLine(world, unit, point);
 }
 
@@ -498,7 +498,7 @@ function hasClearMovementLine(world: World, unit: Unit, point: Vec2): boolean {
 		const x = unit.x + (dx * i) / steps;
 		const y = unit.y + (dy * i) / steps;
 		const tile = worldTile({ x, y });
-		if (!isWalkable(world, tile.x, tile.y)) return false;
+		if (!isWalkableForUnit(world, unit, tile.x, tile.y)) return false;
 	}
 	return true;
 }
@@ -538,6 +538,7 @@ function shouldRefreshPath(world: World, unit: Unit, command: UnitCommand, targe
 function budgetedPath(world: World, unit: Unit, target: Vec2, maxNodes = FOLLOW_PATH_MAX_NODES): PathNode[] | null {
 	if (!canRequestPath(world, unit)) return null;
 	consumePathRequest(world);
+	if (hasPassableGateFor(unit, world)) return findPath(world, unit, target).slice(0, maxNodes);
 	return findSharedPath(world, unit, target, maxNodes, commandCrowd(unit.command));
 }
 
@@ -584,6 +585,7 @@ function isUnitBlocked(world: World, unit: Unit, target: { x: number; y: number 
 
 function isHardOccupied(world: World, unit: Unit | undefined, x: number, y: number): boolean {
 	if (!occupied(world, x, y)) return false;
+	if (unit && isOwnGateTile(world, unit, x, y)) return false;
 	if (hardBlockingTiles(world).has(tileId(x, y))) return true;
 	if (!unit || !isMovingUnit(unit)) return true;
 	const idleOwners = idleUnitTiles(world).get(tileId(x, y));
@@ -601,8 +603,8 @@ function hardBlockingTiles(world: World): Set<number> {
 	}
 	for (const building of Object.values(world.buildings)) {
 		if (!building.walkBlocking) continue;
-		for (let dy = 0; dy < building.size; dy += 1) {
-			for (let dx = 0; dx < building.size; dx += 1) {
+		for (let dy = 0; dy < building.height; dy += 1) {
+			for (let dx = 0; dx < building.width; dx += 1) {
 				const x = building.x + dx;
 				const y = building.y + dy;
 				if (isInMap(x, y)) tiles.add(tileId(x, y));
@@ -639,7 +641,7 @@ function sameTile(a: Vec2, b: Vec2): boolean {
 
 export function findPath(world: World, unit: Unit, target: { x: number; y: number }): PathNode[] {
 	const start = worldTile(unit);
-	const goal = nearestWalkableAround(world, target);
+	const goal = nearestWalkableAround(world, target, unit);
 	if (!isInMap(goal.x, goal.y)) return [];
 	if (start.x === goal.x && start.y === goal.y) return [tileCenter(goal)];
 	const startNode: PathNode = { ...start, g: 0, f: heuristic(start, goal), parent: null };
@@ -667,8 +669,8 @@ export function findPath(world: World, unit: Unit, target: { x: number; y: numbe
 			const next = { x: current.x + dir.x, y: current.y + dir.y };
 			// skip closed nodes
 			if (!isInMap(next.x, next.y) || closed.has(key(next))) continue;
-			if (!isWalkable(world, next.x, next.y) && !(next.x === goal.x && next.y === goal.y)) continue;
-			if (dir.x !== 0 && dir.y !== 0 && (!isWalkable(world, current.x + dir.x, current.y) || !isWalkable(world, current.x, current.y + dir.y))) continue;
+			if (!isWalkableForUnit(world, unit, next.x, next.y) && !(next.x === goal.x && next.y === goal.y)) continue;
+			if (dir.x !== 0 && dir.y !== 0 && (!isWalkableForUnit(world, unit, current.x + dir.x, current.y) || !isWalkableForUnit(world, unit, current.x, current.y + dir.y))) continue;
 			const cost = (current.g ?? 0) + (dir.x !== 0 && dir.y !== 0 ? 1.4 : 1);
 			const existing = best.get(key(next));
 			if (existing && (existing.g ?? 0) <= cost) continue;
@@ -905,16 +907,17 @@ function pruneFlowFields(fields: Map<string, FlowField>, tick: number) {
 	}
 }
 
-function nearestWalkableAround(world: World, target: { x: number; y: number }) {
+function nearestWalkableAround(world: World, target: { x: number; y: number }, unit?: Unit) {
 	const origin = worldTile(target);
-	if (isWalkable(world, origin.x, origin.y)) return origin;
+	const canWalk = (x: number, y: number) => unit ? isWalkableForUnit(world, unit, x, y) : isWalkable(world, x, y);
+	if (canWalk(origin.x, origin.y)) return origin;
 	let best = origin;
 	let bestDistance = Infinity;
 	for (let radius = 1; radius <= 6; radius += 1) {
 		for (let y = origin.y - radius; y <= origin.y + radius; y += 1) {
 			for (let x = origin.x - radius; x <= origin.x + radius; x += 1) {
 				if (Math.abs(x - origin.x) !== radius && Math.abs(y - origin.y) !== radius) continue;
-				if (!isWalkable(world, x, y)) continue;
+				if (!canWalk(x, y)) continue;
 				const d = Math.hypot(x - target.x, y - target.y);
 				if (d < bestDistance) {
 					best = { x, y };
@@ -932,10 +935,30 @@ export function isWalkable(world: World, x: number, y: number): boolean {
 	return !occupied(world, x, y);
 }
 
+function isWalkableForUnit(world: World, unit: Unit, x: number, y: number): boolean {
+	if (!isInMap(x, y)) return false;
+	return !occupied(world, x, y) || isOwnGateTile(world, unit, x, y);
+}
+
 function occupied(world: World, x: number, y: number): boolean {
 	if (!world._occupancy) return false;
 	if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) return true;
 	return world._occupancy[y * MAP_SIZE + x] === 1;
+}
+
+function isOwnGateTile(world: World, unit: Unit, x: number, y: number) {
+	return Object.values(world.buildings).some((building) => (
+		building.type === "gate" &&
+		building.ownerId === unit.ownerId &&
+		x >= building.x &&
+		x < building.x + building.width &&
+		y >= building.y &&
+		y < building.y + building.height
+	));
+}
+
+function hasPassableGateFor(unit: Unit, world: World) {
+	return Object.values(world.buildings).some((building) => building.type === "gate" && building.ownerId === unit.ownerId);
 }
 
 function isInMap(x: number, y: number) {
@@ -958,9 +981,8 @@ function worldTile(point: Vec2): { x: number; y: number } {
 	return { x: Math.round(point.x), y: Math.round(point.y) };
 }
 
-function pointInsideCenteredFootprint(point: Vec2, entity: { x: number; y: number; size?: number }): boolean {
-	const size = entity.size || 1;
-	return point.x >= entity.x - 0.5 && point.x < entity.x + size - 0.5 && point.y >= entity.y - 0.5 && point.y < entity.y + size - 0.5;
+function pointInsideCenteredFootprint(point: Vec2, entity: Footprint): boolean {
+	return point.x >= entity.x - 0.5 && point.x < entity.x + footprintWidth(entity) - 0.5 && point.y >= entity.y - 0.5 && point.y < entity.y + footprintHeight(entity) - 0.5;
 }
 
 function pathingState(world: World) {

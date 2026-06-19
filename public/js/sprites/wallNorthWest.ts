@@ -1,0 +1,18 @@
+export default [
+	"........................",
+	"........................",
+	"......SS................",
+	".....SmmSS..............",
+	".....SmmmmSS............",
+	".....SmmQQmmSS..........",
+	".....SmmQBBQmmSS........",
+	".....SmmQBrrBQmmSS......",
+	".....SmmQBrrrrBQmmSS....",
+	".....SmmQBrrrrrrBQmmSS..",
+	"...SmmQBBBBBBBBBBBBQmmS.",
+	"...SmmQQQQQQQQQQQQQQmmS.",
+	".....SmmmmmmmmmmmmmmmmS..",
+	"......SSSSSSSSSSSSSSSS...",
+	"........................",
+	"........................",
+];

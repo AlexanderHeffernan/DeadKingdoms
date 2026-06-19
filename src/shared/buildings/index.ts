@@ -1,21 +1,25 @@
 import { Barracks } from "./definitions/Barracks.js";
 import { Farm } from "./definitions/Farm.js";
 import { FoodDepot } from "./definitions/FoodDepot.js";
+import { Gate } from "./definitions/Gate.js";
 import { House } from "./definitions/House.js";
 import { LumberCamp } from "./definitions/LumberCamp.js";
 import { MiningCamp } from "./definitions/MiningCamp.js";
 import { TownCenter } from "./definitions/TownCenter.js";
 import { WatchTower } from "./definitions/WatchTower.js";
+import { Wall } from "./definitions/Wall.js";
 import type { BuildingConstructor, BuildingEntity, BuildingInit, BuildingSnapshot } from "./base/index.js";
 import type { BuildingType } from "../types.js";
 
-export { Barracks, Farm, FoodDepot, House, LumberCamp, MiningCamp, TownCenter, WatchTower };
+export { Barracks, Farm, FoodDepot, Gate, House, LumberCamp, MiningCamp, TownCenter, Wall, WatchTower };
 
 export const BUILDING_TYPES = {
 	townCenter: TownCenter,
 	house: House,
 	barracks: Barracks,
 	watchTower: WatchTower,
+	wall: Wall,
+	gate: Gate,
 	farm: Farm,
 	lumberCamp: LumberCamp,
 	foodDepot: FoodDepot,

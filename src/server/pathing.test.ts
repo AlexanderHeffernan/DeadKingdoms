@@ -75,6 +75,32 @@ test("findPath routes around a wall with a gap", () => {
 	}
 });
 
+test("findPath lets own units use gates but keeps gates blocked to enemies", () => {
+	const blocked = [];
+	for (let y = 2; y <= 16; y += 1) blocked.push({ x: 8, y });
+	const world = makeWorld(blocked);
+	world.buildings["b-gate"] = {
+		id: "b-gate",
+		kind: "building",
+		type: "gate",
+		ownerId: "p-test",
+		x: 8,
+		y: 9,
+		size: 1,
+		width: 1,
+		height: 1,
+		walkBlocking: true,
+	} as never;
+
+	const ownerPath = findPath(world, makeUnit(4, 9), { x: 14, y: 9 });
+	const enemy = makeUnit(4, 9, "u-enemy");
+	enemy.ownerId = "p-enemy" as Unit["ownerId"];
+	const enemyPath = findPath(world, enemy, { x: 14, y: 9 });
+
+	assert.ok(ownerPath.some((point) => Math.floor(point.x) === 8 && Math.floor(point.y) === 9));
+	assert.equal(enemyPath.some((point) => Math.floor(point.x) === 8 && Math.floor(point.y) === 9), false);
+});
+
 test("findSharedPath reuses a destination field for nearby units", () => {
 	const blocked = [];
 	for (let y = 2; y <= 16; y += 1) {

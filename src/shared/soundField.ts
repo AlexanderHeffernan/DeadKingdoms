@@ -200,9 +200,10 @@ function getCell(cells: Map<string, MutableSoundCell>, cellX: number, cellY: num
 	return cell;
 }
 
-function centerOf(entity: { x: number; y: number; size?: number }): Vec2 {
-	const size = entity.size || 1;
-	return { x: entity.x + (size - 1) / 2, y: entity.y + (size - 1) / 2 };
+function centerOf(entity: { x: number; y: number; size?: number; width?: number; height?: number }): Vec2 {
+	const width = entity.width ?? entity.size ?? 1;
+	const height = entity.height ?? entity.size ?? 1;
+	return { x: entity.x + (width - 1) / 2, y: entity.y + (height - 1) / 2 };
 }
 
 function cellCoord(value: number) {

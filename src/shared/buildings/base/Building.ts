@@ -25,6 +25,8 @@ export abstract class Building implements BuildingEntity {
 	get sprite() { return this.definition.sprite; }
 	get maxHp() { return this.definition.maxHp; }
 	get size() { return this.definition.size; }
+	get width() { return this.definition.width ?? this.size; }
+	get height() { return this.definition.height ?? this.size; }
 	get score() { return this.definition.score; }
 	get cost() { return this.definition.cost; }
 	get vision() { return this.definition.vision; }
@@ -55,6 +57,8 @@ export abstract class Building implements BuildingEntity {
 			x: this.x,
 			y: this.y,
 			size: this.size,
+			width: this.width,
+			height: this.height,
 			hp: this.hp,
 			maxHp: this.maxHp,
 			vision: this.vision,

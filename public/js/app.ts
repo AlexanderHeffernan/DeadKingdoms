@@ -52,6 +52,7 @@ const view: ViewState = {
 	noiseMode: false,
 	hoverTile: null,
 	mouse: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+	wallDragStartTile: null,
 };
 
 const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -493,6 +494,7 @@ function onMouseDown(event: MouseEvent) {
 	view.dragging = true;
 	view.dragStart = { x: event.clientX, y: event.clientY };
 	view.dragCurrent = { x: event.clientX, y: event.clientY };
+	view.wallDragStartTile = view.buildMode === "wall" && view.hoverTile ? { ...view.hoverTile } : null;
 }
 
 function onMouseMove(event: MouseEvent) {
@@ -522,7 +524,7 @@ function onMouseUp(event: MouseEvent) {
 		return;
 	}
 	if (view.buildMode) {
-		placeBuilding();
+		placeBuildMode();
 		return;
 	}
 	if (view.rallyModeBuildingId) {
@@ -536,6 +538,7 @@ function onMouseUp(event: MouseEvent) {
 
 function handleRightClick(event: MouseEvent) {
 	view.buildMode = null;
+	view.wallDragStartTile = null;
 	view.rallyModeBuildingId = null;
 	if (view.noiseMode) {
 		view.noiseMode = false;
@@ -590,12 +593,34 @@ function placeBuilding() {
 	if (!mode) return;
 	const unitIds = [...state.selectedIds].filter((id) => state.snapshot?.units[id]?.ownerId === state.playerId);
 	if (!view.hoverTile || unitIds.length === 0) return;
-	if (!canAfford(BUILDING_TYPES[mode as keyof typeof BUILDING_TYPES]?.cost || {}) || !canPlacePreview(mode as BuildingType, view.hoverTile.x, view.hoverTile.y)) {
+	if (!canAffordBuildAt(mode as BuildingType, view.hoverTile.x, view.hoverTile.y) || !canPlacePreview(mode as BuildingType, view.hoverTile.x, view.hoverTile.y)) {
 		ui.showToast("Cannot place that building there.");
 		return;
 	}
 	issue({ type: "build", unitIds, buildingType: mode as BuildingType, x: view.hoverTile.x, y: view.hoverTile.y });
 	view.buildMode = null;
+	view.wallDragStartTile = null;
+}
+
+function placeBuildMode() {
+	if (view.buildMode === "wall" && view.wallDragStartTile && view.hoverTile) return placeWallLine();
+	placeBuilding();
+}
+
+async function placeWallLine() {
+	const unitIds = [...state.selectedIds].filter((id) => state.snapshot?.units[id]?.ownerId === state.playerId);
+	const tiles = wallLineTiles();
+	if (!tiles.length || unitIds.length === 0) return;
+	if (!canAffordLine("wall", tiles) || tiles.some((tile) => !canPlacePreview("wall", tile.x, tile.y))) {
+		ui.showToast("Cannot place that wall there.");
+		return;
+	}
+	view.buildMode = null;
+	view.wallDragStartTile = null;
+	for (const tile of tiles) {
+		const result = await issue({ type: "build", unitIds, buildingType: "wall", x: tile.x, y: tile.y });
+		if (!result.ok) break;
+	}
 }
 
 async function issue(payload: ClientCommand, options: { silent?: boolean } = {}) {
@@ -644,6 +669,7 @@ function onKeyDown(event: KeyboardEvent) {
 	const key = event.key.toLowerCase();
 	if (key === "escape") {
 		view.buildMode = null;
+		view.wallDragStartTile = null;
 		if (view.noiseMode) {
 			view.noiseMode = false;
 			ui.showToast("Noise tool off.");
@@ -668,7 +694,7 @@ function onKeyDown(event: KeyboardEvent) {
 	}
 	if (key === "delete" || key === "backspace") return deleteSelectedBuilding();
 	if (key === ".") return selectIdleWorkers();
-	const buildShortcuts: Record<string, string> = { h: "house", f: "farm", b: "barracks", t: "watchTower", l: "lumberCamp", d: "foodDepot", m: "miningCamp" };
+	const buildShortcuts: Record<string, string> = { h: "house", f: "farm", b: "barracks", t: "watchTower", w: "wall", g: "gate", l: "lumberCamp", d: "foodDepot", m: "miningCamp" };
 	if (buildShortcuts[key]) return startBuildShortcut(buildShortcuts[key] as BuildingType);
 	const shortcutUnit = unitTypeForShortcut(key);
 	if (shortcutUnit) return trainShortcut(shortcutUnit);
@@ -685,7 +711,7 @@ function startBuildShortcut(buildingType: BuildingType) {
 	if (!hasBuilder) return ui.showToast("Select build-capable units.");
 	const def = BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES];
 	if (!def) return;
-	if (!canAfford(def.cost || {})) return ui.showToast("Not enough resources.");
+	if (buildingType !== "gate" && !canAfford(def.cost || {})) return ui.showToast("Not enough resources.");
 	view.buildMode = buildingType;
 	ui.showToast(`Place ${def.label}.`);
 }
@@ -752,17 +778,66 @@ function canAfford(cost: Partial<Record<ResourceType, number>> = {}) {
 	return Object.entries(cost).every(([resource, amount]) => (resources[resource] || 0) >= (amount as number));
 }
 
+function canAffordBuildAt(buildingType: BuildingType, x: number, y: number) {
+	return canAfford(effectiveBuildCost(buildingType, x, y));
+}
+
+function effectiveBuildCost(buildingType: BuildingType, x: number, y: number) {
+	const cost = { ...(BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES]?.cost || {}) } as Partial<Record<ResourceType, number>>;
+	const wall = ownWallAt(x, y);
+	if (buildingType !== "gate" || !wall || wall.hp >= wall.maxHp) return cost;
+	for (const [resource, amount] of Object.entries(BUILDING_TYPES.wall.cost) as [ResourceType, number][]) {
+		cost[resource] = Math.max(0, (cost[resource] || 0) - amount);
+	}
+	return cost;
+}
+
+function canAffordLine(buildingType: BuildingType, tiles: { x: number; y: number }[]) {
+	const cost = BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES]?.cost || {};
+	const multiplier = tiles.filter((tile) => !ownWallAt(tile.x, tile.y)).length;
+	const total = Object.fromEntries(Object.entries(cost).map(([resource, amount]) => [resource, (amount as number) * multiplier])) as Partial<Record<ResourceType, number>>;
+	return canAfford(total);
+}
+
+function wallLineTiles() {
+	if (!view.wallDragStartTile || !view.hoverTile) return [];
+	const start = view.wallDragStartTile;
+	const end = view.hoverTile;
+	const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+	const tiles = [];
+	if (horizontal) {
+		const step = end.x >= start.x ? 1 : -1;
+		for (let x = start.x; step > 0 ? x <= end.x : x >= end.x; x += step) tiles.push({ x, y: start.y });
+	} else {
+		const step = end.y >= start.y ? 1 : -1;
+		for (let y = start.y; step > 0 ? y <= end.y : y >= end.y; y += step) tiles.push({ x: start.x, y });
+	}
+	return tiles;
+}
+
 function canPlacePreview(buildingType: BuildingType, x: number, y: number) {
 	if (!state.snapshot || !BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES]) return false;
-	const size = buildingSize(buildingType);
-	if (x < 0 || y < 0 || x + size > state.snapshot.map.size || y + size > state.snapshot.map.size) return false;
+	const footprint = buildingFootprint(buildingType);
+	const replacementWall = ownWallAt(x, y);
+	if (buildingType === "wall" && replacementWall) return true;
+	if (x < 0 || y < 0 || x + footprint.width > state.snapshot.map.size || y + footprint.height > state.snapshot.map.size) return false;
 	for (const building of Object.values(state.snapshot.buildings)) {
-		if (rectsOverlap({ x, y, size }, building)) return false;
+		if (buildingType === "gate" && replacementWall && building.id === replacementWall.id) continue;
+		if (rectsOverlap({ x, y, ...footprint }, building)) return false;
 	}
 	for (const resource of Object.values(state.snapshot.resources)) {
-		if (pointInFootprint(Math.floor(resource.x), Math.floor(resource.y), x, y, size)) return false;
+		if (pointInFootprint(Math.floor(resource.x), Math.floor(resource.y), x, y, footprint)) return false;
 	}
 	return true;
+}
+
+function ownWallAt(x: number, y: number) {
+	return Object.values(state.snapshot?.buildings || {}).find((building) => (
+		building.ownerId === state.playerId &&
+		building.type === "wall" &&
+		building.x === x &&
+		building.y === y
+	)) || null;
 }
 
 function buildingSize(type: BuildingType) {
@@ -772,12 +847,25 @@ function buildingSize(type: BuildingType) {
 	return 1;
 }
 
-function rectsOverlap(a: { x: number; y: number; size: number }, b: { x: number; y: number; size: number }) {
-	return a.x < b.x + b.size && a.x + a.size > b.x && a.y < b.y + b.size && a.y + a.size > b.y;
+function buildingFootprint(type: BuildingType): { width: number; height: number } {
+	const def = BUILDING_TYPES[type as keyof typeof BUILDING_TYPES];
+	const size = buildingSize(type);
+	return {
+		width: (def && "width" in def ? def.width : size) as number,
+		height: (def && "height" in def ? def.height : size) as number,
+	};
 }
 
-function pointInFootprint(px: number, py: number, x: number, y: number, size: number) {
-	return px >= x && px < x + size && py >= y && py < y + size;
+function rectsOverlap(a: { x: number; y: number; size?: number; width?: number; height?: number }, b: { x: number; y: number; size?: number; width?: number; height?: number }) {
+	const aw = a.width ?? a.size ?? 1;
+	const ah = a.height ?? a.size ?? 1;
+	const bw = b.width ?? b.size ?? 1;
+	const bh = b.height ?? b.size ?? 1;
+	return a.x < b.x + bw && a.x + aw > b.x && a.y < b.y + bh && a.y + ah > b.y;
+}
+
+function pointInFootprint(px: number, py: number, x: number, y: number, footprint: { width: number; height: number }) {
+	return px >= x && px < x + footprint.width && py >= y && py < y + footprint.height;
 }
 
 function edgePan() {
@@ -895,20 +983,20 @@ function rememberStaticObjects() {
 	for (const [id, ruin] of Object.entries(state.snapshot.ruins)) state.lastSeen.ruins[id] = ruin;
 }
 
-function forgetVisibleMissing(memory: Record<string, Building | ResourceNode | { x: number; y: number; size?: number }>, current: Record<string, Building | ResourceNode | Ruin>) {
+function forgetVisibleMissing(memory: Record<string, Building | ResourceNode | { x: number; y: number; size?: number; width?: number; height?: number }>, current: Record<string, Building | ResourceNode | Ruin>) {
 	const visibility = state.snapshot?.visibility;
 	if (!visibility) return;
 	const mapSize = state.snapshot!.map.size;
 	for (const [id, entity] of Object.entries(memory)) {
-		if (!current[id] && isVisibleNow(visibility, entity.x, entity.y, entity.size || 1, mapSize)) delete memory[id];
+		if (!current[id] && isVisibleNow(visibility, entity.x, entity.y, entityWidth(entity), entityHeight(entity), mapSize)) delete memory[id];
 	}
 }
 
-function isVisibleNow(visibility: ClientSnapshot["visibility"], x: number, y: number, size: number, mapSize: number) {
+function isVisibleNow(visibility: ClientSnapshot["visibility"], x: number, y: number, width: number, height: number, mapSize: number) {
 	const visible = visibility?.visibleSet;
 	if (!visible) return false;
-	for (let yy = Math.floor(y); yy < Math.ceil(y + size); yy += 1) {
-		for (let xx = Math.floor(x); xx < Math.ceil(x + size); xx += 1) {
+	for (let yy = Math.floor(y); yy < Math.ceil(y + height); yy += 1) {
+		for (let xx = Math.floor(x); xx < Math.ceil(x + width); xx += 1) {
 			if (visible.has(yy * mapSize + xx)) return true;
 		}
 	}
@@ -941,12 +1029,12 @@ function renderedEntityRect(entity: Unit | Building | ResourceNode) {
 	const bounds = spriteMetrics(entity.type);
 	const scale = entityPixel(entity, view.camera.zoom || 1);
 	const center = entity.kind === "building" || entity.kind === "resource"
-		? isoToScreen(entity.x + ((entity.size || 1) - 1) / 2, entity.y + ((entity.size || 1) - 1) / 2, view.camera)
-		: isoToScreen(entity.x + (entity.size || 0) / 2, entity.y + (entity.size || 0) / 2, view.camera);
+		? isoToScreen(entity.x + (entityWidth(entity) - 1) / 2, entity.y + (entityHeight(entity) - 1) / 2, view.camera)
+		: isoToScreen(entity.x + entityWidth(entity) / 2, entity.y + entityHeight(entity) / 2, view.camera);
 	const visualWidth = bounds.width * scale;
 	const visualHeight = bounds.height * scale;
 	const left = Math.round(center.x - visualWidth / 2);
-	const top = Math.round(center.y + ((entity.size || 0) * TILE_H * (view.camera.zoom || 1)) / 2 - visualHeight);
+	const top = Math.round(center.y + (entityHeight(entity) * TILE_H * (view.camera.zoom || 1)) / 2 - visualHeight);
 	const pad = hitPadding(entity);
 	return {
 		left: left - pad,
@@ -958,6 +1046,14 @@ function renderedEntityRect(entity: Unit | Building | ResourceNode) {
 		width: visualWidth,
 		height: visualHeight,
 	};
+}
+
+function entityWidth(entity: { size?: number; width?: number }) {
+	return entity.width ?? entity.size ?? 1;
+}
+
+function entityHeight(entity: { size?: number; height?: number }) {
+	return entity.height ?? entity.size ?? 1;
 }
 
 function hitPadding(entity: { kind: string }) {

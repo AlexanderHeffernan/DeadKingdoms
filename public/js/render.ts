@@ -34,6 +34,7 @@ import type {
 } from "./clientTypes.js";
 
 type RenderEntity = Unit | Building | ResourceNode | Ruin;
+type Footprint = { x: number; y: number; size?: number; width?: number; height?: number };
 
 export class Renderer {
 	canvas: HTMLCanvasElement;
@@ -304,7 +305,7 @@ export class Renderer {
 		alpha: number,
 		key: string,
 	) {
-		const spriteName = spriteNameFor(entity);
+		const spriteName = spriteNameFor(entity, state);
 		const png = pngSprites[spriteName];
 		if (!png && !sprites[spriteName]) return;
 		const center = entityCenter(entity, view.camera);
@@ -701,7 +702,8 @@ export class Renderer {
 			this.drawPixelFootprint(
 				entity.x,
 				entity.y,
-				entity.size || 1,
+				entityWidth(entity),
+				entityHeight(entity),
 				camera,
 				color,
 			);
@@ -781,14 +783,15 @@ export class Renderer {
 	private drawPixelFootprint(
 		tileX: number,
 		tileY: number,
-		size: number,
+		width: number,
+		height: number,
 		camera: CameraState,
 		color: string,
 	) {
 		const top = isoToScreen(tileX - 0.5, tileY - 0.5, camera);
-		const right = isoToScreen(tileX + size - 0.5, tileY - 0.5, camera);
-		const bottom = isoToScreen(tileX + size - 0.5, tileY + size - 0.5, camera);
-		const left = isoToScreen(tileX - 0.5, tileY + size - 0.5, camera);
+		const right = isoToScreen(tileX + width - 0.5, tileY - 0.5, camera);
+		const bottom = isoToScreen(tileX + width - 0.5, tileY + height - 0.5, camera);
+		const left = isoToScreen(tileX - 0.5, tileY + height - 0.5, camera);
 		const cx = (left.x + right.x) / 2;
 		const cy = (top.y + bottom.y) / 2;
 		const px = worldPixel(this.currentZoom || 1);
@@ -883,7 +886,7 @@ export class Renderer {
 	}
 
 	private drawSelectionBox(view: ViewState) {
-		if (!view.dragging || !view.dragCurrent || !view.dragStart) return;
+		if (!view.dragging || !view.dragCurrent || !view.dragStart || view.buildMode) return;
 		const x = Math.min(view.dragStart.x, view.dragCurrent.x);
 		const y = Math.min(view.dragStart.y, view.dragCurrent.y);
 		const w = Math.abs(view.dragCurrent.x - view.dragStart.x);
@@ -898,7 +901,6 @@ export class Renderer {
 	private drawPlacement(view: ViewState, state: GameState) {
 		const mode = view.buildMode;
 		if (!mode || !view.hoverTile) return;
-		const size = buildingSize(mode);
 		const valid = canPlacePreview(
 			state,
 			mode,
@@ -908,21 +910,38 @@ export class Renderer {
 		const ownerColor =
 			(state.playerId && state.snapshot?.players[state.playerId]?.color) ||
 				"#f4efe6";
-		this.drawPixelFootprint(
-			view.hoverTile.x,
-			view.hoverTile.y,
-			size,
-			view.camera,
-			valid ? ownerColor : "#d84b3e",
-		);
+		if (mode === "wall" && view.wallDragStartTile) {
+			const tiles = wallLineTiles(view.wallDragStartTile, view.hoverTile);
+			const lineValid = canAffordLine(state, "wall", tiles) && tiles.every((tile) => canPlacePreview(state, "wall", tile.x, tile.y));
+			for (let index = 0; index < tiles.length; index += 1) {
+				const tile = tiles[index]!;
+				this.drawPixelFootprint(tile.x, tile.y, 1, 1, view.camera, lineValid ? ownerColor : "#d84b3e");
+				this.drawPlacementPreviewSprite(
+					wallPreviewSpriteName(tiles, index),
+					tile.x,
+					tile.y,
+					1,
+					1,
+					view.camera,
+					ownerColor,
+					lineValid,
+					`placementPreview:wall:${index}`,
+				);
+			}
+			return;
+		}
+		const footprint = buildingFootprint(mode);
+		this.drawPixelFootprint(view.hoverTile.x, view.hoverTile.y, footprint.width, footprint.height, view.camera, valid ? ownerColor : "#d84b3e");
 		this.drawPlacementPreviewSprite(
 			mode as SpriteName,
 			view.hoverTile.x,
 			view.hoverTile.y,
-			size,
+			footprint.width,
+			footprint.height,
 			view.camera,
 			ownerColor,
 			valid,
+			"placementPreview",
 		);
 	}
 
@@ -930,20 +949,22 @@ export class Renderer {
 		spriteName: SpriteName,
 		x: number,
 		y: number,
-		size: number,
+		width: number,
+		height: number,
 		camera: CameraState,
 		ownerColor: string,
 		valid: boolean,
+		key: string,
 	) {
 		const png = pngSprites[spriteName];
 		if (!png && !sprites[spriteName]) return;
-		const center = footprintCenter(x, y, size, camera);
+		const center = footprintCenter(x, y, width, height, camera);
 		const px = worldPixel(camera.zoom || 1);
 		const bounds = spriteMetrics(spriteName);
 		const visualWidth = bounds.width * px;
 		const spriteX = center.x - visualWidth / 2 - bounds.minX * px;
 		const topY = spriteTopY(
-			{ kind: "building", type: spriteName, x, y, size } as Building,
+			{ kind: "building", type: spriteName, x, y, size: Math.max(width, height), width, height } as Building,
 			center.y,
 			bounds,
 			px,
@@ -972,7 +993,7 @@ export class Renderer {
 				if (existingFlag) existingFlag.visible = false;
 			}
 			const sprite = this.placeSprite(
-				"placementPreview",
+				key,
 				this.pngTexture(png.base),
 				spriteX,
 				topY,
@@ -986,7 +1007,7 @@ export class Renderer {
 		}
 
 		const sprite = this.placeSprite(
-			"placementPreview",
+			key,
 			this.spriteTexture(spriteName, sprites[spriteName]!, ownerColor),
 			spriteX,
 			topY,
@@ -1042,8 +1063,8 @@ function drawMinimapCanvas(state: GameState, view: ViewState) {
 	for (const building of Object.values(state.snapshot.buildings)) {
 		const player = state.snapshot.players[building.ownerId];
 		const p = project(
-			building.x + (building.size - 1) / 2,
-			building.y + (building.size - 1) / 2,
+			building.x + (entityWidth(building) - 1) / 2,
+			building.y + (entityHeight(building) - 1) / 2,
 		);
 		ctx.fillStyle = player?.color || "#d8d0c0";
 		ctx.fillRect(
@@ -1078,7 +1099,7 @@ function drawMinimapCanvas(state: GameState, view: ViewState) {
 	ctx.stroke();
 }
 
-function spriteNameFor(entity: RenderEntity): SpriteName {
+function spriteNameFor(entity: RenderEntity, state: GameState): SpriteName {
 	if (entity.kind === "ruin") return "ruin";
 	if (entity.kind === "resource") {
 		if (
@@ -1089,7 +1110,27 @@ function spriteNameFor(entity: RenderEntity): SpriteName {
 		)
 			return entity.type;
 	}
+	if (entity.kind === "building" && entity.type === "wall") return wallSpriteName(entity, state);
 	return entity.type as SpriteName;
+}
+
+function wallSpriteName(wall: Building, state: GameState): SpriteName {
+	const hasWest = hasWallAt(state, wall, wall.x - 1, wall.y);
+	const hasEast = hasWallAt(state, wall, wall.x + 1, wall.y);
+	const hasNorth = hasWallAt(state, wall, wall.x, wall.y - 1);
+	const hasSouth = hasWallAt(state, wall, wall.x, wall.y + 1);
+	if (hasWest && hasEast) return "wallNorthEast";
+	if (hasNorth && hasSouth) return "wallSouthEast";
+	return "wallPillar";
+}
+
+function hasWallAt(state: GameState, wall: Building, x: number, y: number) {
+	return Object.values(state.snapshot?.buildings || {}).some((building) => (
+		building.type === "wall" &&
+			building.ownerId === wall.ownerId &&
+			building.x === x &&
+			building.y === y
+	));
 }
 
 function targetFlashFor(state: GameState, id: string) {
@@ -1130,6 +1171,18 @@ function buildingSize(type: string) {
 	return 1;
 }
 
+function buildingFootprint(type: string): { width: number; height: number } {
+	if (type in BUILDING_TYPES) {
+		const def = BUILDING_TYPES[type as keyof typeof BUILDING_TYPES];
+		return {
+			width: ("width" in def ? def.width : def.size) as number,
+			height: ("height" in def ? def.height : def.size) as number,
+		};
+	}
+	const size = buildingSize(type);
+	return { width: size, height: size };
+}
+
 function canPlacePreview(
 	state: GameState,
 	buildingType: string,
@@ -1137,9 +1190,11 @@ function canPlacePreview(
 	y: number,
 ) {
 	if (!state.snapshot) return false;
-	const size = buildingSize(buildingType);
+	const footprint = buildingFootprint(buildingType);
 	const player = state.snapshot.players[state.playerId!];
-	const cost = buildingCost(buildingType);
+	const replacementWall = ownWallAt(state, x, y);
+	const cost = effectiveBuildCost(state, buildingType, x, y);
+	if (buildingType === "wall" && replacementWall) return true;
 	if (
 		!Object.entries(cost).every(
 			([resource, amount]) =>
@@ -1151,17 +1206,18 @@ function canPlacePreview(
 	if (
 		x < 0 ||
 			y < 0 ||
-			x + size > state.snapshot.map.size ||
-			y + size > state.snapshot.map.size
+			x + footprint.width > state.snapshot.map.size ||
+			y + footprint.height > state.snapshot.map.size
 	)
 		return false;
 	for (const building of Object.values(state.snapshot.buildings)) {
-		if (rectsOverlap({ x, y, size }, building)) return false;
+		if (buildingType === "gate" && replacementWall && building.id === replacementWall.id) continue;
+		if (rectsOverlap({ x, y, ...footprint }, building)) return false;
 	}
 	for (const resource of Object.values(state.snapshot.resources)) {
 		const px = Math.floor(resource.x);
 		const py = Math.floor(resource.y);
-		if (px >= x && px < x + size && py >= y && py < y + size) return false;
+		if (px >= x && px < x + footprint.width && py >= y && py < y + footprint.height) return false;
 	}
 	return true;
 }
@@ -1172,21 +1228,44 @@ function buildingCost(type: string) {
 		: {};
 }
 
+function effectiveBuildCost(state: GameState, buildingType: string, x: number, y: number) {
+	const cost = { ...buildingCost(buildingType) } as Partial<Record<ResourceType, number>>;
+	const wall = ownWallAt(state, x, y);
+	if (buildingType !== "gate" || !wall || wall.hp >= wall.maxHp) return cost;
+	for (const [resource, amount] of Object.entries(BUILDING_TYPES.wall.cost) as [ResourceType, number][]) {
+		cost[resource] = Math.max(0, (cost[resource] || 0) - amount);
+	}
+	return cost;
+}
+
+function ownWallAt(state: GameState, x: number, y: number) {
+	return Object.values(state.snapshot?.buildings || {}).find((building) => (
+		building.ownerId === state.playerId &&
+		building.type === "wall" &&
+		building.x === x &&
+		building.y === y
+	)) || null;
+}
+
 function rectsOverlap(
-	a: { x: number; y: number; size: number },
-	b: { x: number; y: number; size: number },
+	a: Footprint,
+	b: Footprint,
 ) {
+	const aw = entityWidth(a);
+	const ah = entityHeight(a);
+	const bw = entityWidth(b);
+	const bh = entityHeight(b);
 	return (
-		a.x < b.x + b.size &&
-			a.x + a.size > b.x &&
-			a.y < b.y + b.size &&
-			a.y + a.size > b.y
+		a.x < b.x + bw &&
+			a.x + aw > b.x &&
+			a.y < b.y + bh &&
+			a.y + ah > b.y
 	);
 }
 
 function entityCenter(entity: RenderEntity, camera: CameraState) {
 	if (entity.kind === "building" || entity.kind === "ruin" || entity.kind === "resource")
-		return footprintCenter(entity.x, entity.y, entity.size || 1, camera);
+		return footprintCenter(entity.x, entity.y, entityWidth(entity), entityHeight(entity), camera);
 	return isoToScreen(
 		entity.x + (entity.size || 0) / 2,
 		entity.y + (entity.size || 0) / 2,
@@ -1195,10 +1274,9 @@ function entityCenter(entity: RenderEntity, camera: CameraState) {
 }
 
 function isEntityNearViewport(entity: RenderEntity, camera: CameraState) {
-	const size = entity.size || 1;
 	const p = entity.kind === "unit"
-		? isoToScreen(entity.x + size / 2, entity.y + size / 2, camera)
-		: footprintCenter(entity.x, entity.y, size, camera);
+		? isoToScreen(entity.x + entityWidth(entity) / 2, entity.y + entityHeight(entity) / 2, camera)
+		: footprintCenter(entity.x, entity.y, entityWidth(entity), entityHeight(entity), camera);
 	const margin = 260;
 	return (
 		p.x >= -margin &&
@@ -1211,10 +1289,11 @@ function isEntityNearViewport(entity: RenderEntity, camera: CameraState) {
 function footprintCenter(
 	x: number,
 	y: number,
-	size: number,
+	width: number,
+	height: number,
 	camera: CameraState,
 ) {
-	return isoToScreen(x + (size - 1) / 2, y + (size - 1) / 2, camera);
+	return isoToScreen(x + (width - 1) / 2, y + (height - 1) / 2, camera);
 }
 
 function spriteTopY(
@@ -1227,10 +1306,43 @@ function spriteTopY(
 	// Units stand at a point (their feet rest on the tile centre), while
 	// resources occupy a 1-tile footprint like buildings, so their base should
 	// sit at the bottom of the tile rather than the centre.
-	const footprintSize =
-		entity.kind === "unit" ? entity.size || 0 : entity.size || 1;
-	const footprintBottom = centerY + (footprintSize * TILE_H * zoom) / 2;
+	const footprintBottom = centerY + (entityHeight(entity) * TILE_H * zoom) / 2;
 	return footprintBottom - (bounds.maxY + 1) * scale;
+}
+
+function entityWidth(entity: { size?: number; width?: number }) {
+	return entity.width ?? entity.size ?? 1;
+}
+
+function entityHeight(entity: { size?: number; height?: number }) {
+	return entity.height ?? entity.size ?? 1;
+}
+
+function wallLineTiles(start: { x: number; y: number }, end: { x: number; y: number }) {
+	const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+	const tiles = [];
+	if (horizontal) {
+		const step = end.x >= start.x ? 1 : -1;
+		for (let x = start.x; step > 0 ? x <= end.x : x >= end.x; x += step) tiles.push({ x, y: start.y });
+	} else {
+		const step = end.y >= start.y ? 1 : -1;
+		for (let y = start.y; step > 0 ? y <= end.y : y >= end.y; y += step) tiles.push({ x: start.x, y });
+	}
+	return tiles;
+}
+
+function wallPreviewSpriteName(tiles: { x: number; y: number }[], index: number): SpriteName {
+	if (tiles.length < 3 || index === 0 || index === tiles.length - 1) return "wallPillar";
+	const previous = tiles[index - 1]!;
+	const next = tiles[index + 1]!;
+	return previous.y === next.y ? "wallNorthEast" : "wallSouthEast";
+}
+
+function canAffordLine(state: GameState, buildingType: string, tiles: { x: number; y: number }[]) {
+	const player = state.snapshot?.players[state.playerId!];
+	const cost = buildingCost(buildingType);
+	const multiplier = tiles.filter((tile) => !ownWallAt(state, tile.x, tile.y)).length;
+	return Object.entries(cost).every(([resource, amount]) => (player?.resources?.[resource as ResourceType] || 0) >= (amount as number) * multiplier);
 }
 
 function isExplored(

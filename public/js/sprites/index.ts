@@ -2,6 +2,7 @@ import barracks from "./barracks.js";
 import berry from "./berry.js";
 import farm from "./farm.js";
 import foodDepot from "./foodDepot.js";
+import gate from "./gate.js";
 import house from "./house.js";
 import lumberCamp from "./lumberCamp.js";
 import miningCamp from "./miningCamp.js";
@@ -12,6 +13,12 @@ import stump from "./stump.js";
 import townCenter from "./townCenter.js";
 import tree from "./tree.js";
 import villager from "./villager.js";
+import wall from "./wall.js";
+import wallNorthEast from "./wallNorthEast.js";
+import wallNorthWest from "./wallNorthWest.js";
+import wallPillar from "./wallPillar.js";
+import wallSouthEast from "./wallSouthEast.js";
+import wallSouthWest from "./wallSouthWest.js";
 import watchTower from "./watchTower.js";
 import zombie from "./zombie.js";
 
@@ -22,6 +29,7 @@ export const sprites: Record<SpriteName, readonly string[]> = {
   berry,
   farm,
   foodDepot,
+  gate,
   house,
   lumberCamp,
   miningCamp,
@@ -32,6 +40,12 @@ export const sprites: Record<SpriteName, readonly string[]> = {
   townCenter,
   tree,
   villager,
+  wall,
+  wallNorthEast,
+  wallNorthWest,
+  wallPillar,
+  wallSouthEast,
+  wallSouthWest,
   watchTower,
   zombie,
 } as const;
