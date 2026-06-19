@@ -11,11 +11,11 @@ export class ZombieUnit extends BaseUnit {
 	public static readonly type = "zombie";
 	public static readonly label = "Zombie";
 	public static readonly sprite = "zombie_vil";
-	public static readonly maxHp = 34;
+	public static readonly maxHp = 10;
 	public static readonly speed = 1;
-	public static readonly attack = 5;
+	public static readonly attack = 2;
 	public static readonly range = 0.55;
-	public static readonly cooldown = 1.5;
+	public static readonly cooldown = 2;
 	public static readonly score = 0;
 	public static readonly trainTime = 0;
 	public static readonly cost = {};
@@ -29,6 +29,12 @@ export class ZombieUnit extends BaseUnit {
 		const target = this.findNearestUnitTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
 		if (target) {
 			this.engageTarget(context, zombie, target, dt);
+			return;
+		}
+
+		const buildingTarget = this.findNearestBuildingTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
+		if (buildingTarget) {
+			this.engageTarget(context, zombie, buildingTarget, dt);
 			return;
 		}
 
@@ -93,6 +99,11 @@ export class ZombieUnit extends BaseUnit {
 			}
 		}
 		return best;
+	}
+
+	private findNearestBuildingTarget(context: UnitSimulationContext, zombie: Unit, range: number): UnitCombatTarget | null {
+		const target = context.nearestEnemy(zombie, range);
+		return target?.kind === "building" ? target : null;
 	}
 
 	private didNotMove(context: UnitSimulationContext, before: Vec2, zombie: Unit) {

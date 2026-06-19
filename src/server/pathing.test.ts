@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
-import type { ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
+import type { Building, ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
 import { ZombieUnit, type UnitSimulationContext } from "../shared/units/index.js";
 import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
 
@@ -46,6 +46,23 @@ function makeUnit(x: number, y: number, id = "u-test"): Unit {
 		carried: null,
 		selected: false,
 	};
+}
+
+function makeBuilding(x: number, y: number, id = "b-test"): Building {
+	return {
+		id: id as Building["id"],
+		kind: "building",
+		type: "house",
+		ownerId: "p-test" as Building["ownerId"],
+		x,
+		y,
+		hp: 100,
+		maxHp: 100,
+		size: 2,
+		width: 2,
+		height: 2,
+		completed: true,
+	} as unknown as Building;
 }
 
 function addUnits(world: World, units: Unit[]) {
@@ -345,6 +362,7 @@ test("zombie movement escalates to pathing when sidesteps do not make progress",
 	const context = {
 		world,
 		nearbyTargetUnits: () => [],
+		nearestEnemy: () => null,
 		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
 		distance: distanceBetween,
 		moveZombieSteered: () => {
@@ -402,6 +420,66 @@ test("nearby combat aggro overrides zombie horde goals", () => {
 	assert.deepEqual(zombie.hordeTarget, { x: 14, y: 10 });
 });
 
+test("zombie attacks nearby buildings when no units are visible", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-building-target");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	const building = makeBuilding(8.4, 10, "b-nearby");
+	let damagedTarget: Building | Unit | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		nearestEnemy: () => building,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: () => false,
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		damage: (target: Building | Unit) => {
+			damagedTarget = target;
+		},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.equal(damagedTarget, building);
+});
+
+test("zombie prioritizes visible units over adjacent buildings", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-unit-over-building");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	const unit = makeUnit(18.3, 10, "u-visible");
+	const building = makeBuilding(8.4, 10, "b-adjacent");
+	let movementTarget: { x: number; y: number } | null = null;
+	let damaged = false;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [unit],
+		nearestEnemy: () => building,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: (_unit: Unit, target: { x: number; y: number }) => {
+			movementTarget = target;
+			return false;
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		damage: () => {
+			damaged = true;
+		},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(movementTarget, { x: unit.x, y: unit.y });
+	assert.equal(damaged, false);
+});
+
 test("zombie unit does not clear director horde target after reaching it", () => {
 	const world = makeWorld();
 	const zombie = makeUnit(8, 10, "z-preserve-horde-target");
@@ -412,6 +490,7 @@ test("zombie unit does not clear director horde target after reaching it", () =>
 	const context = {
 		world,
 		nearbyTargetUnits: () => [],
+		nearestEnemy: () => null,
 		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
 		distance: distanceBetween,
 		moveZombieSteered: () => false,
@@ -434,6 +513,7 @@ test("zombie unit does not become stuck while already at its horde target", () =
 	const context = {
 		world,
 		nearbyTargetUnits: () => [],
+		nearestEnemy: () => null,
 		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
 		distance: distanceBetween,
 		moveZombieSteered: () => {

@@ -8,7 +8,7 @@ export const ZOMBIE_OWNER_ID = "zombies" as Unit["ownerId"];
 const ZOMBIE_BASE_CAP = 140;
 const ZOMBIES_PER_ACTIVE_PLAYER = 80;
 const ZOMBIES_PER_ACTIVE_POPULATION = 2;
-const ZOMBIE_SPAWN_INTERVAL_SECONDS = 10;
+const ZOMBIE_SPAWN_INTERVAL_SECONDS = 7;
 const ZOMBIE_SPAWN_BATCH_MIN = 2;
 const ZOMBIE_SPAWN_BATCH_MAX = 5;
 const ZOMBIE_SAFE_RADIUS = 44;
@@ -27,7 +27,7 @@ export type ZombieSpawnContext = SpawnContext & {
 export const zombieSpawnPolicy: SpawnPolicy<ZombieSpawnContext> = {
 	key: "zombie",
 	initialDelaySeconds: ZOMBIE_SPAWN_INTERVAL_SECONDS,
-	nextDelaySeconds: () => ZOMBIE_SPAWN_INTERVAL_SECONDS + Math.random() * 4,
+	nextDelaySeconds: () => ZOMBIE_SPAWN_INTERVAL_SECONDS,
 	canSpawn: hasActivePlayers,
 	currentCount: countZombies,
 	cap: zombieCap,
