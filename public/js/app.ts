@@ -693,7 +693,7 @@ function pruneEffects() {
 
 function selectAt(x: number, y: number) {
 	state.selectedIds.clear();
-	const hit = hitTest(x, y);
+	const hit = hitTestForSelection(x, y);
 	if (hit) state.selectedIds.add(hit.id);
 	if (hit?.kind === "unit") sfx.play("ui_select_unit", { point: hit });
 	else if (hit?.kind === "building") sfx.play("ui_select_building", { point: hit });
@@ -1082,6 +1082,17 @@ function hitTest(x: number, y: number) {
 		...Object.values(state.snapshot.buildings),
 		...Object.values(state.snapshot.resources),
 	];
+	return closestHit(x, y, candidates);
+}
+
+function hitTestForSelection(x: number, y: number) {
+	if (!state.snapshot) return null;
+	const unitHit = closestHit(x, y, Object.values(state.snapshot.units));
+	if (unitHit) return unitHit;
+	return hitTest(x, y);
+}
+
+function closestHit<T extends Unit | Building | ResourceNode>(x: number, y: number, candidates: T[]) {
 	let best = null;
 	let bestDistance = Infinity;
 	for (const entity of candidates) {

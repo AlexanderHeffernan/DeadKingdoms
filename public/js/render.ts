@@ -35,6 +35,18 @@ import type {
 
 type RenderEntity = Unit | Building | ResourceNode | Ruin;
 type Footprint = { x: number; y: number; size?: number; width?: number; height?: number };
+type SpriteAlphaMask = { width: number; height: number; alpha: Uint8ClampedArray };
+type RenderedSpriteRect = {
+	left: number;
+	right: number;
+	top: number;
+	bottom: number;
+	width: number;
+	height: number;
+};
+type RenderedAlphaMask = { rect: RenderedSpriteRect; mask: SpriteAlphaMask; flipped: boolean };
+
+const UNIT_OCCLUSION_OUTLINE_THRESHOLD = 0.8;
 
 export class Renderer {
 	canvas: HTMLCanvasElement;
@@ -54,6 +66,7 @@ export class Renderer {
 	private flashSprites = new Map<string, Sprite>();
 	private textureCache = new Map<string, Texture>();
 	private tileTextureCache = new Map<string, Texture>();
+	private alphaMaskCache = new Map<string, SpriteAlphaMask | null>();
 	private lastMinimapDraw = 0;
 	private grassLightImage = new Image();
 	private grassLightReady = false;
@@ -128,6 +141,9 @@ export class Renderer {
 		const active = new Set<string>();
 		this.drawLastSeen(state, view, active);
 		this.drawEntities(state, view, active);
+		this.drawFrontSelectedUnitMarkers(state, view, active);
+		this.drawFrontSelectedUnitSprites(state, view, active);
+		this.drawOccludedUnitOutlines(state, view, active);
 		this.hideAllEntitySprites(active);
 		this.hideUnusedSelectionSprites();
 		this.drawPathDebug(state, view);
@@ -428,6 +444,179 @@ export class Renderer {
 			this.drawHealth(center.x, y - 5, entity.amount / entity.maxAmount);
 	}
 
+	private drawOccludedUnitOutlines(state: GameState, view: ViewState, active: Set<string>) {
+		const snap = state.snapshot;
+		if (!snap) return;
+		const blockers = [
+			...Object.values(snap.resources),
+			...Object.values(snap.buildings),
+		].filter((entity) => isEntityNearViewport(entity, view.camera));
+		for (const unit of Object.values(snap.units)) {
+			if (!isEntityNearViewport(unit, view.camera)) continue;
+			if (!this.isUnitOccluded(unit, blockers, view)) continue;
+			this.drawUnitOutline(unit, state, view, active);
+		}
+	}
+
+	private drawFrontSelectedUnitMarkers(state: GameState, view: ViewState, active: Set<string>) {
+		const snap = state.snapshot;
+		if (!snap) return;
+		for (const id of view.selectedIds) {
+			const unit = snap.units[id];
+			if (!unit || !isEntityNearViewport(unit, view.camera)) continue;
+			this.drawFrontUnitSelectionMarker(unit, state, view, active);
+		}
+	}
+
+	private drawFrontSelectedUnitSprites(state: GameState, view: ViewState, active: Set<string>) {
+		const snap = state.snapshot;
+		if (!snap) return;
+		const blockers = [
+			...Object.values(snap.resources),
+			...Object.values(snap.buildings),
+		].filter((entity) => isEntityNearViewport(entity, view.camera));
+		for (const id of view.selectedIds) {
+			const unit = snap.units[id];
+			if (!unit || !isEntityNearViewport(unit, view.camera)) continue;
+			if (this.isUnitOccluded(unit, blockers, view)) continue;
+			this.drawFrontUnitSprite(unit, state, view, active);
+		}
+	}
+
+	private isUnitOccluded(unit: Unit, blockers: (Building | ResourceNode)[], view: ViewState) {
+		const unitRect = renderedSpriteRect(unit, view.camera, null);
+		const unitMask = this.alphaMaskFor(spriteNameFor(unit, { snapshot: null } as GameState));
+		if (!unitMask) return false;
+		const unitDepth = renderDepth(unit);
+		const blockerMasks = blockers.flatMap((blocker): RenderedAlphaMask[] => {
+			if (renderDepth(blocker) <= unitDepth) return [];
+			const blockerSprite = spriteNameFor(blocker, { snapshot: null } as GameState);
+			const blockerMask = this.alphaMaskFor(blockerSprite);
+			if (!blockerMask) return [];
+			const blockerRect = renderedSpriteRect(blocker, view.camera, null);
+			if (!rectsIntersect(unitRect, blockerRect)) return [];
+			return [{ rect: blockerRect, mask: blockerMask, flipped: false }];
+		});
+		return unitOpaqueCoverage(unitRect, unitMask, unit.facing === "left", blockerMasks) >= UNIT_OCCLUSION_OUTLINE_THRESHOLD;
+	}
+
+	private drawUnitOutline(unit: Unit, state: GameState, view: ViewState, active: Set<string>) {
+		const spriteName = spriteNameFor(unit, state);
+		const png = pngSprites[spriteName];
+		if (!png) return;
+		const playerColor = state.snapshot?.players[unit.ownerId]?.color || "#f4efe6";
+		const color = state.selectedIds.has(unit.id) ? playerColor : darkenHex(playerColor, 0.55);
+		const center = entityCenter(unit, view.camera);
+		const px = worldPixel(view.camera.zoom || 1);
+		const bounds = spriteMetrics(spriteName);
+		const visualWidth = bounds.width * px;
+		const x = center.x - visualWidth / 2 - bounds.minX * px;
+		const y = spriteTopY(unit, center.y, bounds, px, view.camera.zoom || 1);
+		const texture = this.unitOutlineTexture(png.base, color);
+		if (texture === Texture.EMPTY) return;
+		const key = `unitOutline:${unit.id}`;
+		const sprite = this.placeSprite(
+			key,
+			texture,
+			x,
+			y,
+			px,
+			unit.facing === "left",
+			1,
+			999000 + renderDepth(unit),
+		);
+		sprite.tint = 0xffffff;
+		active.add(key);
+	}
+
+	private drawFrontUnitSprite(unit: Unit, state: GameState, view: ViewState, active: Set<string>) {
+		const spriteName = spriteNameFor(unit, state);
+		const png = pngSprites[spriteName];
+		if (!png && !sprites[spriteName]) return;
+		const ownerColor = state.snapshot?.players[unit.ownerId]?.color;
+		const center = entityCenter(unit, view.camera);
+		const px = worldPixel(view.camera.zoom || 1);
+		const bounds = spriteMetrics(spriteName);
+		const visualWidth = bounds.width * px;
+		const x = center.x - visualWidth / 2 - bounds.minX * px;
+		const y = spriteTopY(unit, center.y, bounds, px, view.camera.zoom || 1);
+		const flip = unit.facing === "left";
+		const baseZ = 998500 + renderDepth(unit);
+		const flash = targetFlashFor(state, unit.id);
+		const flashTint =
+			flash.amount > 0 && flash.color === "red"
+				? redTint(flash.amount)
+				: 0xffffff;
+
+		if (png) {
+			const flagKey = `frontSelectedFlag:${unit.id}`;
+			if (png.flag) {
+				const flag = this.placeSprite(
+					flagKey,
+					this.pngTexture(png.flag),
+					x,
+					y,
+					px,
+					flip,
+					1,
+					baseZ - 0.5,
+				);
+				flag.tint = ownerColor ? hexToNumber(ownerColor) : 0xffffff;
+				active.add(flagKey);
+			}
+			const key = `frontSelectedUnit:${unit.id}`;
+			const sprite = this.placeSprite(
+				key,
+				this.pngTexture(png.base),
+				x,
+				y,
+				px,
+				flip,
+				1,
+				baseZ,
+			);
+			sprite.tint = flashTint;
+			active.add(key);
+			return;
+		}
+
+		const key = `frontSelectedUnit:${unit.id}`;
+		const sprite = this.placeSprite(
+			key,
+			this.spriteTexture(spriteName, sprites[spriteName]!, ownerColor),
+			x,
+			y,
+			px,
+			flip,
+			1,
+			baseZ,
+		);
+		sprite.tint = flashTint;
+		active.add(key);
+	}
+
+	private drawFrontUnitSelectionMarker(unit: Unit, state: GameState, view: ViewState, active: Set<string>) {
+		const color = state.snapshot?.players[unit.ownerId]?.color || "#f4efe6";
+		const center = entityCenter(unit, view.camera);
+		const px = worldPixel(view.camera.zoom || 1);
+		const rx = Math.max(5, Math.round((unit.size || 0.8) * 8));
+		const ry = Math.max(3, Math.round((unit.size || 0.8) * 4));
+		const texture = this.selectionDiamondTexture(rx, ry, hexToNumber(color));
+		const key = `frontSelection:${unit.id}`;
+		const sprite = this.placeSprite(
+			key,
+			texture,
+			Math.round(center.x - rx * px),
+			Math.round(center.y - ry * px),
+			px,
+			false,
+			1,
+			998000 + renderDepth(unit),
+		);
+		sprite.tint = 0xffffff;
+		active.add(key);
+	}
+
 	private updateFlashOverlay(
 		key: string,
 		base: Sprite,
@@ -500,6 +689,88 @@ export class Renderer {
 		texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
 		this.textureCache.set(url, texture);
 		return texture;
+	}
+
+	private unitOutlineTexture(url: string, playerColor: string) {
+		const key = `unitOutline:${url}:${playerColor}`;
+		const cached = this.textureCache.get(key);
+		if (cached) return cached;
+
+		const image = new Image();
+		image.onload = () => this.textureCache.delete(key);
+		image.src = url;
+		if (!image.complete || image.naturalWidth <= 0) return Texture.EMPTY;
+
+		const canvas = document.createElement("canvas");
+		canvas.width = image.naturalWidth;
+		canvas.height = image.naturalHeight;
+		const ctx = canvas.getContext("2d")!;
+		ctx.imageSmoothingEnabled = false;
+
+		const source = document.createElement("canvas");
+		source.width = image.naturalWidth;
+		source.height = image.naturalHeight;
+		const sourceCtx = source.getContext("2d")!;
+		sourceCtx.imageSmoothingEnabled = false;
+		sourceCtx.drawImage(image, 0, 0);
+		const data = sourceCtx.getImageData(0, 0, source.width, source.height);
+		const mask = ctx.createImageData(canvas.width, canvas.height);
+		const edgeColor = rgbForHex(playerColor);
+		const innerColor = darkenRgb(edgeColor, 0.55);
+		for (let y = 0; y < source.height; y += 1) {
+			for (let x = 0; x < source.width; x += 1) {
+				const color = isInnerEdgePixel(data, x, y)
+					? edgeColor
+					: isSecondInnerEdgePixel(data, x, y)
+						? innerColor
+						: null;
+				if (!color) continue;
+				const index = (y * source.width + x) * 4;
+				mask.data[index] = color.r;
+				mask.data[index + 1] = color.g;
+				mask.data[index + 2] = color.b;
+				mask.data[index + 3] = 255;
+			}
+		}
+		ctx.putImageData(mask, 0, 0);
+
+		const texture = Texture.from(canvas);
+		texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+		this.textureCache.set(key, texture);
+		return texture;
+	}
+
+	private alphaMaskFor(spriteName: SpriteName) {
+		const png = pngSprites[spriteName];
+		if (png) return this.pngAlphaMask(png.base);
+		return asciiAlphaMask(spriteName, sprites[spriteName] || sprites.house);
+	}
+
+	private pngAlphaMask(url: string) {
+		const cached = this.alphaMaskCache.get(url);
+		if (cached !== undefined) return cached;
+
+		const image = new Image();
+		image.onload = () => this.alphaMaskCache.delete(url);
+		image.src = url;
+		if (!image.complete || image.naturalWidth <= 0) {
+			this.alphaMaskCache.set(url, null);
+			return null;
+		}
+
+		const canvas = document.createElement("canvas");
+		canvas.width = image.naturalWidth;
+		canvas.height = image.naturalHeight;
+		const ctx = canvas.getContext("2d")!;
+		ctx.imageSmoothingEnabled = false;
+		ctx.drawImage(image, 0, 0);
+		const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+		const alpha = new Uint8ClampedArray(canvas.width * canvas.height);
+		for (let index = 0; index < alpha.length; index += 1)
+			alpha[index] = imageData.data[index * 4 + 3] || 0;
+		const mask = { width: canvas.width, height: canvas.height, alpha };
+		this.alphaMaskCache.set(url, mask);
+		return mask;
 	}
 
 	private spriteTexture(
@@ -1291,6 +1562,135 @@ function isEntityNearViewport(entity: RenderEntity, camera: CameraState) {
 			p.y >= -margin &&
 			p.y <= window.innerHeight + margin
 	);
+}
+
+function renderedSpriteRect(entity: RenderEntity, camera: CameraState, state: GameState | null) {
+	const spriteName = spriteNameFor(entity, state || ({ snapshot: null } as GameState));
+	const bounds = spriteMetrics(spriteName);
+	const scale = worldPixel(camera.zoom || 1);
+	const center = entityCenter(entity, camera);
+	const visualWidth = bounds.width * scale;
+	const visualHeight = bounds.height * scale;
+	const left = center.x - visualWidth / 2 - bounds.minX * scale;
+	const top = spriteTopY(entity, center.y, bounds, scale, camera.zoom || 1);
+	return {
+		left,
+		right: left + visualWidth,
+		top,
+		bottom: top + visualHeight,
+		width: visualWidth,
+		height: visualHeight,
+	};
+}
+
+function rectsIntersect(
+	a: { left: number; right: number; top: number; bottom: number },
+	b: { left: number; right: number; top: number; bottom: number },
+) {
+	return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function isInnerEdgePixel(data: ImageData, x: number, y: number) {
+	if (alphaAt(data, x, y) === 0) return false;
+	return (
+		alphaAt(data, x - 1, y) === 0 ||
+		alphaAt(data, x + 1, y) === 0 ||
+		alphaAt(data, x, y - 1) === 0 ||
+		alphaAt(data, x, y + 1) === 0
+	);
+}
+
+function isSecondInnerEdgePixel(data: ImageData, x: number, y: number) {
+	if (alphaAt(data, x, y) === 0 || isInnerEdgePixel(data, x, y)) return false;
+	return (
+		isInnerEdgePixel(data, x - 1, y) ||
+		isInnerEdgePixel(data, x + 1, y) ||
+		isInnerEdgePixel(data, x, y - 1) ||
+		isInnerEdgePixel(data, x, y + 1)
+	);
+}
+
+function alphaAt(data: ImageData, x: number, y: number) {
+	if (x < 0 || y < 0 || x >= data.width || y >= data.height) return 0;
+	return data.data[(y * data.width + x) * 4 + 3] || 0;
+}
+
+function rgbForHex(color: string) {
+	const value = hexToNumber(color);
+	return {
+		r: (value >> 16) & 0xff,
+		g: (value >> 8) & 0xff,
+		b: value & 0xff,
+	};
+}
+
+function darkenRgb(color: { r: number; g: number; b: number }, amount: number) {
+	return {
+		r: Math.round(color.r * amount),
+		g: Math.round(color.g * amount),
+		b: Math.round(color.b * amount),
+	};
+}
+
+function darkenHex(color: string, amount: number) {
+	const dark = darkenRgb(rgbForHex(color), amount);
+	return `#${[dark.r, dark.g, dark.b].map((part) => part.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function asciiAlphaMask(spriteName: SpriteName, rows: readonly string[]): SpriteAlphaMask {
+	const width = rows[0]?.length || 1;
+	const height = rows.length || 1;
+	const alpha = new Uint8ClampedArray(width * height);
+	for (let y = 0; y < height; y += 1) {
+		const row = rows[y] || "";
+		for (let x = 0; x < width; x += 1)
+			alpha[y * width + x] = row[x] && row[x] !== "." ? 255 : 0;
+	}
+	return { width, height, alpha };
+}
+
+function unitOpaqueCoverage(
+	unitRect: RenderedSpriteRect,
+	unitMask: SpriteAlphaMask,
+	unitFlipped: boolean,
+	blockers: RenderedAlphaMask[],
+) {
+	if (!blockers.length) return 0;
+
+	const unitScaleX = unitRect.width / unitMask.width;
+	const unitScaleY = unitRect.height / unitMask.height;
+	let opaque = 0;
+	let covered = 0;
+	for (let uy = 0; uy < unitMask.height; uy += 1) {
+		const screenY = unitRect.top + (uy + 0.5) * unitScaleY;
+		for (let ux = 0; ux < unitMask.width; ux += 1) {
+			const maskX = unitFlipped ? unitMask.width - 1 - ux : ux;
+			if (unitMask.alpha[uy * unitMask.width + maskX] === 0) continue;
+			opaque += 1;
+			const screenX = unitRect.left + (ux + 0.5) * unitScaleX;
+			if (blockers.some((blocker) => pointInsideRect(screenX, screenY, blocker.rect) && blockerAlphaAtScreen(blocker.rect, blocker.mask, blocker.flipped, screenX, screenY) > 0))
+				covered += 1;
+		}
+	}
+	return opaque > 0 ? covered / opaque : 0;
+}
+
+function pointInsideRect(x: number, y: number, rect: RenderedSpriteRect) {
+	return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function blockerAlphaAtScreen(
+	rect: RenderedSpriteRect,
+	mask: SpriteAlphaMask,
+	flipped: boolean,
+	screenX: number,
+	screenY: number,
+) {
+	const x = Math.floor(((screenX - rect.left) / rect.width) * mask.width);
+	const y = Math.floor(((screenY - rect.top) / rect.height) * mask.height);
+	if (x < 0 || y < 0 || x >= mask.width || y >= mask.height) return 0;
+	const maskX = flipped ? mask.width - 1 - x : x;
+	return mask.alpha[y * mask.width + maskX] || 0;
 }
 
 function footprintCenter(
