@@ -319,9 +319,7 @@ export class Renderer {
 		const x = center.x - visualWidth / 2 - bounds.minX * px;
 		const y = spriteTopY(entity, center.y, bounds, px, view.camera.zoom || 1);
 		const flip = "facing" in entity && entity.facing === "left";
-		const baseZ =
-			(entity.x + entity.y) * 100 +
-				(entity.kind === "unit" ? 2 : entity.kind === "building" ? 1 : 0);
+		const baseZ = renderDepth(entity) * 100 + renderLayerOffset(entity);
 		const flash = targetFlashFor(state, entity.id);
 		const flashTint =
 			flash.amount > 0 && flash.color === "red"
@@ -1317,6 +1315,23 @@ function spriteTopY(
 	// sit at the bottom of the tile rather than the centre.
 	const footprintBottom = centerY + (entityHeight(entity) * TILE_H * zoom) / 2;
 	return footprintBottom - (bounds.maxY + 1) * scale;
+}
+
+function renderDepth(entity: RenderEntity) {
+	if (entity.kind === "unit") return entity.x + entity.y + (entity.size || 0);
+	return footprintRenderDepth(entity);
+}
+
+function footprintRenderDepth(entity: RenderEntity) {
+	const width = entityWidth(entity);
+	const height = entityHeight(entity);
+	return entity.x + entity.y + (width + height - 2) / 2;
+}
+
+function renderLayerOffset(entity: RenderEntity) {
+	if (entity.kind === "unit") return 2;
+	if (entity.kind === "building") return 1;
+	return 0;
 }
 
 function entityWidth(entity: { size?: number; width?: number }) {
