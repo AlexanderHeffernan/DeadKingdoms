@@ -52,6 +52,7 @@ export interface DeleteBuildingPayload extends CommandBase {
 export interface SetRallyPointPayload extends CommandBase, Vec2 {
 	type: "setRallyPoint";
 	buildingId: BuildingId;
+	targetId?: EntityId | undefined;
 }
 
 export interface TrainPayload extends CommandBase {

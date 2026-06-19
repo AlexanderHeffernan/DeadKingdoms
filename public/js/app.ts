@@ -572,7 +572,7 @@ function handleRightClick(event: MouseEvent) {
 			addTargetFlash(hit.id, result.ok ? "white" : "red");
 			sfx.play(result.ok ? "ui_command_build" : "ui_error", { point: hit });
 		});
-	} else if (hit?.kind === "resource" || (hit?.kind === "building" && hit.canBeGatheredBy(state.playerId!))) {
+	} else if (hit?.kind === "resource" || (hit?.kind === "building" && canGatherFromClickTarget(hit))) {
 		issue({ type: "gather", unitIds: ownUnits, targetId: hit.id }, { silent: true }).then((result) => {
 			addTargetFlash(hit.id, result.ok ? "white" : "red");
 			sfx.play(result.ok ? commandSoundForTarget(hit) : "ui_error", { point: hit });
@@ -591,6 +591,10 @@ function handleRightClick(event: MouseEvent) {
 	}
 }
 
+function canGatherFromClickTarget(target: Building) {
+	return target.canBeGatheredBy(state.playerId!) || (target.ownerId === state.playerId && target.isComplete() && !!target.depotGatherKind());
+}
+
 function emitNoiseFromScreen(x: number, y: number) {
 	if (!state.playerId) return;
 	const iso = screenToIso(x, y, view.camera);
@@ -600,12 +604,23 @@ function emitNoiseFromScreen(x: number, y: number) {
 
 function setRallyPointFromScreen(x: number, y: number, buildingId = view.rallyModeBuildingId) {
 	if (!buildingId) return;
+	const hit = hitTest(x, y);
 	const iso = screenToIso(x, y, view.camera);
-	issue({ type: "setRallyPoint", buildingId, x: iso.x, y: iso.y }).then((result) => {
-		if (result.ok) addMoveCross(iso.x, iso.y);
-		sfx.play(result.ok ? "ui_command_move" : "ui_error", { point: iso });
+	const rallyPoint = hit?.kind === "building" ? centerOfEntity(hit) : iso;
+	const targetId = hit?.kind === "building" ? hit.id : undefined;
+	issue({ type: "setRallyPoint", buildingId, x: rallyPoint.x, y: rallyPoint.y, targetId }, { silent: true }).then((result) => {
+		if (result.ok && targetId) addTargetFlash(targetId, "white");
+		else if (result.ok) addMoveCross(rallyPoint.x, rallyPoint.y);
+		sfx.play(result.ok ? "ui_command_move" : "ui_error", { point: rallyPoint });
 	});
 	view.rallyModeBuildingId = null;
+}
+
+function centerOfEntity(entity: { x: number; y: number; size?: number; width?: number; height?: number }) {
+	return {
+		x: entity.x + ((entity.width ?? entity.size ?? 1) - 1) / 2,
+		y: entity.y + ((entity.height ?? entity.size ?? 1) - 1) / 2,
+	};
 }
 
 function placeBuilding() {

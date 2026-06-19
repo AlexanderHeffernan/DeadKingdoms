@@ -1,4 +1,4 @@
-import type { UnitType } from "../../types.js";
+import type { EntityId, UnitType } from "../../types.js";
 import type { UnitClass } from "../../units/index.js";
 import { DepotBuilding } from "./DepotBuilding.js";
 import type { BuildingSnapshot } from "./types.js";
@@ -6,6 +6,7 @@ import type { BuildingSnapshot } from "./types.js";
 export abstract class ProductionDepotBuilding extends DepotBuilding {
 	queue = [];
 	rallyPoint = null;
+	rallyTargetId: EntityId | null = null;
 
 	canTrain(unitType: UnitType) {
 		return this.trainableUnitClasses().some((Unit) => Unit.type === unitType);
@@ -24,6 +25,7 @@ export abstract class ProductionDepotBuilding extends DepotBuilding {
 			...super.serializeExtra(),
 			queue: this.queue,
 			rallyPoint: this.rallyPoint,
+			rallyTargetId: this.rallyTargetId,
 		};
 	}
 }

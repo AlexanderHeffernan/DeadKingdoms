@@ -24,6 +24,7 @@ export type BuildingSnapshot = {
 	builderIds: UnitId[];
 	queue?: BuildQueueItem[] | undefined;
 	rallyPoint?: Vec2 | null | undefined;
+	rallyTargetId?: string | null | undefined;
 	cooldown?: number | undefined;
 	attackFlash?: number | undefined;
 	amount?: number | undefined;
@@ -100,6 +101,7 @@ export interface BuildingEntity extends GatherTarget {
 	builderIds: UnitId[];
 	queue?: BuildQueueItem[] | undefined;
 	rallyPoint?: Vec2 | null | undefined;
+	rallyTargetId?: string | null | undefined;
 	cooldown?: number | undefined;
 	attackFlash?: number | undefined;
 	amount?: number | undefined;

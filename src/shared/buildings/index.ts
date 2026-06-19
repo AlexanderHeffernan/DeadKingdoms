@@ -42,6 +42,7 @@ export function deserializeBuilding(snapshot: BuildingSnapshot): BuildingEntity 
 	building.builderIds = snapshot.builderIds;
 	if (snapshot.queue !== undefined) building.queue = snapshot.queue;
 	if (snapshot.rallyPoint !== undefined) building.rallyPoint = snapshot.rallyPoint;
+	if (snapshot.rallyTargetId !== undefined) building.rallyTargetId = snapshot.rallyTargetId;
 	if (snapshot.cooldown !== undefined) building.cooldown = snapshot.cooldown;
 	if (snapshot.attackFlash !== undefined) building.attackFlash = snapshot.attackFlash;
 	if (snapshot.amount !== undefined) building.amount = snapshot.amount;

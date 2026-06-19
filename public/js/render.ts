@@ -543,32 +543,41 @@ export class Renderer {
 				Math.min(1, (now - effect.createdAt) / effect.duration),
 			);
 			if (effect.type !== "moveCross") continue;
-			const p = isoToScreen(effect.x, effect.y, view.camera);
 			const alpha = 1 - life;
-			const px = worldPixel(view.camera.zoom || 1);
-			this.overlayLayer.beginFill(0xd83f34, alpha);
-			const s = px * 2;
-			this.overlayLayer.drawRect(
-				Math.round(p.x - s / 2),
-				Math.round(p.y - px * 5),
-				s,
-				px * 10,
-			);
-			this.overlayLayer.drawRect(
-				Math.round(p.x - px * 5),
-				Math.round(p.y - s / 2),
-				px * 10,
-				s,
-			);
-			this.overlayLayer.beginFill(0xffd2c9, alpha);
-			this.overlayLayer.drawRect(
-				Math.round(p.x - px / 2),
-				Math.round(p.y - px / 2),
-				px,
-				px,
-			);
-			this.overlayLayer.endFill();
+			this.drawMoveCross(effect.x, effect.y, view, alpha);
 		}
+		for (const id of state.selectedIds) {
+			const building = state.snapshot?.buildings[id];
+			if (!building?.rallyPoint) continue;
+			this.drawMoveCross(building.rallyPoint.x, building.rallyPoint.y, view, 0.9);
+		}
+	}
+
+	private drawMoveCross(x: number, y: number, view: ViewState, alpha: number) {
+		const p = isoToScreen(x, y, view.camera);
+		const px = worldPixel(view.camera.zoom || 1);
+		this.overlayLayer.beginFill(0xd83f34, alpha);
+		const s = px * 2;
+		this.overlayLayer.drawRect(
+			Math.round(p.x - s / 2),
+			Math.round(p.y - px * 5),
+			s,
+			px * 10,
+		);
+		this.overlayLayer.drawRect(
+			Math.round(p.x - px * 5),
+			Math.round(p.y - s / 2),
+			px * 10,
+			s,
+		);
+		this.overlayLayer.beginFill(0xffd2c9, alpha);
+		this.overlayLayer.drawRect(
+			Math.round(p.x - px / 2),
+			Math.round(p.y - px / 2),
+			px,
+			px,
+		);
+		this.overlayLayer.endFill();
 	}
 
 	private drawSoundDebug(state: GameState, view: ViewState) {

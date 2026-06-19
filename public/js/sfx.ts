@@ -379,6 +379,7 @@ export function commandSoundForTarget(target: Entity | null): SoundEffectName {
 	if (!target) return "ui_command_move";
 	if (target.kind === "resource") return "ui_command_gather";
 	if (target.kind === "building" && target.gatherResource) return "ui_command_gather";
+	if (target.kind === "building" && target.depotGatherKind()) return "ui_command_gather";
 	if (target.ownerId) return "ui_command_attack";
 	return "ui_command_move";
 }

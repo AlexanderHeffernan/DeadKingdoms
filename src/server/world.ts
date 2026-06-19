@@ -738,7 +738,10 @@ function commandAttack(world: World, playerId: PlayerId, body: Extract<CommandPa
 }
 
 function commandGather(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "gather" }>): CommandResult {
-	const resource = world.resources[body.targetId] || gatherableBuilding(world.buildings[body.targetId], playerId);
+	const targetBuilding = world.buildings[body.targetId];
+	const depotResource = targetBuilding?.ownerId === playerId && isComplete(targetBuilding) ? targetBuilding.depotGatherKind() : null;
+	const depotGatherTarget = targetBuilding && depotResource ? findNextResourceNear(world, centerOf(targetBuilding), depotResource, playerId) : null;
+	const resource = world.resources[body.targetId] || gatherableBuilding(targetBuilding, playerId) || depotGatherTarget;
 	if (!resource) return { ok: false, error: "Invalid resource." };
 	let assigned = false;
 	forOwnUnits(world, playerId, body.unitIds, (unit) => {
@@ -856,10 +859,12 @@ function commandDeleteBuilding(world: World, playerId: PlayerId, body: Extract<C
 function commandSetRallyPoint(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "setRallyPoint" }>): CommandResult {
 	const building = world.buildings[body.buildingId];
 	if (!building || building.ownerId !== playerId || building.trainableUnits().length === 0) return { ok: false, error: "Select a production building." };
-	building.rallyPoint = {
+	const target = body.targetId ? world.buildings[body.targetId as BuildingId] : null;
+	building.rallyPoint = target ? centerOf(target) : {
 		x: clamp(Number(body.x), 0, MAP_SIZE - 1),
 		y: clamp(Number(body.y), 0, MAP_SIZE - 1),
 	};
+	building.rallyTargetId = target?.id ?? null;
 	return { ok: true };
 }
 
@@ -1007,7 +1012,7 @@ function stepBuilding(world: World, building: Building, dt: number) {
 			if (!item) return;
 			const unit = createUnit(world, building.ownerId, item.unitType, building.x + building.width + 0.4, building.y + building.height + 0.2);
 			if (building.rallyPoint) {
-				unit.command = { type: "move", ...building.rallyPoint, path: null };
+				assignRallyCommand(world, unit, building.rallyPoint, building.rallyTargetId ?? null);
 			}
 		}
 	}
@@ -1111,18 +1116,20 @@ function assignPostBuildGather(world: World, unit: Unit, resourceKind: ResourceT
 			return;
 		}
 	}
-	const nextBuild = findNextBuildSite(world, unit);
-	if (nextBuild) {
-		nextBuild.builderIds = [...new Set([...(nextBuild.builderIds || []), unit.id])];
-		unit.command = { type: "build", targetId: nextBuild.id, path: null, resourceKind: nextBuild.depotGatherKind(), gatherBuiltFarm: nextBuild.shouldGatherAfterBuild };
-		return;
+	if (resourceKind && unitBehavior(unit).canGather) {
+		const next = findNextResource(world, unit, resourceKind);
+		if (next) {
+			unit.command = { type: "gather", targetId: next.id, resourceKind, progress: 0, path: null };
+			return;
+		}
 	}
-	if (!resourceKind || !unitBehavior(unit).canGather) {
+	const nextBuild = findNextBuildSite(world, unit);
+	if (!nextBuild) {
 		unit.command = { type: "idle" };
 		return;
 	}
-	const next = findNextResource(world, unit, resourceKind);
-	unit.command = next ? { type: "gather", targetId: next.id, resourceKind, progress: 0, path: null } : { type: "idle" };
+	nextBuild.builderIds = [...new Set([...(nextBuild.builderIds || []), unit.id])];
+	unit.command = { type: "build", targetId: nextBuild.id, path: null, resourceKind: nextBuild.depotGatherKind(), gatherBuiltFarm: nextBuild.shouldGatherAfterBuild };
 }
 
 function findNextBuildSite(world: World, unit: Unit): Building | null {
@@ -1146,27 +1153,80 @@ function findNextBuildSite(world: World, unit: Unit): Building | null {
 }
 
 function findNextResource(world: World, unit: Unit, resourceKind: ResourceType | null): ResourceNode | Building | null {
+	return findNextResourceNear(world, unit, resourceKind, unit.ownerId);
+}
+
+function findNextResourceNear(world: World, source: { x: number; y: number }, resourceKind: ResourceType | null, playerId: PlayerId): ResourceNode | Building | null {
 	if (!resourceKind) return null;
 	const RANGE = 30;
 	let best = null;
 	let bestDist = RANGE;
 	for (const r of Object.values(world.resources)) {
 		if (r.amount <= 0 || r.resource !== resourceKind) continue;
-		const d = distance(unit, r);
+		const d = distance(source, r);
 		if (d < bestDist) {
 			best = r;
 			bestDist = d;
 		}
 	}
 	for (const b of Object.values(world.buildings)) {
-		if (!b.canBeGatheredBy(unit.ownerId) || b.gatherResource !== resourceKind || b.gatherExhausted) continue;
-		const d = distance(unit, b);
+		if (!b.canBeGatheredBy(playerId) || b.gatherResource !== resourceKind || b.gatherExhausted) continue;
+		const d = distance(source, centerOf(b));
 		if (d < bestDist) {
 			best = b;
 			bestDist = d;
 		}
 	}
 	return best;
+}
+
+function assignRallyCommand(world: World, unit: Unit, rallyPoint: Vec2, targetId: EntityId | null) {
+	const target = targetId ? world.buildings[targetId as BuildingId] : null;
+	if (target && assignRallyTargetCommand(world, unit, target)) return;
+	const depot = depotAtPoint(world, unit.ownerId, rallyPoint);
+	const resourceKind = depot?.depotGatherKind() || depot?.gatherResource || null;
+	if (resourceKind && unitBehavior(unit).canGather) {
+		const resource = findNextResourceNear(world, depot ? centerOf(depot) : rallyPoint, resourceKind, unit.ownerId);
+		if (resource) {
+			unit.command = { type: "gather", targetId: resource.id, resourceKind, progress: 0, path: null };
+			return;
+		}
+	}
+	unit.command = { type: "move", ...rallyPoint, path: null };
+}
+
+function assignRallyTargetCommand(world: World, unit: Unit, target: Building) {
+	if (target.ownerId === unit.ownerId && target.hp < target.maxHp && unitBehavior(unit).canBuild) {
+		if (isComplete(target)) {
+			const player = world.players[unit.ownerId];
+			if (player && spend(player, repairCost(target))) target.repairPaidUntilHp = target.maxHp;
+				else return false;
+		}
+		target.builderIds = [...new Set([...(target.builderIds || []), unit.id])];
+		unit.command = { type: "build", targetId: target.id, path: null, resourceKind: target.depotGatherKind(), gatherBuiltFarm: target.shouldGatherAfterBuild };
+		return true;
+	}
+	const resourceKind = target.depotGatherKind() || target.gatherResource;
+	if (target.ownerId === unit.ownerId && resourceKind && unitBehavior(unit).canGather) {
+		const resource = target.depotGatherKind()
+			? findNextResourceNear(world, centerOf(target), resourceKind, unit.ownerId)
+			: target.canBeGatheredBy(unit.ownerId) && !target.gatherExhausted ? target : null;
+		if (resource) {
+			unit.command = { type: "gather", targetId: resource.id, resourceKind, progress: 0, path: null };
+			return true;
+		}
+	}
+	unit.command = { type: "move", ...centerOf(target), path: null };
+	return true;
+}
+
+function depotAtPoint(world: World, playerId: PlayerId, point: Vec2): Building | null {
+	return Object.values(world.buildings).find((building) => (
+		building.ownerId === playerId &&
+		isComplete(building) &&
+		(building.depotGatherKind() || building.gatherResource) &&
+		pointInsideEntity(Math.floor(point.x), Math.floor(point.y), building)
+	)) || null;
 }
 
 function nearestDepot(world: World, ownerId: PlayerId, resource: ResourceType, source: { x: number; y: number }) {
