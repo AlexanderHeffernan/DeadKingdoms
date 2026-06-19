@@ -32,10 +32,13 @@ export function createBuilding(type: BuildingType, init: BuildingInit): Building
 }
 
 export function deserializeBuilding(snapshot: BuildingSnapshot): BuildingEntity {
-	const building = createBuilding(snapshot.type, snapshot);
+	const completed = snapshot.completed ?? snapshot.hp >= snapshot.maxHp;
+	const building = createBuilding(snapshot.type, { ...snapshot, completed });
 	building.x = snapshot.x;
 	building.y = snapshot.y;
 	building.hp = snapshot.hp;
+	building.completed = completed;
+	building.repairPaidUntilHp = snapshot.repairPaidUntilHp;
 	building.builderIds = snapshot.builderIds;
 	if (snapshot.queue !== undefined) building.queue = snapshot.queue;
 	if (snapshot.rallyPoint !== undefined) building.rallyPoint = snapshot.rallyPoint;

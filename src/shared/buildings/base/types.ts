@@ -18,6 +18,8 @@ export type BuildingSnapshot = {
 	height: number;
 	hp: number;
 	maxHp: number;
+	completed: boolean;
+	repairPaidUntilHp: number | undefined;
 	vision?: number | undefined;
 	builderIds: UnitId[];
 	queue?: BuildQueueItem[] | undefined;
@@ -36,6 +38,8 @@ export type BuildingInit = {
 	x: number;
 	y: number;
 	hp?: number;
+	completed?: boolean;
+	repairPaidUntilHp?: number | undefined;
 };
 
 export type BuildingClass = {
@@ -68,6 +72,8 @@ export interface BuildingEntity extends GatherTarget {
 	x: number;
 	y: number;
 	hp: number;
+	completed: boolean;
+	repairPaidUntilHp: number | undefined;
 	readonly type: BuildingType;
 	readonly label: string;
 	readonly sprite: string;
@@ -103,6 +109,8 @@ export interface BuildingEntity extends GatherTarget {
 	invincible?: boolean;
 	serialize(): BuildingSnapshot;
 	isComplete(): boolean;
+	markComplete(): void;
+	startConstruction(hp: number): void;
 	canTrain(unitType: UnitType): boolean;
 	trainableUnits(): readonly UnitType[];
 	trainableUnitClasses(): readonly UnitClass[];

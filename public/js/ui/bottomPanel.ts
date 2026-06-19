@@ -171,7 +171,7 @@ function canAfford(resources: Record<string, number>, cost: Record<string, numbe
 }
 
 function isComplete(entity: Building) {
-	return !entity.maxHp || entity.hp >= entity.maxHp;
+	return entity.completed;
 }
 
 function formatCost(cost: Record<string, number>) {

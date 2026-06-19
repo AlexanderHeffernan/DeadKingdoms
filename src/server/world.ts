@@ -670,7 +670,7 @@ function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPay
 	if (body.buildingType === "gate" && replacementWall) return replaceWallWithGate(world, playerId, replacementWall, builders);
 	const building = createBuilding(world, playerId, body.buildingType, x, y);
 	if (!building) return { ok: false, error: "Not enough resources." };
-	building.hp = Math.max(12, Math.floor(building.maxHp * 0.25));
+	building.startConstruction(Math.max(12, Math.floor(building.maxHp * 0.25)));
 	building.builderIds = builders.map((unit) => unit.id);
 	const resourceKind = building.depotGatherKind();
 	for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild };
@@ -686,7 +686,7 @@ function replaceWallWithGate(world: World, playerId: PlayerId, wall: Building, b
 	delete world.buildings[wall.id];
 	const gate = createBuilding(world, playerId, "gate", wall.x, wall.y, true);
 	if (!gate) return { ok: false, error: "Could not place gate." };
-	gate.hp = Math.max(12, Math.floor(gate.maxHp * 0.25));
+	gate.startConstruction(Math.max(12, Math.floor(gate.maxHp * 0.25)));
 	gate.builderIds = builders.map((unit) => unit.id);
 	for (const unit of builders) unit.command = { type: "build", targetId: gate.id, path: null, resourceKind: null, gatherBuiltFarm: false };
 	return { ok: true };
@@ -704,11 +704,18 @@ function ownWallAt(world: World, playerId: PlayerId, x: number, y: number) {
 function commandFinishBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "finishBuild" }>): CommandResult {
 	const building = world.buildings[body.buildingId];
 	if (!building || building.ownerId !== playerId) return { ok: false, error: "Invalid building." };
-	if (isComplete(building)) return { ok: false, error: "Building is already complete." };
+	if (isComplete(building) && building.hp >= building.maxHp) return { ok: false, error: "Building is already fully repaired." };
 	const builders = Object.values(world.units).filter(
 		(unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild,
 	);
 	if (builders.length === 0) return { ok: false, error: "Select build-capable units." };
+	if (isComplete(building)) {
+		const player = world.players[playerId];
+		if (!player) return { ok: false, error: "Player not found." };
+		const cost = repairCost(building);
+		if (!spend(player, cost)) return { ok: false, error: "Not enough resources to repair." };
+		building.repairPaidUntilHp = building.maxHp;
+	}
 	const resourceKind = building.depotGatherKind();
 	building.builderIds = [...new Set([...(building.builderIds || []), ...builders.map((unit) => unit.id)])];
 	for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild };
@@ -1131,6 +1138,9 @@ function gatherTargetFor(entity: ResourceNode | Building): GatherTarget {
 function damage(world: World, target: Unit | Building, amount: number, attackerId: PlayerId) {
 	if (target.kind === "building" && target.invincible) return;
 	target.hp -= amount;
+	if (target.kind === "building" && target.repairPaidUntilHp !== undefined) {
+		target.repairPaidUntilHp = Math.min(target.repairPaidUntilHp, target.hp);
+	}
 	if (target.hp > 0) return;
 	if (target.kind === "building") {
 		emitActionSound(world, "buildingDestroyed", centerOf(target));
@@ -1200,6 +1210,14 @@ function netCost(cost: Partial<Record<ResourceType, number>>, refund: Partial<Re
 		result[resource] = Math.max(0, (result[resource] || 0) - amount);
 	}
 	return result;
+}
+
+function repairCost(building: Building) {
+	const paidUntilHp = building.repairPaidUntilHp ?? building.hp;
+	const missingHealthRatio = Math.max(0, building.maxHp - Math.max(building.hp, paidUntilHp)) / building.maxHp;
+	return Object.fromEntries(
+		Object.entries(building.cost).map(([resource, amount]) => [resource, Math.ceil(amount * missingHealthRatio)]),
+	) as Partial<Record<ResourceType, number>>;
 }
 
 function recalcPlayer(world: World, playerId: PlayerId) {

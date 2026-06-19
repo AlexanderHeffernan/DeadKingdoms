@@ -1231,7 +1231,7 @@ function buildingCost(type: string) {
 function effectiveBuildCost(state: GameState, buildingType: string, x: number, y: number) {
 	const cost = { ...buildingCost(buildingType) } as Partial<Record<ResourceType, number>>;
 	const wall = ownWallAt(state, x, y);
-	if (buildingType !== "gate" || !wall || wall.hp >= wall.maxHp) return cost;
+	if (buildingType !== "gate" || !wall || wall.completed) return cost;
 	for (const [resource, amount] of Object.entries(BUILDING_TYPES.wall.cost) as [ResourceType, number][]) {
 		cost[resource] = Math.max(0, (cost[resource] || 0) - amount);
 	}

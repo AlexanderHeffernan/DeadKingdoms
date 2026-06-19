@@ -120,7 +120,7 @@ export class VillagerUnit extends BaseUnit {
 			unit.command = { type: "idle" };
 			return;
 		}
-		if (context.isComplete(building)) {
+		if (context.isComplete(building) && building.hp >= building.maxHp) {
 			context.assignPostBuildGather(unit, command.resourceKind, command.gatherBuiltFarm ? building : null);
 			return;
 		}
@@ -133,6 +133,7 @@ export class VillagerUnit extends BaseUnit {
 		context.emitActionSound("build", targetPoint);
 		building.hp = Math.min(building.maxHp, building.hp + 38 * dt);
 		if (building.hp >= building.maxHp) {
+			building.markComplete();
 			context.assignPostBuildGather(unit, command.resourceKind, command.gatherBuiltFarm ? building : null);
 		}
 	}

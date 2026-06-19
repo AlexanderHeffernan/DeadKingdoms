@@ -785,7 +785,7 @@ function canAffordBuildAt(buildingType: BuildingType, x: number, y: number) {
 function effectiveBuildCost(buildingType: BuildingType, x: number, y: number) {
 	const cost = { ...(BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES]?.cost || {}) } as Partial<Record<ResourceType, number>>;
 	const wall = ownWallAt(x, y);
-	if (buildingType !== "gate" || !wall || wall.hp >= wall.maxHp) return cost;
+	if (buildingType !== "gate" || !wall || wall.completed) return cost;
 	for (const [resource, amount] of Object.entries(BUILDING_TYPES.wall.cost) as [ResourceType, number][]) {
 		cost[resource] = Math.max(0, (cost[resource] || 0) - amount);
 	}

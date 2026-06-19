@@ -10,6 +10,8 @@ import townCenterFlag from "./town_centre_flag_v2.png";
 
 import soldierBase from "./soldier_base.png";
 import soldierFlag from "./soldier_flag.png";
+import villagerBase from "./villager_base.png";
+import villagerFlag from "./villager_flag.png";
 
 import type { SpriteName } from "../../../src/shared/types.js";
 
@@ -32,5 +34,6 @@ export const pngSprites: Partial<Record<SpriteName, PngSprite>> = {
   tree: { base: pine, width: 16, height: 24 },
   berry: { base: berryBush, width: 16, height: 16 },
   townCenter: { base: townCenterBase, flag: townCenterFlag, width: 64, height: 64 },
-  soldier: { base: soldierBase, flag: soldierFlag, width: 16, height: 16 }
+  soldier: { base: soldierBase, flag: soldierFlag, width: 16, height: 16 },
+  villager: { base: villagerBase, flag: villagerFlag, width: 16, height: 16 }
 };

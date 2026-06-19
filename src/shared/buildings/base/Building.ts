@@ -9,6 +9,8 @@ export abstract class Building implements BuildingEntity {
 	x;
 	y;
 	hp;
+	completed;
+	repairPaidUntilHp: number | undefined;
 	builderIds = [];
 	invincible?: boolean;
 
@@ -18,6 +20,8 @@ export abstract class Building implements BuildingEntity {
 		this.x = Math.round(init.x);
 		this.y = Math.round(init.y);
 		this.hp = init.hp ?? this.maxHp;
+		this.completed = init.completed ?? true;
+		this.repairPaidUntilHp = init.repairPaidUntilHp;
 	}
 
 	get type() { return this.definition.type; }
@@ -61,6 +65,8 @@ export abstract class Building implements BuildingEntity {
 			height: this.height,
 			hp: this.hp,
 			maxHp: this.maxHp,
+			completed: this.completed,
+			repairPaidUntilHp: this.repairPaidUntilHp,
 			vision: this.vision,
 			builderIds: this.builderIds,
 			...this.serializeExtra(),
@@ -72,7 +78,17 @@ export abstract class Building implements BuildingEntity {
 	}
 
 	isComplete() {
-		return this.hp >= this.maxHp;
+		return this.completed;
+	}
+
+	markComplete() {
+		this.completed = true;
+	}
+
+	startConstruction(hp: number) {
+		this.completed = false;
+		this.hp = Math.min(this.maxHp, Math.max(1, hp));
+		this.repairPaidUntilHp = undefined;
 	}
 
 	canTrain(_unitType: UnitType) {
