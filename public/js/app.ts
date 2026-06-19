@@ -71,6 +71,7 @@ let zombieHordePending = false;
 let lastFrameAt = performance.now();
 let smoothedFps = 60;
 let lastPingReportAt = 0;
+let adminDiagnosticsVisible = false;
 const ui = new UI(state, {
 	setBuildMode(type) {
 		view.buildMode = type;
@@ -381,7 +382,8 @@ function connectEvents() {
 		}
 		applyVisibility(snap);
 		state.snapshot = snap;
-		maybeReportPing(Math.max(0, Date.now() - snap.now));
+		adminDiagnosticsVisible = snap.admin !== null;
+		if (adminDiagnosticsVisible) maybeReportPing(Math.max(0, Date.now() - snap.now));
 		rememberStaticObjects();
 		cullSelection();
 		ui.render();
@@ -411,6 +413,7 @@ function resetToJoin(message: string) {
 	localStorage.removeItem("rtsPlayerId");
 	state.playerId = null;
 	state.snapshot = null;
+	adminDiagnosticsVisible = false;
 	state.selectedIds.clear();
 	state.effects = [];
 	centered = false;
@@ -467,6 +470,10 @@ function drawLoop() {
 }
 
 function updateFpsStat() {
+	if (!adminDiagnosticsVisible) {
+		lastFrameAt = performance.now();
+		return;
+	}
 	const now = performance.now();
 	const dt = Math.max(1, now - lastFrameAt);
 	lastFrameAt = now;

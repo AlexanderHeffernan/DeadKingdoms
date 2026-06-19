@@ -58,3 +58,7 @@ docker compose down
 - Villagers gather wood/ore/food.
 - Farms, houses, barracks, watch towers, town centers, trees, ore, villagers, and soldiers.
 - Simple combat, destruction, ruins, and leaderboard.
+
+## Credits
+
+- UI font: [C&C Red Alert](https://www.dafont.com/c-c-red-alert-inet.font) by N3tRunn3r, distributed as 100% freeware. The original font README is included at `public/fonts/red-alert-inet-README.txt`.

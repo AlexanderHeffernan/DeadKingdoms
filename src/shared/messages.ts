@@ -10,6 +10,7 @@ export function makeSnapshot(
 	sentExplored: Set<number> | null = null,
 ): Snapshot {
 	const player = playerId ? world.players[playerId] : null;
+	const admin = buildAdminSnapshot(world, player?.adminLevel);
 	const visible = playerId && !player?.godMode ? cachedVisibility(world, playerId) : null;
 	const visibleSet = visible ? visible.visible : null;
 	const filterVisible = <T extends { x: number; y: number; size?: number }>(entities: Record<string, T>, set = visibleSet): Record<string, T> => {
@@ -79,11 +80,13 @@ export function makeSnapshot(
 		notices: world.notices.slice(-8),
 		soundDebug: player?.soundDebug ? buildSoundDebugSources(world) : null,
 		pathDebug: player?.pathDebug === true,
-		serverPerf: {
-			tps: world.serverPerf.tps,
-			tickMs: world.serverPerf.tickMs,
-		},
-		admin: buildAdminSnapshot(world, player?.adminLevel),
+		serverPerf: admin
+			? {
+				tps: world.serverPerf.tps,
+				tickMs: world.serverPerf.tickMs,
+			}
+			: null,
+		admin,
 	};
 }
 

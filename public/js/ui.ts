@@ -61,7 +61,7 @@ export class UI {
 		});
 		this.components = [
 			new ResourcePanel(state, mustGet("resources"), hoverCard),
-			new TopPanel(state, mustGet("status"), mustGet("ping"), mustGet("serverPerf"), mustGet("leaderboard")),
+			new TopPanel(state, mustGet("status"), mustGet("ping"), mustGet("fps"), mustGet("serverPerf"), mustGet("leaderboard")),
 			new AdminPopup({
 				panel: mustGet("adminPanel"),
 				heading: mustGet("adminHeading"),

@@ -17,6 +17,7 @@ export interface LeaderboardEntry {
 	score: number;
 	defeated: boolean;
 	joinedAt: number;
+	firstPlaceSince: number | null;
 }
 
 /** Debug-only sound source sent to clients that enable the sound overlay. */
@@ -110,6 +111,6 @@ export interface Snapshot {
 	notices: Notice[];
 	soundDebug: SoundDebugSource[] | null;
 	pathDebug: boolean;
-	serverPerf: ServerPerfStats;
+	serverPerf: ServerPerfStats | null;
 	admin: AdminSnapshot | null;
 }

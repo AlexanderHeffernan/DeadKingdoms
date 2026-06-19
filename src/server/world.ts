@@ -247,7 +247,7 @@ export function command(world: World, playerId: PlayerId, body: CommandPayload):
 
 export function stepWorld(world: World, dt: number) {
 	const tickStartedAt = performance.now();
-	updateServerTps(world, tickStartedAt);
+	if (hasAdminViewer(world)) updateServerTps(world, tickStartedAt);
 	try {
 		world.tick += 1;
 		rebuildOccupancy(world);
@@ -263,7 +263,7 @@ export function stepWorld(world: World, dt: number) {
 		for (const playerId of Object.keys(world.players)) recalcPlayer(world, playerId);
 		updateLeaderboard(world);
 	} finally {
-		updateServerTickDuration(world, performance.now() - tickStartedAt);
+		if (hasAdminViewer(world)) updateServerTickDuration(world, performance.now() - tickStartedAt);
 	}
 }
 
@@ -305,6 +305,10 @@ function updateServerTickDuration(world: World, tickMs: number) {
 	if (world.serverPerf.samples.length > SERVER_PERF_SAMPLE_LIMIT) {
 		world.serverPerf.samples.splice(0, world.serverPerf.samples.length - SERVER_PERF_SAMPLE_LIMIT);
 	}
+}
+
+function hasAdminViewer(world: World) {
+	return Object.values(world.players).some((player) => player.adminLevel);
 }
 
 function smoothMetric(current: number, next: number) {
@@ -1176,10 +1180,29 @@ function isComplete(building: Building): boolean {
 }
 
 function updateLeaderboard(world: World) {
-	world.leaderboard = Object.values(world.players)
+	const leaders = Object.values(world.players)
 		.filter((player) => !player.defeated)
-		.map((player) => ({ id: player.id, name: player.name, color: player.color, score: player.score, defeated: player.defeated, joinedAt: player.joinedAt }))
 		.sort((a, b) => b.score - a.score);
+	const leader = leaders[0] ?? null;
+	if (!leader) {
+		delete world.firstPlacePlayerId;
+		delete world.firstPlaceSince;
+		world.leaderboard = [];
+		return;
+	}
+	if (world.firstPlacePlayerId !== leader.id) {
+		world.firstPlacePlayerId = leader.id;
+		world.firstPlaceSince = Date.now();
+	}
+	world.leaderboard = leaders.map((player) => ({
+		id: player.id,
+		name: player.name,
+		color: player.color,
+		score: player.score,
+		defeated: player.defeated,
+		joinedAt: player.joinedAt,
+		firstPlaceSince: player.id === world.firstPlacePlayerId ? world.firstPlaceSince ?? null : null,
+	}));
 }
 
 function notice(world: World, text: string) {

@@ -2,6 +2,7 @@ import type { AdminSnapshot, ServerPerfSample } from "../../../src/shared/types.
 import { aliveTime, escapeHtml, formatClock, timeAgo } from "./dom.js";
 
 const CHART_PLOT = { left: 96, top: 28, right: 32, bottom: 58 };
+const UI_FONT = `"Red Alert INET", sans-serif`;
 
 export class AdminDashboard {
 	private readonly panel: HTMLElement;
@@ -292,7 +293,7 @@ export class AdminDashboard {
 			`TPS ${sample.tps.toFixed(2)}`,
 			`#${sample.tick}`,
 		];
-		ctx.font = "16px sans-serif";
+		ctx.font = `16px ${UI_FONT}`;
 		const padding = 10;
 		const lineHeight = 21;
 		const boxWidth = Math.max(...lines.map((line) => ctx.measureText(line).width)) + padding * 2;
@@ -340,7 +341,7 @@ function drawChartGrid(ctx: CanvasRenderingContext2D, width: number, height: num
 	const bottom = CHART_PLOT.bottom;
 	ctx.strokeStyle = "rgb(244 239 230 / 0.16)";
 	ctx.fillStyle = "#cfc7b7";
-	ctx.font = "18px sans-serif";
+	ctx.font = `18px ${UI_FONT}`;
 	ctx.lineWidth = 1;
 	for (let i = 0; i <= 4; i += 1) {
 		const y = top + ((height - top - bottom) / 4) * i;

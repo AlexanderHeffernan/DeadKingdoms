@@ -54,6 +54,8 @@ export interface World {
 	adminLogs: AdminLogEntry[];
 	actionNoises: ActionNoise[];
 	leaderboard: LeaderboardEntry[];
+	firstPlacePlayerId?: PlayerId;
+	firstPlaceSince?: number;
 	tick: number;
 	spawnTimers: Record<string, number>;
 	serverPerf: ServerPerfStats & { lastTickAt?: number; samples: ServerPerfSample[] };
