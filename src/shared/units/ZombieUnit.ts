@@ -5,6 +5,7 @@ import type { Unit, Vec2 } from "../types.js";
 const ZOMBIE_TARGET_SIGHT_RANGE = 10.5;
 const ZOMBIE_PATH_STUCK_TICKS = 10;
 const ZOMBIE_PROGRESS_EPSILON = 0.03;
+const ZOMBIE_SIDEWAYS_PROGRESS_TOLERANCE = 0.015;
 
 export class ZombieUnit extends BaseUnit {
 	public static readonly type = "zombie";
@@ -68,8 +69,16 @@ export class ZombieUnit extends BaseUnit {
 
 	private followHordeTarget(context: UnitSimulationContext, zombie: Unit, target: Vec2, dt: number) {
 		zombie.facing = target.x < zombie.x ? "left" : "right";
+		if (context.distance(zombie, target) <= 0.45) {
+			zombie.zombieStuckTicks = 0;
+			zombie.zombiePath = null;
+			zombie.zombiePathTarget = null;
+			zombie.retargetIn = 0;
+			return;
+		}
 		this.moveTowardGoal(context, zombie, target, dt);
 		if (context.distance(zombie, target) >= 0.45) return;
+		zombie.zombieStuckTicks = 0;
 		zombie.retargetIn = 0;
 	}
 
@@ -96,17 +105,18 @@ export class ZombieUnit extends BaseUnit {
 		const usedPath = (zombie.zombieStuckTicks || 0) >= ZOMBIE_PATH_STUCK_TICKS;
 		if (usedPath) context.moveZombieWithPath(zombie, target, this.speed * dt);
 		else {
-			context.moveAroundSmallObstacle(zombie, target, this.speed * dt);
+			context.moveZombieSteered(zombie, target, this.speed * dt);
 			zombie.zombiePath = null;
 			zombie.zombiePathTarget = null;
 		}
 		const afterDistance = context.distance(zombie, target);
 		const moved = !this.didNotMove(context, before, zombie);
 		const madeProgress = afterDistance < beforeDistance - ZOMBIE_PROGRESS_EPSILON;
+		const movedAroundObstacle = moved && afterDistance <= beforeDistance + ZOMBIE_SIDEWAYS_PROGRESS_TOLERANCE;
 		if (moved) {
 			this.rememberDriftDirection(context, zombie, before);
 		}
-		if (madeProgress) zombie.zombieStuckTicks = 0;
+		if (madeProgress || movedAroundObstacle) zombie.zombieStuckTicks = 0;
 		else zombie.zombieStuckTicks = (zombie.zombieStuckTicks || 0) + 1;
 		return { moved, usedPath };
 	}
@@ -140,5 +150,6 @@ export class ZombieUnit extends BaseUnit {
 		zombie.zombiePathTarget = null;
 		zombie.zombieStuckTicks = 0;
 		zombie.zombieDriftDirection = null;
+		zombie.zombieHordeSourceTarget = null;
 	}
 }

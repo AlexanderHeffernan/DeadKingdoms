@@ -38,6 +38,8 @@ export interface PathingWorldState {
 	idleUnitTilesTick?: number;
 	movingUnitGrid?: unknown;
 	movingUnitGridTick?: number;
+	movingZombieGrid?: unknown;
+	movingZombieGridTick?: number;
 	pathRequestsThisTick: number;
 	lastRequestTick: number;
 }

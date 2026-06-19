@@ -15,7 +15,7 @@ import type { UnitSimulationContext } from "../shared/units/index.js";
 import type { GatherTarget } from "../shared/buildings/base/index.js";
 import { id } from "./id.js";
 import { clamp, distance, footprintHeight, footprintWidth, rectsOverlap, type Footprint } from "./math.js";
-import { isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
+import { isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { stepZombieDirector } from "./zombieDirector.js";
@@ -262,9 +262,9 @@ export function stepWorld(world: World, dt: number) {
 		world.tick += 1;
 		rebuildOccupancy(world);
 		const context = createSimulationContext(world);
-		stepActionNoises(world, dt);
 		stepSpawner(context, zombieSpawnPolicy, dt);
 		stepZombieDirector(world, dt);
+		stepActionNoises(world, dt);
 		stepResourceDecay(world, dt);
 		stepRuinDecay(world, dt);
 		for (const unit of Object.values(world.units)) unitBehavior(unit).step(context, unit, dt);
@@ -342,6 +342,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		moveNearTarget: (unit, command, target, range, maxStep) => moveNearTarget(world, unit, command, target, range, maxStep),
 		moveUnit: (unit, target, maxStep) => moveUnit(world, unit, target, maxStep),
 		moveZombieWithPath: (unit, target, maxStep) => moveZombieWithPath(world, unit, target, maxStep),
+		moveZombieSteered: (unit, target, maxStep) => moveZombieSteered(world, unit, target, maxStep),
 		moveAroundSmallObstacle: (unit, target, maxStep) => moveAroundSmallObstacle(world, unit, target, maxStep),
 		centerOf,
 		distance,

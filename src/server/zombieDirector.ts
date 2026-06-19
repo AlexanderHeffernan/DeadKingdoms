@@ -14,11 +14,13 @@ import {
 import type { ActionNoise } from "../shared/types.js";
 import { id } from "./id.js";
 import { clamp, distance } from "./math.js";
+import { isWalkable, nearestWalkablePointAround } from "./pathing.js";
 import { ZOMBIE_OWNER_ID } from "./zombieSpawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 
 const HORDE_CELL_SIZE = 4;
 const HORDE_JOIN_RADIUS = 3;
+const HORDE_COHORT_RADIUS = 8;
 const HORDE_MERGE_PADDING = 2.5;
 const HORDE_TARGET_MEMORY_SECONDS = 10;
 const HORDE_RETARGET_TICKS = 8;
@@ -33,12 +35,21 @@ const HORDE_WANDER_MIN_DISTANCE = 2;
 const HORDE_WANDER_MAX_DISTANCE = 6;
 const HORDE_WANDER_REACHED_DISTANCE = 2;
 const HORDE_HEARING_MEMBER_SAMPLES = 12;
+const HORDE_SLOT_BASE_RADIUS = 0.12;
+const HORDE_SLOT_RADIUS_PER_MEMBER = 0.08;
+const HORDE_SLOT_MAX_RADIUS = 1.25;
+const HORDE_SLOT_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const HORDE_MEMBER_SOUND_RATIO = 0.08;
+const HORDE_MEMBER_SOUND_MIN_LISTENERS = 2;
+const HORDE_MEMBER_SOUND_MAX_LISTENERS = 8;
+const LOUD_ACTION_SOUND_THRESHOLD = 400;
 
 type HeardSound = {
 	direction: Vec2;
 	target: Vec2;
 	significance: number;
 	worldSignificance: number;
+	loudAction: boolean;
 };
 
 export function stepZombieDirector(world: World, dt: number) {
@@ -86,14 +97,14 @@ function buildHordes(world: World, zombies: Unit[]): Record<string, ZombieHorde>
 	const grid = new SpatialGrid(zombies, HORDE_CELL_SIZE);
 	const visited = new Set<string>();
 	const previous = world._zombieHordes || {};
+	const claimedPreviousHordeIds = new Set<string>();
 	const hordes: Record<string, ZombieHorde> = {};
 
 	for (const zombie of zombies) {
 		if (visited.has(zombie.id)) continue;
 		const members = collectConnectedZombies(grid, zombie, visited);
 		const previousHordes = previousHordesFor(previous, members);
-		const previousHorde = previousHordes[0] || null;
-		const horde = makeHorde(previousHorde?.id || id("h"), members, previousHordes);
+		const horde = makeHorde(nextHordeId(previousHordes, claimedPreviousHordeIds), members, previousHordes);
 		hordes[horde.id] = horde;
 		for (const memberId of horde.memberIds) {
 			const member = world.units[memberId];
@@ -103,6 +114,15 @@ function buildHordes(world: World, zombies: Unit[]): Record<string, ZombieHorde>
 	}
 
 	return hordes;
+}
+
+function nextHordeId(previousHordes: ZombieHorde[], claimedPreviousHordeIds: Set<string>) {
+	const previous = previousHordes[0] || null;
+	if (previous && !claimedPreviousHordeIds.has(previous.id)) {
+		claimedPreviousHordeIds.add(previous.id);
+		return previous.id;
+	}
+	return id("h");
 }
 
 function refreshHordes(world: World) {
@@ -127,6 +147,7 @@ function collectConnectedZombies(grid: SpatialGrid<Unit>, seed: Unit, visited: S
 			const other = entry.item;
 			if (visited.has(other.id)) continue;
 			if (distance(zombie, other) > HORDE_JOIN_RADIUS) continue;
+			if (distance(seed, other) > HORDE_COHORT_RADIUS) continue;
 			visited.add(other.id);
 			queue.push(other);
 		}
@@ -151,8 +172,6 @@ function makeHorde(idValue: string, members: Unit[], previousHordes: ZombieHorde
 	const center = averagePoint(members);
 	const radius = clamp(Math.sqrt(members.length) * 1.4 + HORDE_MERGE_PADDING, HORDE_MIN_RADIUS, HORDE_MAX_RADIUS);
 	const previous = previousHordes[0] || null;
-	const driftSource = previousHordes.find((horde) => horde.driftDirection);
-	const soundSource = previousHordes.find((horde) => horde.soundMemory);
 	return {
 		id: idValue,
 		memberIds: members.map((unit) => unit.id),
@@ -162,8 +181,8 @@ function makeHorde(idValue: string, members: Unit[], previousHordes: ZombieHorde
 		targetMemory: previous?.targetMemory || 0,
 		wanderTarget: previous?.wanderTarget || null,
 		targetKind: previous?.targetKind || null,
-		driftDirection: driftSource?.driftDirection || previous?.driftDirection || null,
-		soundMemory: soundSource?.soundMemory || previous?.soundMemory || null,
+		driftDirection: previous?.driftDirection || null,
+		soundMemory: previous?.soundMemory || null,
 	};
 }
 
@@ -174,11 +193,14 @@ function assignZombieGoals(world: World, horde: ZombieHorde) {
 		return;
 	}
 	const goalKind = horde.targetKind || (horde.target ? "target" : "wander");
+	const memberIds = stableMemberIds(horde);
 
-	for (const memberId of horde.memberIds) {
+	for (let index = 0; index < memberIds.length; index += 1) {
+		const memberId = memberIds[index]!;
 		const zombie = world.units[memberId];
 		if (!zombie) continue;
-		zombie.hordeTarget = target;
+		zombie.hordeTarget = hordeMemberTarget(world, horde, zombie, target, index, memberIds.length);
+		zombie.zombieHordeSourceTarget = target;
 		zombie.zombieGoalKind = goalKind;
 	}
 }
@@ -206,6 +228,7 @@ function clearZombieGoals(world: World, horde: ZombieHorde) {
 		const zombie = world.units[memberId];
 		if (!zombie) continue;
 		zombie.hordeTarget = null;
+		zombie.zombieHordeSourceTarget = null;
 		zombie.zombieGoalKind = null;
 	}
 }
@@ -230,30 +253,73 @@ function assignDirectActionSoundGoals(world: World, hordes: ZombieHorde[]) {
 		}
 		const target = reachedExistingSound ? driftTarget(horde) || heardSound.target : heardSound.target;
 		const goalKind = reachedExistingSound ? "drift" : "sound";
-		for (const memberId of horde.memberIds) {
+		const memberIds = stableMemberIds(horde);
+		for (let index = 0; index < memberIds.length; index += 1) {
+			const memberId = memberIds[index]!;
 			const zombie = world.units[memberId];
 			if (!zombie) continue;
-			if (!zombie.hordeTarget || distance(zombie.hordeTarget, target) > 0.2) {
+			if (!zombie.zombieHordeSourceTarget || distance(zombie.zombieHordeSourceTarget, target) > 0.2) {
 				zombie.zombiePath = null;
 				zombie.zombiePathTarget = null;
 				zombie.zombieStuckTicks = 0;
 			}
-			zombie.hordeTarget = target;
+			zombie.hordeTarget = hordeMemberTarget(world, horde, zombie, target, index, memberIds.length);
+			zombie.zombieHordeSourceTarget = target;
 			zombie.zombieGoalKind = goalKind;
 		}
 	}
 }
 
+function stableMemberIds(horde: ZombieHorde) {
+	return [...horde.memberIds].sort();
+}
+
+function hordeMemberTarget(world: World, horde: ZombieHorde, zombie: Unit, target: Vec2, index: number, count: number): Vec2 {
+	if (count <= 1) return walkableHordeTarget(world, zombie, target);
+	const approach = directionBetween(horde.center, target) || horde.driftDirection || { x: 1, y: 0 };
+	const side = { x: -approach.y, y: approach.x };
+	const radius = Math.min(HORDE_SLOT_MAX_RADIUS, HORDE_SLOT_BASE_RADIUS + Math.sqrt(count) * HORDE_SLOT_RADIUS_PER_MEMBER);
+	const angle = index * HORDE_SLOT_GOLDEN_ANGLE + (unitHash(zombie.id) % 360) * Math.PI / 180;
+	const lateral = Math.cos(angle) * radius;
+	const depth = Math.sin(angle) * radius * 0.75;
+	return walkableHordeTarget(world, zombie, {
+		x: target.x + side.x * lateral + approach.x * depth,
+		y: target.y + side.y * lateral + approach.y * depth,
+	});
+}
+
+function walkableHordeTarget(world: World, zombie: Unit, target: Vec2): Vec2 {
+	const point = {
+		x: clamp(target.x, 0.5, MAP_SIZE - 0.5),
+		y: clamp(target.y, 0.5, MAP_SIZE - 0.5),
+	};
+	const tile = { x: Math.round(point.x), y: Math.round(point.y) };
+	if (isWalkable(world, tile.x, tile.y)) return point;
+	return nearestWalkablePointAround(world, point, zombie);
+}
+
 function heardActionSoundForHordeMembers(world: World, horde: ZombieHorde): HeardSound | null {
 	let best: HeardSound | null = null;
+	let listeners = 0;
 	for (const memberId of horde.memberIds) {
 		const zombie = world.units[memberId];
 		if (!zombie) continue;
 		const heardSound = heardActionSoundForPoint(world, zombie);
 		if (!heardSound) continue;
+		listeners += 1;
 		if (!best || heardSound.significance > best.significance) best = heardSound;
 	}
+	if (best?.loudAction) return best;
+	if (listeners < requiredActionSoundListeners(horde)) return null;
 	return best;
+}
+
+function requiredActionSoundListeners(horde: ZombieHorde) {
+	if (horde.memberIds.length <= HORDE_HEARING_MEMBER_SAMPLES) return 1;
+	return Math.min(
+		HORDE_MEMBER_SOUND_MAX_LISTENERS,
+		Math.max(HORDE_MEMBER_SOUND_MIN_LISTENERS, Math.ceil(horde.memberIds.length * HORDE_MEMBER_SOUND_RATIO)),
+	);
 }
 
 function heardActionSoundForPoint(world: World, point: Vec2): HeardSound | null {
@@ -269,6 +335,7 @@ function heardActionSoundForPoint(world: World, point: Vec2): HeardSound | null 
 			target: { x: noise.x, y: noise.y },
 			significance: Math.min(SOUND_FIELD_MAX_STRENGTH, signal),
 			worldSignificance: Math.min(SOUND_FIELD_MAX_STRENGTH, signal),
+			loudAction: isLoudActionSound(noise),
 		};
 	}
 	return null;
@@ -293,12 +360,17 @@ function heardActionNoise(noise: ActionNoise, horde: ZombieHorde, points: Vec2[]
 	const direction = length > 0.001 ? { x: dx / length, y: dy / length } : horde.soundMemory?.direction || null;
 	if (!direction) return null;
 	const significance = Math.min(SOUND_FIELD_MAX_STRENGTH, bestSignal);
-	return {
-		direction,
-		target: { x: noise.x, y: noise.y },
-		significance,
-		worldSignificance: significance,
-	};
+		return {
+			direction,
+			target: { x: noise.x, y: noise.y },
+			significance,
+			worldSignificance: significance,
+			loudAction: isLoudActionSound(noise),
+		};
+}
+
+function isLoudActionSound(noise: ActionNoise) {
+	return noise.action === "devBang" || noise.sound >= LOUD_ACTION_SOUND_THRESHOLD;
 }
 
 function bestActionNoiseSignal(noise: ActionNoise, points: Vec2[]): number {
@@ -358,12 +430,13 @@ function heardSoundAt(cells: SoundFieldCell[], horde: ZombieHorde, point: Vec2):
 	if (significance <= 0 && worldSignificance <= 0) return null;
 	const direction = soundDirectionFromPoint(horde.center, cell, horde.soundMemory?.direction || null);
 	if (!direction) return null;
-	return {
-		direction,
-		target: { x: cell.x, y: cell.y },
-		significance,
-		worldSignificance,
-	};
+		return {
+			direction,
+			target: { x: cell.x, y: cell.y },
+			significance,
+			worldSignificance,
+			loudAction: false,
+		};
 }
 
 function cellSignificanceForHorde(cell: SoundFieldCell, horde: ZombieHorde): number {
@@ -438,6 +511,12 @@ function directionBetween(from: Vec2, to: Vec2): Vec2 | null {
 
 function nonZeroDirection(direction: Vec2): Vec2 | null {
 	return Math.hypot(direction.x, direction.y) > 0.001 ? direction : null;
+}
+
+function unitHash(idValue: string): number {
+	let hash = 0;
+	for (let i = 0; i < idValue.length; i += 1) hash = (hash * 31 + idValue.charCodeAt(i)) | 0;
+	return Math.abs(hash);
 }
 
 function nearestPoint<T extends Unit | Building>(entities: T[], point: Vec2, range: number): T | null {

@@ -3,7 +3,7 @@ import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
 import type { ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
 import { ZombieUnit, type UnitSimulationContext } from "../shared/units/index.js";
-import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
+import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 	const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -283,13 +283,63 @@ test("moveZombieWithPath routes around a small cluster of trees", () => {
 	assert.equal(isWalkable(world, Math.round(zombie.x), Math.round(zombie.y)), true);
 });
 
+test("moveZombieSteered smoothly follows the edge of a larger forest", () => {
+	const blocked = [];
+	for (let y = 7; y <= 13; y += 1) {
+		for (let x = 11; x <= 14; x += 1) blocked.push({ x, y });
+	}
+	const world = makeWorld(blocked);
+	const zombie = makeUnit(8, 10, "z-forest-steer");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.hordeTarget = { x: 18, y: 10 };
+	addUnits(world, [zombie]);
+	const target = { x: 18, y: 10 };
+	let stalledTicks = 0;
+
+	for (let tick = 0; tick < 90 && distanceBetween(zombie, target) > 0.6; tick += 1) {
+		const before = { x: zombie.x, y: zombie.y };
+		world.tick = tick + 1;
+		moveZombieSteered(world, zombie, target, 0.135);
+		if (distanceBetween(before, zombie) < 0.01) stalledTicks += 1;
+		assert.equal(isWalkable(world, Math.round(zombie.x), Math.round(zombie.y)), true);
+	}
+
+	assert.equal(stalledTicks, 0);
+	assert.ok(zombie.x > 14);
+	assert.ok(distanceBetween(zombie, target) < 3.5);
+});
+
+test("moveZombieSteered uses nearby zombies as soft crowd pressure", () => {
+	const world = makeWorld();
+	const a = makeUnit(10, 10, "z-crowd-a");
+	const b = makeUnit(10.04, 10, "z-crowd-b");
+	for (const zombie of [a, b]) {
+		zombie.type = "zombie";
+		zombie.ownerId = "zombies" as Unit["ownerId"];
+		zombie.hordeTarget = { x: 16, y: 10 };
+	}
+	addUnits(world, [a, b]);
+	const beforeDistance = distanceBetween(a, b);
+
+	for (let tick = 0; tick < 10; tick += 1) {
+		world.tick = tick + 1;
+		moveZombieSteered(world, a, a.hordeTarget!, 0.12);
+		moveZombieSteered(world, b, b.hordeTarget!, 0.12);
+	}
+
+	assert.ok(distanceBetween(a, b) > beforeDistance + 0.05);
+	assert.ok(a.x > 10.2);
+	assert.ok(b.x > 10.2);
+});
+
 test("zombie movement escalates to pathing when sidesteps do not make progress", () => {
 	const world = makeWorld();
 	const zombie = makeUnit(8, 10, "z-progress-stuck");
 	zombie.type = "zombie";
 	zombie.ownerId = "zombies" as Unit["ownerId"];
 	zombie.hordeTarget = { x: 14, y: 10 };
-	let sidestepCalls = 0;
+	let steeringCalls = 0;
 	let pathCalls = 0;
 	const behavior = new ZombieUnit();
 	const context = {
@@ -297,11 +347,11 @@ test("zombie movement escalates to pathing when sidesteps do not make progress",
 		nearbyTargetUnits: () => [],
 		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
 		distance: distanceBetween,
-		moveAroundSmallObstacle: (unit: Unit) => {
-			sidestepCalls += 1;
-			unit.y += 0.04;
+		moveZombieSteered: () => {
+			steeringCalls += 1;
 			return false;
 		},
+		moveAroundSmallObstacle: () => false,
 		moveZombieWithPath: (unit: Unit) => {
 			pathCalls += 1;
 			unit.x += 0.2;
@@ -311,7 +361,7 @@ test("zombie movement escalates to pathing when sidesteps do not make progress",
 
 	for (let tick = 0; tick < 11; tick += 1) behavior.step(context, zombie, 0.1);
 
-	assert.equal(sidestepCalls, 10);
+	assert.equal(steeringCalls, 10);
 	assert.equal(pathCalls, 1);
 	assert.equal(zombie.zombieStuckTicks, 0);
 });
@@ -332,11 +382,12 @@ test("nearby combat aggro overrides zombie horde goals", () => {
 		nearbyTargetUnits: () => [target],
 		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
 		distance: distanceBetween,
-		moveAroundSmallObstacle: (unit: Unit) => {
+		moveZombieSteered: (unit: Unit) => {
 			moved = true;
 			unit.x += 0.2;
 			return false;
 		},
+		moveAroundSmallObstacle: () => false,
 		moveZombieWithPath: () => false,
 		damage: () => {
 			damaged = true;
@@ -363,12 +414,38 @@ test("zombie unit does not clear director horde target after reaching it", () =>
 		nearbyTargetUnits: () => [],
 		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
 		distance: distanceBetween,
+		moveZombieSteered: () => false,
 		moveAroundSmallObstacle: () => false,
 		moveZombieWithPath: () => false,
 	} as unknown as UnitSimulationContext;
 
 	behavior.step(context, zombie, 0.1);
 
+	assert.deepEqual(zombie.hordeTarget, { x: 8.1, y: 10 });
+});
+
+test("zombie unit does not become stuck while already at its horde target", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-arrived-horde-target");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.hordeTarget = { x: 8.1, y: 10 };
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: () => {
+			throw new Error("arrived horde zombies should not request movement");
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+	} as unknown as UnitSimulationContext;
+
+	for (let tick = 0; tick < 12; tick += 1) behavior.step(context, zombie, 0.1);
+
+	assert.equal(zombie.zombieStuckTicks, 0);
 	assert.deepEqual(zombie.hordeTarget, { x: 8.1, y: 10 });
 });
 

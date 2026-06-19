@@ -25,6 +25,13 @@ const MOVING_COHESION_CELL_SIZE = 1.4;
 const MOVING_COHESION_RADIUS = 0.75;
 const MOVING_COHESION_STRENGTH = 0.7;
 const MOVING_COHESION_NEIGHBORS_PER_UNIT = 8;
+const ZOMBIE_STEER_LOOKAHEAD = 3.4;
+const ZOMBIE_STEER_MIN_MOVE = 0.005;
+const ZOMBIE_CROWD_CELL_SIZE = 1.4;
+const ZOMBIE_CROWD_RADIUS = 0.9;
+const ZOMBIE_CROWD_STRENGTH = 0.45;
+const ZOMBIE_CROWD_NEIGHBORS = 12;
+const ZOMBIE_CROWD_TARGET_DISTANCE = 1.2;
 const SEPARATION_MAX_PAIRS_PER_TICK = 4500;
 const SEPARATION_NEIGHBORS_PER_UNIT = 10;
 export const ZOMBIE_PATH_LOOKAHEAD_DISTANCE = 10;
@@ -69,6 +76,117 @@ export function moveAroundSmallObstacle(world: World, unit: Unit, target: { x: n
 		unit.y = sidestepBefore.y;
 	}
 	return true;
+}
+
+export function moveZombieSteered(world: World, unit: Unit, target: Vec2, maxStep: number): boolean {
+	if (distance(unit, target) <= WAYPOINT_REACHED_DISTANCE) return true;
+	const desired = directionBetween(unit, target);
+	if (!desired) return true;
+	const crowd = distance(unit, target) > ZOMBIE_CROWD_TARGET_DISTANCE ? zombieCrowdPush(world, unit, desired) : { x: 0, y: 0 };
+	const candidate = bestZombieSteeringCandidate(world, unit, target, desired, crowd, maxStep);
+	if (!candidate) return moveAroundSmallObstacle(world, unit, target, maxStep);
+	const before = { x: unit.x, y: unit.y };
+	moveToward(unit, candidate.target, maxStep);
+	const moved = directionBetween(before, unit);
+	if (moved) unit.zombieDriftDirection = moved;
+	return distance(unit, target) <= WAYPOINT_REACHED_DISTANCE;
+}
+
+function bestZombieSteeringCandidate(world: World, unit: Unit, target: Vec2, desired: Vec2, crowd: Vec2, maxStep: number) {
+	const preferredSide = unitHash(unit) % 2 === 0 ? 1 : -1;
+	const offsets = steeringAngleOffsets(preferredSide);
+	const beforeDistance = distance(unit, target);
+	const previousDirection = unit.zombieDriftDirection || null;
+	let best: { target: Vec2; score: number } | null = null;
+
+	for (const offset of offsets) {
+		const direction = steeredDirection(rotateVector(desired, offset), crowd);
+		if (!direction) continue;
+		const candidateTarget = {
+			x: unit.x + direction.x * ZOMBIE_STEER_LOOKAHEAD,
+			y: unit.y + direction.y * ZOMBIE_STEER_LOOKAHEAD,
+		};
+		const movedTo = candidateStep(world, unit, candidateTarget, maxStep);
+		if (!movedTo) continue;
+		const progress = beforeDistance - distance(movedTo, target);
+		const alignment = direction.x * desired.x + direction.y * desired.y;
+		const continuity = previousDirection ? direction.x * previousDirection.x + direction.y * previousDirection.y : 0;
+		const crowdAlignment = crowd.x * direction.x + crowd.y * direction.y;
+		const score = progress * 8 + alignment + continuity * 1.4 + crowdAlignment * 0.8 - Math.abs(offset) * 0.002;
+		if (!best || score > best.score) best = { target: candidateTarget, score };
+	}
+
+	return best;
+}
+
+function steeringAngleOffsets(preferredSide: number) {
+	return [
+		0,
+		preferredSide * 18,
+		-preferredSide * 18,
+		preferredSide * 36,
+		-preferredSide * 36,
+		preferredSide * 58,
+		-preferredSide * 58,
+		preferredSide * 82,
+		-preferredSide * 82,
+		preferredSide * 112,
+		-preferredSide * 112,
+		180,
+	];
+}
+
+function steeredDirection(direction: Vec2, crowd: Vec2): Vec2 | null {
+	const x = direction.x + crowd.x * ZOMBIE_CROWD_STRENGTH;
+	const y = direction.y + crowd.y * ZOMBIE_CROWD_STRENGTH;
+	const length = Math.hypot(x, y);
+	if (length <= 0.001) return null;
+	return { x: x / length, y: y / length };
+}
+
+function candidateStep(world: World, unit: Unit, target: Vec2, maxStep: number): Vec2 | null {
+	if (!canUseMovementWaypoint(world, unit, target)) return null;
+	const before = { x: unit.x, y: unit.y };
+	moveToward(unit, target, maxStep);
+	const movedTo = { x: unit.x, y: unit.y };
+	const tile = worldTile(unit);
+	const blocked = isHardOccupied(world, unit, tile.x, tile.y) || isUnitBlocked(world, unit, target, before);
+	unit.x = before.x;
+	unit.y = before.y;
+	if (blocked || distance(before, movedTo) < ZOMBIE_STEER_MIN_MOVE) return null;
+	return movedTo;
+}
+
+function zombieCrowdPush(world: World, unit: Unit, desired: Vec2): Vec2 {
+	let pushX = 0;
+	let pushY = 0;
+	const side = { x: -desired.y, y: desired.x };
+	for (const entry of movingZombieGrid(world).nearby(unit, ZOMBIE_CROWD_RADIUS, ZOMBIE_CROWD_NEIGHBORS)) {
+		const other = entry.item;
+		if (other === unit || other.ownerId !== unit.ownerId) continue;
+		const dx = unit.x - other.x;
+		const dy = unit.y - other.y;
+		const dist = Math.hypot(dx, dy);
+		if (dist >= ZOMBIE_CROWD_RADIUS) continue;
+		if (dist <= 0.001) {
+			const angle = (unitHash(unit) % 360) * Math.PI / 180;
+			pushX += Math.cos(angle);
+			pushY += Math.sin(angle);
+			continue;
+		}
+		const strength = (ZOMBIE_CROWD_RADIUS - dist) / ZOMBIE_CROWD_RADIUS;
+		const away = { x: dx / dist, y: dy / dist };
+		pushX += away.x * strength;
+		pushY += away.y * strength;
+		if (Math.abs(away.x * desired.x + away.y * desired.y) > 0.75) {
+			const lateralSide = unitHash(unit) < unitHash(other) ? -1 : 1;
+			pushX += side.x * lateralSide * strength;
+			pushY += side.y * lateralSide * strength;
+		}
+	}
+	const length = Math.hypot(pushX, pushY);
+	if (length <= 0.001) return { x: 0, y: 0 };
+	return { x: pushX / length, y: pushY / length };
 }
 
 function escapeOccupiedTile(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
@@ -487,6 +605,16 @@ function movingUnitGrid(world: World): SpatialGrid<Unit> {
 	const grid = new SpatialGrid(movingUnits, MOVING_COHESION_CELL_SIZE);
 	state.movingUnitGrid = grid;
 	state.movingUnitGridTick = world.tick;
+	return grid;
+}
+
+function movingZombieGrid(world: World): SpatialGrid<Unit> {
+	const state = pathingState(world);
+	if (state.movingZombieGridTick === world.tick && state.movingZombieGrid) return state.movingZombieGrid as SpatialGrid<Unit>;
+	const zombies = Object.values(world.units).filter((unit) => unit.type === "zombie" && unit.hp > 0 && isMovingUnit(unit));
+	const grid = new SpatialGrid(zombies, ZOMBIE_CROWD_CELL_SIZE);
+	state.movingZombieGrid = grid;
+	state.movingZombieGridTick = world.tick;
 	return grid;
 }
 
@@ -935,6 +1063,10 @@ export function isWalkable(world: World, x: number, y: number): boolean {
 	return !occupied(world, x, y);
 }
 
+export function nearestWalkablePointAround(world: World, target: Vec2, unit?: Unit): Vec2 {
+	return tileCenter(nearestWalkableAround(world, target, unit));
+}
+
 function isWalkableForUnit(world: World, unit: Unit, x: number, y: number): boolean {
 	if (!isInMap(x, y)) return false;
 	return !occupied(world, x, y) || isOwnGateTile(world, unit, x, y);
@@ -1001,6 +1133,25 @@ function pathingState(world: World) {
 
 function heuristic(a: { x: number; y: number }, b: { x: number; y: number }): number {
 	return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function directionBetween(from: Vec2, to: Vec2): Vec2 | null {
+	const dx = to.x - from.x;
+	const dy = to.y - from.y;
+	const length = Math.hypot(dx, dy);
+	if (length <= 0.001) return null;
+	return { x: dx / length, y: dy / length };
+}
+
+function rotateVector(vector: Vec2, degrees: number): Vec2 {
+	if (degrees === 0) return vector;
+	const radians = degrees * Math.PI / 180;
+	const cos = Math.cos(radians);
+	const sin = Math.sin(radians);
+	return {
+		x: vector.x * cos - vector.y * sin,
+		y: vector.x * sin + vector.y * cos,
+	};
 }
 
 function unpackPath(node: PathNode): PathNode[] {

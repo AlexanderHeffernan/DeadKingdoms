@@ -94,6 +94,7 @@ export interface Unit extends BaseEntity {
 	retargetIn?: number;
 	hordeId?: string | null;
 	zombieDriftDirection?: Vec2 | null;
+	zombieHordeSourceTarget?: Vec2 | null;
 }
 
 /** Pending unit-production entry for train-capable buildings. */
