@@ -1,6 +1,7 @@
 import { emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, sendCommand, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
+import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
 import { UI } from "./ui.js";
 import { BUILDINGS, SCALE, TILE_H, TRAINING } from "./constants.js";
 import { BUILDING_TYPES, deserializeBuilding } from "../../src/shared/buildings/index.js";
@@ -54,6 +55,7 @@ const view: ViewState = {
 	mouse: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
 	wallDragStartTile: null,
 };
+const sfx = new SoundEffects(view.camera);
 
 const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const DEV_COMMAND_BUFFER_LENGTH = 40;
@@ -77,21 +79,27 @@ const ui = new UI(state, {
 	setBuildMode(type) {
 		view.buildMode = type;
 	},
-	train(buildingId: string, unitType: UnitType) {
-		issue({ type: "train", buildingId, unitType });
-	},
+		train(buildingId: string, unitType: UnitType) {
+			issue({ type: "train", buildingId, unitType }).then((result) => {
+				if (result.ok) sfx.play("train_queue", { point: state.snapshot?.buildings[buildingId] });
+				else sfx.play(errorMessage(result).includes("Population") ? "population_blocked" : "ui_error");
+			});
+		},
 	toggleAutoFarm() {
-		issue({ type: "toggleAutoFarm" });
+		issue({ type: "toggleAutoFarm" }).then((result) => sfx.play(result.ok ? "toast_notice" : "ui_error"));
 	},
 	replenishFarm(farmId) {
-		issue({ type: "replenishFarm", farmId });
+		issue({ type: "replenishFarm", farmId }).then((result) => {
+			sfx.play(result.ok ? "farm_replenish" : "ui_error", { point: state.snapshot?.buildings[farmId] });
+		});
 	},
 	deleteBuilding(buildingId) {
-		issue({ type: "deleteBuilding", buildingId });
+		issue({ type: "deleteBuilding", buildingId }).then((result) => sfx.play(result.ok ? "building_destroyed" : "ui_error"));
 	},
 	setRallyMode(buildingId) {
 		view.rallyModeBuildingId = buildingId;
 		ui.showToast("Choose a rally point.");
+		sfx.play("ui_command_move", { point: state.snapshot?.buildings[buildingId] });
 	},
 	async respawn() {
 		if (!state.playerId) return;
@@ -158,6 +166,7 @@ const ui = new UI(state, {
 
 document.getElementById("joinForm")?.addEventListener("submit", async (event) => {
 	event.preventDefault();
+	sfx.unlock();
 	const nameInput = document.getElementById("nameInput") as HTMLInputElement | null;
 	const colorInput = document.getElementById("colorInput") as HTMLInputElement | null;
 	const name = nameInput?.value.trim() || "Player";
@@ -175,6 +184,7 @@ document.getElementById("joinForm")?.addEventListener("submit", async (event) =>
 });
 
 document.getElementById("leaveButton")?.addEventListener("click", async () => {
+	sfx.unlock();
 	await leaveCurrentGame("You left the game.");
 });
 document.getElementById("muteButton")?.addEventListener("click", toggleMusicMute);
@@ -241,7 +251,7 @@ async function updateHomeStatus() {
 }
 
 async function initMusic() {
-	music.audio.volume = 0.45;
+	music.audio.volume = 0.25;
 	music.audio.muted = music.muted;
 	music.audio.loop = false;
 	music.audio.preload = "auto";
@@ -285,6 +295,8 @@ function songName(track: string) {
 }
 
 function toggleMusicMute() {
+	sfx.unlock();
+	sfx.play("music_toggle");
 	music.muted = !music.muted;
 	localStorage.setItem("rtsMusicMuted", String(music.muted));
 	music.audio.muted = music.muted;
@@ -388,6 +400,7 @@ function connectEvents() {
 		rememberStaticObjects();
 		cullSelection();
 		ui.render();
+		sfx.observe(snap);
 		centerOnTownOnce();
 	};
 	eventStream.onerror = () => ui.showToast("Connection interrupted.");
@@ -417,6 +430,7 @@ function resetToJoin(message: string) {
 	adminDiagnosticsVisible = false;
 	state.selectedIds.clear();
 	state.effects = [];
+	sfx.reset();
 	centered = false;
 	document.getElementById("game")?.classList.add("hidden");
 	document.getElementById("join")?.classList.remove("hidden");
@@ -485,6 +499,7 @@ function updateFpsStat() {
 }
 
 function onMouseDown(event: MouseEvent) {
+	sfx.unlock();
 	if (event.button === 1 || event.shiftKey) {
 		view.panning = true;
 		view.panLast = { x: event.clientX, y: event.clientY };
@@ -555,19 +570,23 @@ function handleRightClick(event: MouseEvent) {
 	if (hit?.kind === "building" && hit.ownerId === state.playerId && hit.hp < hit.maxHp) {
 		issue({ type: "finishBuild", unitIds: ownUnits, buildingId: hit.id }, { silent: true }).then((result) => {
 			addTargetFlash(hit.id, result.ok ? "white" : "red");
+			sfx.play(result.ok ? "ui_command_build" : "ui_error", { point: hit });
 		});
 	} else if (hit?.kind === "resource" || (hit?.kind === "building" && hit.canBeGatheredBy(state.playerId!))) {
 		issue({ type: "gather", unitIds: ownUnits, targetId: hit.id }, { silent: true }).then((result) => {
 			addTargetFlash(hit.id, result.ok ? "white" : "red");
+			sfx.play(result.ok ? commandSoundForTarget(hit) : "ui_error", { point: hit });
 		});
 	} else if (hit?.ownerId && hit.ownerId !== state.playerId) {
 		issue({ type: "attack", unitIds: ownUnits, targetId: hit.id }, { silent: true }).then((result) => {
 			addTargetFlash(hit.id, result.ok ? "white" : "red");
+			sfx.play(result.ok ? "ui_command_attack" : "ui_error", { point: hit });
 		});
 	} else {
 		const iso = screenToIso(event.clientX, event.clientY, view.camera);
 		issue({ type: "move", unitIds: ownUnits, x: iso.x, y: iso.y }).then((result) => {
 			if (result.ok) addMoveCross(iso.x, iso.y);
+			sfx.play(result.ok ? "ui_command_move" : "ui_error", { point: iso });
 		});
 	}
 }
@@ -584,6 +603,7 @@ function setRallyPointFromScreen(x: number, y: number, buildingId = view.rallyMo
 	const iso = screenToIso(x, y, view.camera);
 	issue({ type: "setRallyPoint", buildingId, x: iso.x, y: iso.y }).then((result) => {
 		if (result.ok) addMoveCross(iso.x, iso.y);
+		sfx.play(result.ok ? "ui_command_move" : "ui_error", { point: iso });
 	});
 	view.rallyModeBuildingId = null;
 }
@@ -595,9 +615,13 @@ function placeBuilding() {
 	if (!view.hoverTile || unitIds.length === 0) return;
 	if (!canAffordBuildAt(mode as BuildingType, view.hoverTile.x, view.hoverTile.y) || !canPlacePreview(mode as BuildingType, view.hoverTile.x, view.hoverTile.y)) {
 		ui.showToast("Cannot place that building there.");
+		sfx.play("ui_error");
 		return;
 	}
-	issue({ type: "build", unitIds, buildingType: mode as BuildingType, x: view.hoverTile.x, y: view.hoverTile.y });
+	const buildPoint = { x: view.hoverTile.x, y: view.hoverTile.y };
+	issue({ type: "build", unitIds, buildingType: mode as BuildingType, x: buildPoint.x, y: buildPoint.y }).then((result) => {
+		sfx.play(result.ok ? buildingCommandSound(mode) : "ui_error", { point: buildPoint });
+	});
 	view.buildMode = null;
 	view.wallDragStartTile = null;
 }
@@ -613,12 +637,14 @@ async function placeWallLine() {
 	if (!tiles.length || unitIds.length === 0) return;
 	if (!canAffordLine("wall", tiles) || tiles.some((tile) => !canPlacePreview("wall", tile.x, tile.y))) {
 		ui.showToast("Cannot place that wall there.");
+		sfx.play("ui_error");
 		return;
 	}
 	view.buildMode = null;
 	view.wallDragStartTile = null;
 	for (const tile of tiles) {
 		const result = await issue({ type: "build", unitIds, buildingType: "wall", x: tile.x, y: tile.y });
+		sfx.play(result.ok ? "ui_command_build" : "ui_error", { point: tile, cooldownKey: "wall_line_build" });
 		if (!result.ok) break;
 	}
 }
@@ -626,8 +652,15 @@ async function placeWallLine() {
 async function issue(payload: ClientCommand, options: { silent?: boolean } = {}) {
 	if (!state.playerId) return { ok: false };
 	const result = await sendCommand({ ...payload, playerId: state.playerId } as unknown as CommandPayload);
-	if (!result.ok && !options.silent) ui.showToast(result.error || "Command failed.");
+	if (!result.ok && !options.silent) {
+		ui.showToast(result.error || "Command failed.");
+		sfx.play(result.error?.includes("Population") ? "population_blocked" : "ui_error");
+	}
 	return result;
+}
+
+function errorMessage(result: { ok: boolean; error?: string }) {
+	return result.error || "";
 }
 
 function addMoveCross(x: number, y: number) {
@@ -647,6 +680,8 @@ function selectAt(x: number, y: number) {
 	state.selectedIds.clear();
 	const hit = hitTest(x, y);
 	if (hit) state.selectedIds.add(hit.id);
+	if (hit?.kind === "unit") sfx.play("ui_select_unit", { point: hit });
+	else if (hit?.kind === "building") sfx.play("ui_select_building", { point: hit });
 }
 
 function selectBox() {
@@ -662,9 +697,11 @@ function selectBox() {
 		const p = isoToScreen(unit.x, unit.y, view.camera);
 		if (p.x >= left && p.x <= right && p.y >= top - 40 && p.y <= bottom) state.selectedIds.add(unit.id);
 	}
+	if (state.selectedIds.size > 0) sfx.play("ui_select_unit", { volume: Math.min(1.7, 0.9 + state.selectedIds.size * 0.05) });
 }
 
 function onKeyDown(event: KeyboardEvent) {
+	sfx.unlock();
 	if (document.getElementById("game")?.classList.contains("hidden") || (event.target as HTMLElement)?.matches?.("input, button")) return;
 	const key = event.key.toLowerCase();
 	if (key === "escape") {
@@ -708,12 +745,19 @@ function startBuildShortcut(buildingType: BuildingType) {
 		const unit = state.snapshot?.units[id];
 		return unit?.ownerId === state.playerId && unitBehavior(unit).canBuild;
 	});
-	if (!hasBuilder) return ui.showToast("Select build-capable units.");
+	if (!hasBuilder) {
+		sfx.play("ui_error");
+		return ui.showToast("Select build-capable units.");
+	}
 	const def = BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES];
 	if (!def) return;
-	if (buildingType !== "gate" && !canAfford(def.cost || {})) return ui.showToast("Not enough resources.");
+	if (buildingType !== "gate" && !canAfford(def.cost || {})) {
+		sfx.play("ui_error");
+		return ui.showToast("Not enough resources.");
+	}
 	view.buildMode = buildingType;
 	ui.showToast(`Place ${def.label}.`);
+	sfx.play(buildingCommandSound(buildingType));
 }
 
 function trainShortcut(unitType: UnitType) {
@@ -725,10 +769,21 @@ function trainShortcut(unitType: UnitType) {
 	if (!building) return;
 	const train = ((TRAINING as Record<string, readonly { unitType: string; cost: Record<string, number> }[]>)[building.type] || []).find((item) => item.unitType === unitType);
 	const player = state.snapshot.players[state.playerId]!;
-	if (!train || !canAfford(train.cost || {})) return ui.showToast("Not enough resources.");
-	if (player.population >= player.popCap) return ui.showToast("Population cap reached.");
-	if ((building.queue?.length ?? 0) >= 10) return ui.showToast("Training queue is full.");
-	issue({ type: "train", buildingId: building.id, unitType });
+	if (!train || !canAfford(train.cost || {})) {
+		sfx.play("ui_error");
+		return ui.showToast("Not enough resources.");
+	}
+	if (player.population >= player.popCap) {
+		sfx.play("population_blocked");
+		return ui.showToast("Population cap reached.");
+	}
+	if ((building.queue?.length ?? 0) >= 10) {
+		sfx.play("ui_error");
+		return ui.showToast("Training queue is full.");
+	}
+	issue({ type: "train", buildingId: building.id, unitType }).then((result) => {
+		sfx.play(result.ok ? "train_queue" : "ui_error", { point: building });
+	});
 }
 
 function selectedFarmAction(action: (farm: Building) => void) {
@@ -738,7 +793,9 @@ function selectedFarmAction(action: (farm: Building) => void) {
 
 function deleteSelectedBuilding() {
 	const building = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId);
-	if (building) issue({ type: "deleteBuilding", buildingId: building.id });
+	if (building) issue({ type: "deleteBuilding", buildingId: building.id }).then((result) => {
+		sfx.play(result.ok ? "building_destroyed" : "ui_error", { point: building });
+	});
 }
 
 function selectIdleWorkers() {

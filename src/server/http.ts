@@ -16,6 +16,7 @@ const MIME = {
 	".css": "text/css; charset=utf-8",
 	".json": "application/json; charset=utf-8",
 	".mp3": "audio/mpeg",
+	".wav": "audio/wav",
 };
 
 // If a client's outgoing buffer exceeds this many bytes we skip sending it
