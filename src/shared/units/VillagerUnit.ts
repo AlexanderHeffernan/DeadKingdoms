@@ -16,12 +16,12 @@ export class VillagerUnit extends BaseUnit {
 	public static readonly cooldown = 1.1;
 	public static readonly score = 10;
 	public static readonly trainTime = 7;
-	public static readonly cost = { food: 45 };
+	public static readonly cost = { food: 50 };
 	public static readonly vision = 6;
 	public static readonly sound = 6;
 	public static readonly canGather = true;
 	public static readonly canBuild = true;
-	public static readonly carryCapacity = 36;
+	public static readonly carryCapacity = 10;
 
 	public step(context: UnitSimulationContext, unit: Unit, dt: number) {
 		const command = unit.command || { type: "idle" };

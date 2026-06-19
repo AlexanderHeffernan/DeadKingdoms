@@ -4,10 +4,10 @@ export class Wall extends Building {
 	static readonly type = "wall";
 	static readonly label = "Wall";
 	static readonly sprite = "wall";
-	static readonly maxHp = 180;
+	static readonly maxHp = 1080;
 	static readonly size = 1;
 	static readonly score = 20;
-	static readonly cost = { wood: 8 };
+	static readonly cost = { ore: 5 };
 	static readonly vision = 1;
 	static readonly sound = 0;
 }

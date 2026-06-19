@@ -8,9 +8,9 @@ export const TILE_H = 32;
 export const RESOURCE_TYPES = ["wood", "food", "ore"] as const;
 
 export const STARTING_RESOURCES = {
-	wood: 180,
-	food: 160,
-	ore: 80,
+	wood: 200,
+	food: 200,
+	ore: 100,
 };
 
 export const COLORS = [
@@ -27,9 +27,11 @@ export const COLORS = [
 ];
 
 export const STARTING_UNITS = [
-	{ unitType: "villager", x: 4.4, y: 4.5 },
-	{ unitType: "villager", x: 5.0, y: 4.9 },
-	{ unitType: "soldier", x: 3.8, y: 5.2 },
+	{ unitType: "soldier", x: 5.0, y: 5.0 },
+	{ unitType: "villager", x: 3.0, y: 5.0 },
+	{ unitType: "villager", x: 1.0, y: 5.0 },
+
+	{ unitType: "villager", x: 5.0, y: 3.0 },
 ] as const;
 
 export const RESOURCE_DEFS = {
@@ -37,21 +39,21 @@ export const RESOURCE_DEFS = {
 		label: "Tree",
 		sprite: "tree",
 		resource: "wood",
-		amount: 160,
+		amount: 100,
 		score: 0,
 	},
 	ore: {
-		label: "Ore",
+		label: "Stone",
 		sprite: "ore",
 		resource: "ore",
-		amount: 280,
+		amount: 350,
 		score: 0,
 	},
 	berry: {
 		label: "Berry Bush",
 		sprite: "berry",
 		resource: "food",
-		amount: 130,
+		amount: 125,
 		score: 0,
 	},
 } as const;

@@ -37,6 +37,7 @@ import type {
 	Unit,
 	UnitId,
 	UnitType,
+	Vec2,
 	World,
 } from "../shared/types.js";
 
@@ -55,6 +56,15 @@ const SERVER_PERF_SMOOTHING = 0.1;
 const SERVER_PERF_SAMPLE_LIMIT = TICK_RATE * 120;
 const TARGET_UNIT_GRID_CELL_SIZE = 4;
 const COMMAND_CLUSTER_DISTANCE = 12;
+const FOREST_COUNT = 71;
+const LONE_TREE_COUNT = 269;
+const FOREST_MIN_RADIUS = 4;
+const FOREST_RADIUS_VARIANCE = 12;
+const ORE_VEIN_COUNT = 43;
+const BERRY_PATCH_COUNT = 62;
+const RESOURCE_PILE_PLACEMENT_ATTEMPTS = 80;
+const RESOURCE_CLUSTER_GAP = 2;
+const RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER = 8;
 
 export function createWorld(): World {
 	const world: World = {
@@ -417,29 +427,130 @@ function occupied(world: World, x: number, y: number): boolean {
 }
 
 function seedResources(world: World) {
-	for (let grove = 0; grove < 240; grove += 1) {
-		const cx = 4 + Math.floor(Math.random() * (MAP_SIZE - 8));
-		const cy = 4 + Math.floor(Math.random() * (MAP_SIZE - 8));
-		const count = 12 + Math.floor(Math.random() * 18);
-		for (let i = 0; i < count; i += 1) {
-			const angle = Math.random() * Math.PI * 2;
-			const radius = Math.random() * 6;
-			createResource(world, "tree", cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+	const placement = new ResourcePlacementTracker(world);
+	seedTrees(world, placement);
+	seedResourcePiles(world, placement, "ore", ORE_VEIN_COUNT, () => 5 + Math.floor(Math.random() * 4));
+	seedResourcePiles(world, placement, "berry", BERRY_PATCH_COUNT, () => 4 + Math.floor(Math.random() * 4));
+}
+
+function seedTrees(world: World, placement: ResourcePlacementTracker) {
+	for (let forest = 0, attempt = 0; forest < FOREST_COUNT && attempt < FOREST_COUNT * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER; attempt += 1) {
+		if (seedForest(world, placement, randomResourcePoint())) forest += 1;
+	}
+	for (let tree = 0, attempt = 0; tree < LONE_TREE_COUNT && attempt < LONE_TREE_COUNT * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER; attempt += 1) {
+		const point = randomResourcePoint();
+		if (!placement.canPlaceCluster([point])) continue;
+		placement.placeCluster("tree", [point]);
+		tree += 1;
+	}
+}
+
+function seedForest(world: World, placement: ResourcePlacementTracker, center: Vec2) {
+	const radiusX = FOREST_MIN_RADIUS + Math.floor(Math.random() * FOREST_RADIUS_VARIANCE);
+	const radiusY = FOREST_MIN_RADIUS + Math.floor(Math.random() * FOREST_RADIUS_VARIANCE);
+	const wobble = Math.random() * Math.PI * 2;
+	const pinch = Math.random() * Math.PI * 2;
+	const tiles: Vec2[] = [];
+
+	for (let dy = -radiusY; dy <= radiusY; dy += 1) {
+		for (let dx = -radiusX; dx <= radiusX; dx += 1) {
+			if (!insideForestShape(dx, dy, radiusX, radiusY, wobble, pinch)) continue;
+			tiles.push({ x: center.x + dx, y: center.y + dy });
 		}
 	}
-	for (let vein = 0; vein < 86; vein += 1) {
-		const cx = 5 + Math.floor(Math.random() * (MAP_SIZE - 10));
-		const cy = 5 + Math.floor(Math.random() * (MAP_SIZE - 10));
-		for (let i = 0; i < 5 + Math.floor(Math.random() * 4); i += 1) {
-			createResource(world, "ore", cx + Math.floor(Math.random() * 5) - 2, cy + Math.floor(Math.random() * 5) - 2);
+	if (!placement.canPlaceCluster(tiles)) return false;
+	placement.placeCluster("tree", tiles);
+	return true;
+}
+
+function insideForestShape(dx: number, dy: number, radiusX: number, radiusY: number, wobble: number, pinch: number) {
+	const angle = Math.atan2(dy, dx);
+	const localRadiusX = radiusX * (0.85 + Math.sin(angle * 2 + pinch) * 0.18 + Math.cos(angle * 4 - wobble) * 0.12);
+	const localRadiusY = radiusY * (0.85 + Math.cos(angle * 3 - pinch) * 0.16 + Math.sin(angle * 5 + wobble) * 0.1);
+	const edge = 0.92 + Math.sin(angle * 3 + wobble) * 0.2 + Math.cos(angle * 7 - pinch) * 0.12;
+	const normalized = (dx * dx) / (localRadiusX * localRadiusX) + (dy * dy) / (localRadiusY * localRadiusY);
+	return normalized <= edge;
+}
+
+function randomResourcePoint(): Vec2 {
+	return {
+		x: 4 + Math.floor(Math.random() * (MAP_SIZE - 8)),
+		y: 4 + Math.floor(Math.random() * (MAP_SIZE - 8)),
+	};
+}
+
+function seedResourcePiles(world: World, placement: ResourcePlacementTracker, type: "ore" | "berry", count: number, pileSize: () => number) {
+	for (let pile = 0, attempt = 0; pile < count && attempt < count * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER; attempt += 1) {
+		if (seedConnectedResourcePile(placement, type, randomResourcePoint(), pileSize())) pile += 1;
+	}
+}
+
+function seedConnectedResourcePile(placement: ResourcePlacementTracker, type: "ore" | "berry", center: Vec2, count: number) {
+	const placed: Vec2[] = [];
+	if (!placement.canPlaceCluster([center])) return false;
+	placed.push(center);
+
+	for (let attempt = 0; placed.length < count && attempt < RESOURCE_PILE_PLACEMENT_ATTEMPTS; attempt += 1) {
+		const source = placed[Math.floor(Math.random() * placed.length)]!;
+		const neighbor = randomCardinalNeighbor(source);
+		if (placed.some((tile) => sameTile(tile, neighbor))) continue;
+		if (!placement.canPlaceCluster([neighbor])) continue;
+		placed.push(neighbor);
+	}
+	placement.placeCluster(type, placed);
+	return true;
+}
+
+function sameTile(a: Vec2, b: Vec2) {
+	return Math.round(a.x) === Math.round(b.x) && Math.round(a.y) === Math.round(b.y);
+}
+
+function randomCardinalNeighbor(point: Vec2): Vec2 {
+	const neighbors = [
+		{ x: point.x + 1, y: point.y },
+		{ x: point.x - 1, y: point.y },
+		{ x: point.x, y: point.y + 1 },
+		{ x: point.x, y: point.y - 1 },
+	];
+	return neighbors[Math.floor(Math.random() * neighbors.length)]!;
+}
+
+class ResourcePlacementTracker {
+	private readonly occupied = new Set<string>();
+
+	constructor(private readonly world: World) {
+		for (const resource of Object.values(world.resources)) this.mark(resource);
+	}
+
+	canPlaceCluster(tiles: Vec2[]) {
+		return tiles.every((tile) => this.canPlaceTile(tile));
+	}
+
+	placeCluster(type: "tree" | "ore" | "berry", tiles: Vec2[]) {
+		for (const tile of tiles) {
+			const resource = createSeedResource(this.world, type, tile.x, tile.y);
+			if (resource) this.mark(resource);
 		}
 	}
-	for (let patch = 0; patch < 124; patch += 1) {
-		const cx = 5 + Math.floor(Math.random() * (MAP_SIZE - 10));
-		const cy = 5 + Math.floor(Math.random() * (MAP_SIZE - 10));
-		for (let i = 0; i < 4 + Math.floor(Math.random() * 4); i += 1) {
-			createResource(world, "berry", cx + Math.floor(Math.random() * 4) - 2, cy + Math.floor(Math.random() * 4) - 2);
+
+	private canPlaceTile(point: Vec2) {
+		const x = Math.round(point.x);
+		const y = Math.round(point.y);
+		if (x < 1 || y < 1 || x > MAP_SIZE - 2 || y > MAP_SIZE - 2) return false;
+		for (let dy = -RESOURCE_CLUSTER_GAP; dy <= RESOURCE_CLUSTER_GAP; dy += 1) {
+			for (let dx = -RESOURCE_CLUSTER_GAP; dx <= RESOURCE_CLUSTER_GAP; dx += 1) {
+				if (this.occupied.has(this.key(x + dx, y + dy))) return false;
+			}
 		}
+		return true;
+	}
+
+	private mark(point: Vec2) {
+		this.occupied.add(this.key(Math.round(point.x), Math.round(point.y)));
+	}
+
+	private key(x: number, y: number) {
+		return `${x},${y}`;
 	}
 }
 
@@ -537,6 +648,14 @@ function createResource(world: World, type: keyof typeof RESOURCE_DEFS, x: numbe
 	y = clamp(Math.round(y), 1, MAP_SIZE - 2);
 	const blocked = [...Object.values(world.resources), ...Object.values(world.buildings)].some((entity) => pointInsideEntity(x, y, entity));
 	if (blocked) return null;
+	return addResourceNode(world, type, x, y);
+}
+
+function createSeedResource(world: World, type: keyof typeof RESOURCE_DEFS, x: number, y: number): ResourceNode {
+	return addResourceNode(world, type, clamp(Math.round(x), 1, MAP_SIZE - 2), clamp(Math.round(y), 1, MAP_SIZE - 2));
+}
+
+function addResourceNode(world: World, type: keyof typeof RESOURCE_DEFS, x: number, y: number): ResourceNode {
 	const def = RESOURCE_DEFS[type];
 	const resource: ResourceNode = {
 		id: id("r"),
@@ -1131,7 +1250,7 @@ function gatherTargetFor(entity: ResourceNode | Building): GatherTarget {
 	if (isBuilding(entity)) return entity;
 	return {
 		gatherAmountFor: (unit) => unit.carryCapacity,
-		gatherSecondsFor: () => 1.1,
+		gatherSecondsFor: () => 20,
 	};
 }
 
