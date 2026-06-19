@@ -15,7 +15,7 @@ import type {
 } from "./core.js";
 import type { UnitCommand } from "./unitCommands.js";
 import type { VisibilityCache } from "./visibility.js";
-import type { BuildingEntity, BuildingSnapshot } from "../buildingDefinitions.js";
+import type { BuildingEntity, BuildingSnapshot } from "../buildings/base/index.js";
 import type { AdminLevel } from "./snapshot.js";
 
 export type ZombieDebugState =

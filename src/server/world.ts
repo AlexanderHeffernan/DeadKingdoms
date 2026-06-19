@@ -8,11 +8,11 @@ import {
 	STARTING_UNITS,
 	TICK_RATE,
 } from "../shared/config.js";
-import { BUILDING_DEFS, createBuildingEntity } from "../shared/buildingRegistry.js";
+import { BUILDING_TYPES, createBuilding as createBuildingInstance } from "../shared/buildings/index.js";
 import { buildSoundField, collectWorldSoundSources } from "../shared/soundField.js";
 import { unitBehaviorFor } from "../shared/unitRegistry.js";
 import type { UnitSimulationContext } from "../shared/units/index.js";
-import type { GatherTarget } from "../shared/buildingDefinitions.js";
+import type { GatherTarget } from "../shared/buildings/base/index.js";
 import { id } from "./id.js";
 import { clamp, distance, rectsOverlap } from "./math.js";
 import { isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
@@ -167,7 +167,7 @@ export function grantPlayerSoldiers(world: World, playerId: PlayerId, count: num
 
 /** Dev tool: toggles invincibility on the player's town center and returns the new state. */
 export function toggleTownCenterInvincibility(world: World, playerId: PlayerId): boolean | null {
-	const townCenter = Object.values(world.buildings).find((building) => building.ownerId === playerId && building.isTownCenter());
+	const townCenter = Object.values(world.buildings).find((building) => building.ownerId === playerId && building.type === "townCenter");
 	if (!townCenter) return null;
 	townCenter.invincible = !townCenter.invincible;
 	return townCenter.invincible;
@@ -189,7 +189,7 @@ export function emitDevBang(world: World, x: number, y: number): void {
 }
 
 function playerSpawnCenter(world: World, playerId: PlayerId) {
-	const townCenter = Object.values(world.buildings).find((building) => building.ownerId === playerId && building.isTownCenter());
+	const townCenter = Object.values(world.buildings).find((building) => building.ownerId === playerId && building.type === "townCenter");
 	if (townCenter) return centerOf(townCenter);
 	const building = Object.values(world.buildings).find((entity) => entity.ownerId === playerId);
 	if (building) return centerOf(building);
@@ -342,7 +342,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		gatherTarget: (targetId, playerId) => world.resources[targetId as keyof typeof world.resources] || gatherableBuilding(world.buildings[targetId as BuildingId], playerId),
 		gatherResource,
 		gatherTargetFor,
-		gatherRange: (entity) => (isBuilding(entity) ? entity.gatherRange() : 1.1),
+		gatherRange: (entity) => (isBuilding(entity) ? entity.gatherRange : 1.1),
 		isBuilding,
 		nearestDepot: (ownerId, resource, source) => nearestDepot(world, ownerId, resource, source),
 		findNextResource: (unit, resourceKind) => findNextResource(world, unit, resourceKind),
@@ -360,7 +360,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		createZombie: (point) => createZombie(world, point.x, point.y),
 		isWalkable: (x, y) => isWalkable(world, x, y),
 		weightedWorldSound: () => weightedWorldSound(world),
-		unitVision: (unit) => unit.vision || unitBehavior(unit).stats.vision || 5,
+		unitVision: (unit) => unit.vision || unitBehavior(unit).vision || 5,
 		randomInt,
 	};
 }
@@ -380,7 +380,7 @@ function rebuildOccupancy(world: World) {
 		if (x >= 0 && y >= 0 && x < size && y < size) grid[y * size + x] = 1;
 	}
 	for (const building of Object.values(world.buildings)) {
-		if (!building.isWalkBlocking()) continue;
+		if (!building.walkBlocking) continue;
 		for (let dy = 0; dy < building.size; dy += 1) {
 			for (let dx = 0; dx < building.size; dx += 1) {
 				const x = building.x + dx;
@@ -459,7 +459,7 @@ function addLocalResources(world: World, x: number, y: number) {
 }
 
 function chooseSpawn(world: World, _count: number) {
-	const existingTownCenters = Object.values(world.buildings).filter((building) => building.isTownCenter());
+	const existingTownCenters = Object.values(world.buildings).filter((building) => building.type === "townCenter");
 	let best = randomInteriorPoint();
 	let bestScore = -Infinity;
 	for (let attempt = 0; attempt < PLAYER_SPAWN_ATTEMPTS; attempt += 1) {
@@ -486,7 +486,7 @@ function randomInteriorPoint() {
 }
 
 function canSpawnTownCenterAt(world: World, x: number, y: number): boolean {
-	const size = BUILDING_DEFS.townCenter.stats.size;
+	const size = BUILDING_TYPES.townCenter.size;
 	if (x < PLAYER_SPAWN_MARGIN || y < PLAYER_SPAWN_MARGIN || x + size > MAP_SIZE - PLAYER_SPAWN_MARGIN || y + size > MAP_SIZE - PLAYER_SPAWN_MARGIN) return false;
 	return Object.values(world.buildings).every((building) => !rectsOverlap({ x, y, size }, building));
 }
@@ -500,8 +500,8 @@ function createUnit(world: World, ownerId: PlayerId, type: UnitType, x: number, 
 		type,
 		x,
 		y,
-		hp: def.stats.maxHp,
-		maxHp: def.stats.maxHp,
+		hp: def.maxHp,
+		maxHp: def.maxHp,
 		command: { type: "idle" },
 		cooldown: 0,
 		attackFlash: 0,
@@ -521,9 +521,9 @@ function createZombie(world: World, x: number, y: number): Unit {
 }
 
 function createBuilding(world: World, ownerId: PlayerId, type: BuildingType, x: number, y: number, free = false): Building | null {
-	const def = BUILDING_DEFS[type];
-	const building = createBuildingEntity(type, { id: id("b"), ownerId, x, y });
-	if (!free && !spend(world.players[ownerId]!, def.stats.cost)) return null;
+	const def = BUILDING_TYPES[type];
+	const building = createBuildingInstance(type, { id: id("b"), ownerId, x, y });
+	if (!free && !spend(world.players[ownerId]!, def.cost)) return null;
 	world.buildings[building.id] = building;
 	return building;
 }
@@ -617,7 +617,7 @@ function commandGather(world: World, playerId: PlayerId, body: Extract<CommandPa
 	if (!resource) return { ok: false, error: "Invalid resource." };
 	let assigned = false;
 	forOwnUnits(world, playerId, body.unitIds, (unit) => {
-		if (unitBehavior(unit).canGather()) {
+		if (unitBehavior(unit).canGather) {
 			unit.command = {
 				type: "gather",
 				targetId: resource.id,
@@ -647,13 +647,13 @@ function commandReplenishFarm(world: World, playerId: PlayerId, body: Extract<Co
 }
 
 function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "build" }>): CommandResult {
-	const def = BUILDING_DEFS[body.buildingType];
+	const def = BUILDING_TYPES[body.buildingType];
 	if (!def) return { ok: false, error: "Unknown building." };
-	const x = clamp(Math.round(Number(body.x)), 0, MAP_SIZE - def.stats.size);
-	const y = clamp(Math.round(Number(body.y)), 0, MAP_SIZE - def.stats.size);
-	if (!canPlace(world, x, y, def.stats.size)) return { ok: false, error: "Blocked tile." };
+	const x = clamp(Math.round(Number(body.x)), 0, MAP_SIZE - def.size);
+	const y = clamp(Math.round(Number(body.y)), 0, MAP_SIZE - def.size);
+	if (!canPlace(world, x, y, def.size)) return { ok: false, error: "Blocked tile." };
 	const builders = Object.values(world.units).filter(
-		(unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild(),
+		(unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild,
 	);
 	if (builders.length === 0) return { ok: false, error: "Select build-capable units." };
 	const building = createBuilding(world, playerId, body.buildingType, x, y);
@@ -661,7 +661,7 @@ function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPay
 	building.hp = Math.max(12, Math.floor(building.maxHp * 0.25));
 	building.builderIds = builders.map((unit) => unit.id);
 	const resourceKind = building.depotGatherKind();
-	for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild() };
+	for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild };
 	return { ok: true };
 }
 
@@ -670,12 +670,12 @@ function commandFinishBuild(world: World, playerId: PlayerId, body: Extract<Comm
 	if (!building || building.ownerId !== playerId) return { ok: false, error: "Invalid building." };
 	if (isComplete(building)) return { ok: false, error: "Building is already complete." };
 	const builders = Object.values(world.units).filter(
-		(unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild(),
+		(unit) => unit.ownerId === playerId && body.unitIds?.includes(unit.id) && unitBehavior(unit).canBuild,
 	);
 	if (builders.length === 0) return { ok: false, error: "Select build-capable units." };
 	const resourceKind = building.depotGatherKind();
 	building.builderIds = [...new Set([...(building.builderIds || []), ...builders.map((unit) => unit.id)])];
-	for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild() };
+	for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild };
 	return { ok: true };
 }
 
@@ -712,9 +712,10 @@ function commandTrain(world: World, playerId: PlayerId, body: Extract<CommandPay
 	const player = world.players[playerId];
 	if (!player) return { ok: false, error: "Player not found." };
 	if (player.population >= player.popCap) return { ok: false, error: "Population cap reached." };
+	if (!building.queue) return { ok: false, error: "Selected building cannot train units." };
 	if (building.queue.length >= 10) return { ok: false, error: "Training queue is full." };
-	if (!spend(player, unitDef.stats.cost)) return { ok: false, error: "Not enough resources." };
-	building.queue.push({ unitType: body.unitType, remaining: unitDef.stats.trainTime } as BuildQueueItem);
+	if (!spend(player, unitDef.cost)) return { ok: false, error: "Not enough resources." };
+	building.queue.push({ unitType: body.unitType, remaining: unitDef.trainTime } as BuildQueueItem);
 	return { ok: true };
 }
 
@@ -831,10 +832,10 @@ function spatialUnitClusters(units: Unit[]): Unit[][] {
 }
 
 function stepBuilding(world: World, building: Building, dt: number) {
-	building.cooldown = Math.max(0, building.cooldown - dt);
-	building.attackFlash = Math.max(0, (building.attackFlash || 0) - dt);
+	if (building.cooldown !== undefined) building.cooldown = Math.max(0, building.cooldown - dt);
+	if (building.attackFlash !== undefined) building.attackFlash = Math.max(0, (building.attackFlash || 0) - dt);
 	if (!isComplete(building)) return;
-	if (building.queue.length > 0) {
+	if (building.queue && building.queue.length > 0) {
 		const current = building.queue[0];
 		if (current) current.remaining -= dt;
 		emitActionSound(world, "trainUnit", centerOf(building));
@@ -847,13 +848,12 @@ function stepBuilding(world: World, building: Building, dt: number) {
 			}
 		}
 	}
-	const attack = building.attackStats();
-	if (attack) {
-		const target = nearestEnemy(world, unitTargetGridsByOwner(world), building, attack.range);
-		if (target && building.cooldown <= 0) {
-			damage(world, target, attack.attack, building.ownerId);
+	if (building.canAttack) {
+		const target = nearestEnemy(world, unitTargetGridsByOwner(world), building, building.attackRange);
+		if (target && (building.cooldown ?? 0) <= 0) {
+			damage(world, target, building.attack, building.ownerId);
 			emitActionSound(world, "towerAttack", centerOf(building));
-			building.cooldown = attack.cooldown;
+			building.cooldown = building.attackCooldown;
 			building.attackFlash = 0.22;
 		}
 	}
@@ -863,8 +863,8 @@ function attackBlockingBuilding(world: World, zombie: Unit, targetPoint: { x: nu
 	const behavior = unitBehavior(zombie);
 	const building = blockingBuildingToward(world, zombie, targetPoint);
 	if (!building || zombie.cooldown > 0) return;
-	damage(world, building, behavior.stats.attack, ZOMBIE_OWNER_ID);
-	zombie.cooldown = behavior.stats.cooldown;
+	damage(world, building, behavior.attack, ZOMBIE_OWNER_ID);
+	zombie.cooldown = behavior.cooldown;
 	zombie.attackFlash = 0.22;
 }
 
@@ -941,8 +941,8 @@ function makeStump(resource: ResourceNode) {
 }
 
 function assignPostBuildGather(world: World, unit: Unit, resourceKind: ResourceType | null, builtFarm: Building | null = null) {
-	if (builtFarm && unitBehavior(unit).canGather() && isComplete(builtFarm)) {
-		const resource = builtFarm.gatherResource();
+	if (builtFarm && unitBehavior(unit).canGather && isComplete(builtFarm)) {
+		const resource = builtFarm.gatherResource;
 		if (resource) {
 			unit.command = { type: "gather", targetId: builtFarm.id, resourceKind: resource, progress: 0, path: null };
 			return;
@@ -951,10 +951,10 @@ function assignPostBuildGather(world: World, unit: Unit, resourceKind: ResourceT
 	const nextBuild = findNextBuildSite(world, unit);
 	if (nextBuild) {
 		nextBuild.builderIds = [...new Set([...(nextBuild.builderIds || []), unit.id])];
-		unit.command = { type: "build", targetId: nextBuild.id, path: null, resourceKind: nextBuild.depotGatherKind(), gatherBuiltFarm: nextBuild.shouldGatherAfterBuild() };
+		unit.command = { type: "build", targetId: nextBuild.id, path: null, resourceKind: nextBuild.depotGatherKind(), gatherBuiltFarm: nextBuild.shouldGatherAfterBuild };
 		return;
 	}
-	if (!resourceKind || !unitBehavior(unit).canGather()) {
+	if (!resourceKind || !unitBehavior(unit).canGather) {
 		unit.command = { type: "idle" };
 		return;
 	}
@@ -996,7 +996,7 @@ function findNextResource(world: World, unit: Unit, resourceKind: ResourceType |
 		}
 	}
 	for (const b of Object.values(world.buildings)) {
-		if (!b.canBeGatheredBy(unit.ownerId) || b.gatherResource() !== resourceKind || b.isGatherExhausted()) continue;
+		if (!b.canBeGatheredBy(unit.ownerId) || b.gatherResource !== resourceKind || b.gatherExhausted) continue;
 		const d = distance(unit, b);
 		if (d < bestDist) {
 			best = b;
@@ -1080,14 +1080,14 @@ function isBuilding(entity: ResourceNode | Building | null | undefined): entity 
 }
 
 function gatherResource(entity: ResourceNode | Building): ResourceType {
-	if (isBuilding(entity)) return entity.gatherResource()!;
+	if (isBuilding(entity)) return entity.gatherResource!;
 	return entity.resource;
 }
 
 function gatherTargetFor(entity: ResourceNode | Building): GatherTarget {
 	if (isBuilding(entity)) return entity;
 	return {
-		gatherAmountFor: (unit) => unit.carryCapacity(),
+		gatherAmountFor: (unit) => unit.carryCapacity,
 		gatherSecondsFor: () => 1.1,
 	};
 }
@@ -1100,7 +1100,7 @@ function damage(world: World, target: Unit | Building, amount: number, attackerI
 		emitActionSound(world, "buildingDestroyed", centerOf(target));
 		createRuin(world, target);
 		delete world.buildings[target.id];
-		if (target.isTownCenter()) defeatPlayer(world, target.ownerId, attackerId);
+		if (target.type === "townCenter") defeatPlayer(world, target.ownerId, attackerId);
 	} else {
 		const shouldTurn = attackerId === ZOMBIE_OWNER_ID && target.ownerId !== ZOMBIE_OWNER_ID;
 		const deathPoint = { x: target.x, y: target.y };
@@ -1164,12 +1164,11 @@ function recalcPlayer(world: World, playerId: PlayerId) {
 	const buildings = Object.values(world.buildings).filter((building) => building.ownerId === playerId);
 	player.population = units.length;
 	player.popCap = 4 + buildings.filter(isComplete).reduce((sum, building) => {
-		return sum + building.populationCapacity();
+		return sum + building.populationCapacity;
 	}, 0);
-	const unitScore = units.reduce((sum, unit) => sum + unitBehavior(unit).stats.score, 0);
-	const buildingScore = buildings.reduce((sum, building) => sum + BUILDING_DEFS[building.type].stats.score, 0);
-	const resourceScore = Math.floor(Object.values(player.resources).reduce((sum, amount) => sum + amount, 0) / 8);
-	player.score = player.defeated ? 0 : unitScore + buildingScore + resourceScore;
+	const unitScore = units.reduce((sum, unit) => sum + unitBehavior(unit).score, 0);
+	const buildingScore = buildings.filter(isComplete).reduce((sum, building) => sum + building.score, 0);
+	player.score = player.defeated ? 0 : unitScore + buildingScore;
 }
 
 function isComplete(building: Building): boolean {

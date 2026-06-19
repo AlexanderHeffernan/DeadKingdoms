@@ -600,7 +600,7 @@ function hardBlockingTiles(world: World): Set<number> {
 		if (isInMap(x, y)) tiles.add(tileId(x, y));
 	}
 	for (const building of Object.values(world.buildings)) {
-		if (!building.isWalkBlocking()) continue;
+		if (!building.walkBlocking) continue;
 		for (let dy = 0; dy < building.size; dy += 1) {
 			for (let dx = 0; dx < building.size; dx += 1) {
 				const x = building.x + dx;

@@ -83,7 +83,7 @@ function randomZombieSpawnPoint(context: ZombieSpawnContext, target: Vec2 | null
 function canSpawnZombieAt(context: ZombieSpawnContext, x: number, y: number): boolean {
 	if (!context.isWalkable(Math.floor(x), Math.floor(y))) return false;
 	for (const building of Object.values(context.world.buildings)) {
-		if (!building.isTownCenter()) continue;
+		if (building.type !== "townCenter") continue;
 		if (context.distance({ x, y }, context.centerOf(building)) < ZOMBIE_SAFE_RADIUS) return false;
 	}
 	return !isInAnyPlayerSight(context, x, y);

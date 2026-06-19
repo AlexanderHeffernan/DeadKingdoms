@@ -53,7 +53,7 @@ export class BottomPanel implements GameUiComponent {
 		}, {});
 		const carried = isUnit(first) && first.carried ? ` · carrying ${Math.floor(first.carried.amount)} ${first.carried.resource}` : "";
 		const resource = first.kind === "resource" ? ` · ${Math.floor(first.amount)}/${first.maxAmount} ${first.resource} left` : "";
-		const farm = isBuilding(first) && first.gatherResource()
+		const farm = isBuilding(first) && first.gatherResource
 			? ` · ${Math.floor(first.amount || 0)}/${first.maxAmount || 0} food left${first.exhausted ? " · exhausted" : ""}`
 			: "";
 		this.selection.innerHTML = `
@@ -68,14 +68,14 @@ export class BottomPanel implements GameUiComponent {
 		const ownedUnits = selected.filter((entity): entity is Unit => entity.kind === "unit" && entity.ownerId === this.state.playerId);
 		const ownedAnyBuildings = selected.filter((entity): entity is Building => entity.kind === "building" && entity.ownerId === this.state.playerId);
 		const ownedBuildings = selected.filter((entity): entity is Building => entity.kind === "building" && entity.ownerId === this.state.playerId && isComplete(entity));
-		const hasBuilder = ownedUnits.some((entity) => unitBehaviorFor(entity.type).canBuild());
+		const hasBuilder = ownedUnits.some((entity) => unitBehaviorFor(entity.type).canBuild);
 		if (hasBuilder) {
 			for (const [buildingType, def] of Object.entries(BUILDINGS)) {
 				actions.push({ spriteName: buildingType, label: def.label, cost: def.cost, shortcut: BUILD_SHORTCUTS[buildingType as keyof typeof BUILD_SHORTCUTS], action: () => this.actions.setBuildMode(buildingType) });
 			}
 		}
 		for (const building of ownedBuildings) {
-			if (building.gatherResource()) {
+			if (building.gatherResource) {
 				const player = this.state.snapshot!.players[this.state.playerId!];
 				if (!player) continue;
 				actions.push({ spriteName: building.type, label: player.autoReplenishFarms ? "Auto reseed: on" : "Auto reseed: off", cost: {}, displayCost: { wood: 45 }, shortcut: "A", action: () => this.actions.toggleAutoFarm() });

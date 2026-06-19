@@ -8,7 +8,7 @@ import {
 	Texture,
 } from "pixi.js";
 import { SCALE, TILE_H, TILE_W } from "./constants.js";
-import { BUILDING_DEFS } from "../../src/shared/buildingRegistry.js";
+import { BUILDING_TYPES } from "../../src/shared/buildings/index.js";
 import { isoToScreen } from "./iso.js";
 import { palette } from "./sprites/palette.js";
 import { sprites } from "./sprites/index.js";
@@ -398,7 +398,7 @@ export class Renderer {
 				center.y,
 				ownerColor || "#f4efe6",
 			);
-		if ("attackFlash" in entity && entity.attackFlash > 0)
+		if ("attackFlash" in entity && (entity.attackFlash ?? 0) > 0)
 			this.drawAttackFlash(center.x, center.y, ownerColor || "#f4efe6");
 		if (entity.kind === "unit") {
 			const cmd = entity.command as { resourceKind?: ResourceType };
@@ -416,7 +416,7 @@ export class Renderer {
 			this.drawHealth(center.x, y - 8, entity.hp / entity.maxHp);
 		if (
 			entity.kind === "building" &&
-				entity.gatherResource() &&
+				entity.gatherResource &&
 				entity.maxAmount &&
 				entity.amount! < entity.maxAmount
 		)
@@ -1115,8 +1115,8 @@ function redTint(amount: number) {
 }
 
 function buildingSize(type: string) {
-	if (type in BUILDING_DEFS)
-		return BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.size;
+	if (type in BUILDING_TYPES)
+		return BUILDING_TYPES[type as keyof typeof BUILDING_TYPES].size;
 	if (type === "townCenter") return 4;
 	if (type === "barracks") return 3;
 	if (type === "house") return 2;
@@ -1167,8 +1167,8 @@ function canPlacePreview(
 }
 
 function buildingCost(type: string) {
-	return type in BUILDING_DEFS
-		? BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.cost
+	return type in BUILDING_TYPES
+		? BUILDING_TYPES[type as keyof typeof BUILDING_TYPES].cost
 		: {};
 }
 

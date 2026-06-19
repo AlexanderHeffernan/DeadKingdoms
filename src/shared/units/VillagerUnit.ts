@@ -9,40 +9,29 @@ export class VillagerUnit extends BaseUnit {
 	public static readonly label = "Villager";
 	public static readonly sprite = "villager";
 	public static readonly trainShortcut = "V";
-	public static readonly stats = {
-		maxHp: 40,
-		speed: 3.2,
-		attack: 3,
-		range: 0.9,
-		cooldown: 1.1,
-		score: 8,
-		trainTime: 7,
-		cost: { food: 45 },
-		vision: 6,
-		sound: 6,
-	} as const;
+	public static readonly maxHp = 40;
+	public static readonly speed = 3.2;
+	public static readonly attack = 3;
+	public static readonly range = 0.9;
+	public static readonly cooldown = 1.1;
+	public static readonly score = 10;
+	public static readonly trainTime = 7;
+	public static readonly cost = { food: 45 };
+	public static readonly vision = 6;
+	public static readonly sound = 6;
+	public static readonly canGather = true;
+	public static readonly canBuild = true;
+	public static readonly carryCapacity = 36;
 
 	public step(context: UnitSimulationContext, unit: Unit, dt: number) {
 		const command = unit.command || { type: "idle" };
 		if (command.type === "gather" || command.type === "build") {
 			this.updateTimers(unit, dt);
-			unit.vision = this.stats.vision || 5;
+			unit.vision = this.vision || 5;
 			if (command.type === "gather") this.stepGather(context, unit, command, dt);
 				else this.stepBuild(context, unit, command, dt);
 		}
 		else super.step(context, unit, dt);
-	}
-
-	public canGather() {
-		return true;
-	}
-
-	public canBuild() {
-		return true;
-	}
-
-	public carryCapacity() {
-		return 36;
 	}
 
 	private stepGather(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "gather" }>, dt: number) {
@@ -69,7 +58,7 @@ export class VillagerUnit extends BaseUnit {
 		const targetPoint = context.isBuilding(resource) ? context.centerOf(resource) : resource;
 		const gatherRange = context.gatherRange(resource);
 		if (context.distance(unit, targetPoint) > gatherRange) {
-			context.moveNearTarget(unit, command, targetPoint, gatherRange, this.stats.speed * dt);
+			context.moveNearTarget(unit, command, targetPoint, gatherRange, this.speed * dt);
 			return;
 		}
 		this.gatherFromTarget(context, unit, command, resource, targetPoint, dt);
@@ -80,7 +69,7 @@ export class VillagerUnit extends BaseUnit {
 		const depot = context.nearestDepot(unit.ownerId, unit.carried.resource, unit);
 		if (!depot) return;
 		if (context.distance(unit, context.centerOf(depot)) > depot.size + 0.7) {
-			context.moveNearTarget(unit, command, context.centerOf(depot), depot.size + 0.7, this.stats.speed * dt);
+			context.moveNearTarget(unit, command, context.centerOf(depot), depot.size + 0.7, this.speed * dt);
 			return;
 		}
 		context.depositResource(unit.ownerId, unit.carried.resource, unit.carried.amount);
@@ -137,7 +126,7 @@ export class VillagerUnit extends BaseUnit {
 		}
 		const targetPoint = context.centerOf(building);
 		if (context.distance(unit, targetPoint) > building.size + 0.7) {
-			context.moveNearTarget(unit, command, targetPoint, building.size + 0.7, this.stats.speed * dt);
+			context.moveNearTarget(unit, command, targetPoint, building.size + 0.7, this.speed * dt);
 			return;
 		}
 		unit.workFlash = 0.2;

@@ -1,4 +1,4 @@
-import type { GatherTarget } from "../buildingDefinitions.js";
+import type { GatherTarget } from "../buildings/base/index.js";
 import type { Building, ResourceCost, ResourceNode, Unit, UnitCommand, UnitType, World } from "../types.js";
 
 export type UnitStats = {
@@ -19,7 +19,20 @@ export type UnitClass<T extends BaseUnit = BaseUnit> = {
 	readonly type: UnitType;
 	readonly label: string;
 	readonly sprite: string;
-	readonly stats: UnitStats;
+	readonly maxHp: number;
+	readonly speed: number;
+	readonly attack: number;
+	readonly range: number;
+	readonly cooldown: number;
+	readonly score: number;
+	readonly trainTime: number;
+	readonly cost: ResourceCost;
+	readonly vision: number;
+	readonly sound: number;
+	readonly canGather: boolean;
+	readonly canBuild: boolean;
+	readonly canAutoAcquireTargets: boolean;
+	readonly carryCapacity: number;
 	readonly trainShortcut?: string | undefined;
 };
 
@@ -133,7 +146,16 @@ export interface UnitBehavior {
 	readonly sprite: string;
 
 	/** Numeric balance values used by simulation, scoring, training, and combat. */
-	readonly stats: UnitStats;
+	readonly maxHp: number;
+	readonly speed: number;
+	readonly attack: number;
+	readonly range: number;
+	readonly cooldown: number;
+	readonly score: number;
+	readonly trainTime: number;
+	readonly cost: ResourceCost;
+	readonly vision: number;
+	readonly sound: number;
 
 	/** Optional keyboard shortcut used by production-building train actions. */
 	readonly trainShortcut?: string | undefined;
@@ -141,17 +163,10 @@ export interface UnitBehavior {
 	/** Advances this unit's simulation for one world tick. */
 	step(context: UnitSimulationContext, unit: Unit, dt: number): void;
 
-	/** Whether this unit can receive gather commands and collect resources. */
-	canGather(): boolean;
-
-	/** Whether this unit can place and finish player buildings. */
-	canBuild(): boolean;
-
-	/** Whether idle simulation should automatically assign nearby enemy targets. */
-	canAutoAcquireTargets(): boolean;
-
-	/** Maximum resource amount this unit can carry from non-building resource nodes. */
-	carryCapacity(): number;
+	readonly canGather: boolean;
+	readonly canBuild: boolean;
+	readonly canAutoAcquireTargets: boolean;
+	readonly carryCapacity: number;
 
 	/** Persistent noise this unit emits for zombie attraction. */
 	soundLevel(): number;
@@ -167,7 +182,20 @@ export abstract class BaseUnit implements UnitBehavior {
 	public static readonly type: UnitType;
 	public static readonly label: string;
 	public static readonly sprite: string;
-	public static readonly stats: UnitStats;
+	public static readonly maxHp: number;
+	public static readonly speed: number;
+	public static readonly attack: number;
+	public static readonly range: number;
+	public static readonly cooldown: number;
+	public static readonly score: number;
+	public static readonly trainTime: number;
+	public static readonly cost: ResourceCost;
+	public static readonly vision: number;
+	public static readonly sound: number;
+	public static readonly canGather: boolean = false;
+	public static readonly canBuild: boolean = false;
+	public static readonly canAutoAcquireTargets: boolean = false;
+	public static readonly carryCapacity: number = 0;
 	public static readonly trainShortcut?: string | undefined;
 
 	/** Stable unit type key stored in snapshots, commands, queues, and config. */
@@ -185,10 +213,20 @@ export abstract class BaseUnit implements UnitBehavior {
 		return (this.constructor as UnitClass).sprite;
 	}
 
-	/** Numeric balance values used by simulation, scoring, training, and combat. */
-	public get stats() {
-		return (this.constructor as UnitClass).stats;
-	}
+	public get maxHp() { return (this.constructor as UnitClass).maxHp; }
+	public get speed() { return (this.constructor as UnitClass).speed; }
+	public get attack() { return (this.constructor as UnitClass).attack; }
+	public get range() { return (this.constructor as UnitClass).range; }
+	public get cooldown() { return (this.constructor as UnitClass).cooldown; }
+	public get score() { return (this.constructor as UnitClass).score; }
+	public get trainTime() { return (this.constructor as UnitClass).trainTime; }
+	public get cost() { return (this.constructor as UnitClass).cost; }
+	public get vision() { return (this.constructor as UnitClass).vision; }
+	public get sound() { return (this.constructor as UnitClass).sound; }
+	public get canGather() { return (this.constructor as UnitClass).canGather; }
+	public get canBuild() { return (this.constructor as UnitClass).canBuild; }
+	public get canAutoAcquireTargets() { return (this.constructor as UnitClass).canAutoAcquireTargets; }
+	public get carryCapacity() { return (this.constructor as UnitClass).carryCapacity; }
 
 	/** Optional keyboard shortcut used by production-building train actions. */
 	public get trainShortcut() {
@@ -198,7 +236,7 @@ export abstract class BaseUnit implements UnitBehavior {
 	/** Advances this unit's simulation for one world tick. */
 	public step(context: UnitSimulationContext, unit: Unit, dt: number) {
 		this.updateTimers(unit, dt);
-		unit.vision = this.stats.vision || 5;
+		unit.vision = this.vision || 5;
 		const command = unit.command || { type: "idle" };
 		if (command.type === "idle") this.stepIdle(context, unit);
 			else if (command.type === "move") this.stepMove(context, unit, command, dt);
@@ -213,14 +251,14 @@ export abstract class BaseUnit implements UnitBehavior {
 	}
 
 	protected stepIdle(context: UnitSimulationContext, unit: Unit) {
-		if (!this.canAutoAcquireTargets()) return;
+		if (!this.canAutoAcquireTargets) return;
 		const target = context.nearestEnemy(unit, 5.5);
 		if (target) unit.command = { type: "attack", targetId: target.id };
 	}
 
 	protected stepMove(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, dt: number) {
 		unit.facing = command.x < unit.x ? "left" : "right";
-		if (context.moveWithPath(unit, command, this.stats.speed * dt)) unit.command = { type: "idle" };
+		if (context.moveWithPath(unit, command, this.speed * dt)) unit.command = { type: "idle" };
 	}
 
 	protected stepAttack(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "attack" }>, dt: number) {
@@ -232,16 +270,16 @@ export abstract class BaseUnit implements UnitBehavior {
 			return;
 		}
 		const targetPoint = context.centerOf(explicitTarget);
-		const range = this.stats.range + (explicitTarget.size || 0.6);
+		const range = this.range + (explicitTarget.size || 0.6);
 		if (context.distance(unit, targetPoint) > range) {
 			unit.facing = targetPoint.x < unit.x ? "left" : "right";
-			context.moveNearTarget(unit, command, targetPoint, range, this.stats.speed * dt);
+			context.moveNearTarget(unit, command, targetPoint, range, this.speed * dt);
 			return;
 		}
 		if (unit.cooldown <= 0) {
-			context.damage(explicitTarget, this.stats.attack, unit.ownerId);
+			context.damage(explicitTarget, this.attack, unit.ownerId);
 			context.emitActionSound("unitAttack", unit);
-			unit.cooldown = this.stats.cooldown;
+			unit.cooldown = this.cooldown;
 			unit.attackFlash = 0.22;
 			const nextTarget = context.nearestEnemy(unit, 5.5);
 			if (nextTarget && !context.targetById(command.targetId)) {
@@ -250,29 +288,9 @@ export abstract class BaseUnit implements UnitBehavior {
 		}
 	}
 
-	/** Whether this unit can receive gather commands and collect resources. */
-	public canGather() {
-		return false;
-	}
-
-	/** Whether this unit can place and finish player buildings. */
-	public canBuild() {
-		return false;
-	}
-
-	/** Whether idle simulation should automatically assign nearby enemy targets. */
-	public canAutoAcquireTargets() {
-		return false;
-	}
-
-	/** Maximum resource amount this unit can carry from non-building resource nodes. */
-	public carryCapacity() {
-		return 0;
-	}
-
 	/** Persistent noise this unit emits for zombie attraction. */
 	public soundLevel() {
-		return this.stats.sound;
+		return this.sound;
 	}
 
 	/** Amount gathered per completed gather cycle for the supplied target. */

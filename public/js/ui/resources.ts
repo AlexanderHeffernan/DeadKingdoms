@@ -39,7 +39,7 @@ export class ResourcePanel implements GameUiComponent {
 }
 
 function idleWorkerCount(snapshot: ClientSnapshot, playerId: string) {
-	return Object.values(snapshot.units).filter((unit) => unit.ownerId === playerId && unitBehaviorFor(unit.type).canGather() && (!unit.command || unit.command.type === "idle")).length;
+	return Object.values(snapshot.units).filter((unit) => unit.ownerId === playerId && unitBehaviorFor(unit.type).canGather && (!unit.command || unit.command.type === "idle")).length;
 }
 
 function resourcePill(resource: string, amount: number) {

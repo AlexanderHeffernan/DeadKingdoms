@@ -3,7 +3,7 @@ import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { UI } from "./ui.js";
 import { BUILDINGS, SCALE, TILE_H, TRAINING } from "./constants.js";
-import { BUILDING_DEFS, deserializeBuilding } from "../../src/shared/buildingRegistry.js";
+import { BUILDING_TYPES, deserializeBuilding } from "../../src/shared/buildings/index.js";
 import { allUnitClasses, unitBehaviorFor } from "../../src/shared/unitRegistry.js";
 import { spriteMetrics } from "./sprites/spriteInfo.js";
 import { Logs } from "../../src/shared/logs.js";
@@ -449,7 +449,7 @@ function centerOnTownOnce() {
 function centerOnTown(once = true) {
 	if (!state.snapshot) return;
 	if (once && centered) return;
-	const town = Object.values(state.snapshot.buildings).find((building) => building.ownerId === state.playerId && building.isTownCenter());
+	const town = Object.values(state.snapshot.buildings).find((building) => building.ownerId === state.playerId && building.type === "townCenter");
 	if (!town) return;
 	const screen = isoToScreen(town.x + (town.size - 1) / 2, town.y + (town.size - 1) / 2, { x: 0, y: 0, zoom: view.camera.zoom });
 	view.camera.x = window.innerWidth / 2 - screen.x;
@@ -583,7 +583,7 @@ function placeBuilding() {
 	if (!mode) return;
 	const unitIds = [...state.selectedIds].filter((id) => state.snapshot?.units[id]?.ownerId === state.playerId);
 	if (!view.hoverTile || unitIds.length === 0) return;
-	if (!canAfford(BUILDINGS[mode as keyof typeof BUILDINGS]?.cost || {}) || !canPlacePreview(mode as BuildingType, view.hoverTile.x, view.hoverTile.y)) {
+	if (!canAfford(BUILDING_TYPES[mode as keyof typeof BUILDING_TYPES]?.cost || {}) || !canPlacePreview(mode as BuildingType, view.hoverTile.x, view.hoverTile.y)) {
 		ui.showToast("Cannot place that building there.");
 		return;
 	}
@@ -673,10 +673,10 @@ function onKeyDown(event: KeyboardEvent) {
 function startBuildShortcut(buildingType: BuildingType) {
 	const hasBuilder = [...state.selectedIds].some((id) => {
 		const unit = state.snapshot?.units[id];
-		return unit?.ownerId === state.playerId && unitBehavior(unit).canBuild();
+		return unit?.ownerId === state.playerId && unitBehavior(unit).canBuild;
 	});
 	if (!hasBuilder) return ui.showToast("Select build-capable units.");
-	const def = BUILDINGS[buildingType as keyof typeof BUILDINGS];
+	const def = BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES];
 	if (!def) return;
 	if (!canAfford(def.cost || {})) return ui.showToast("Not enough resources.");
 	view.buildMode = buildingType;
@@ -694,12 +694,12 @@ function trainShortcut(unitType: UnitType) {
 	const player = state.snapshot.players[state.playerId]!;
 	if (!train || !canAfford(train.cost || {})) return ui.showToast("Not enough resources.");
 	if (player.population >= player.popCap) return ui.showToast("Population cap reached.");
-	if (building.queue?.length >= 10) return ui.showToast("Training queue is full.");
+	if ((building.queue?.length ?? 0) >= 10) return ui.showToast("Training queue is full.");
 	issue({ type: "train", buildingId: building.id, unitType });
 }
 
 function selectedFarmAction(action: (farm: Building) => void) {
-	const farm = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId && entity.gatherResource());
+	const farm = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId && entity.gatherResource);
 	if (farm) action(farm);
 }
 
@@ -710,7 +710,7 @@ function deleteSelectedBuilding() {
 
 function selectIdleWorkers() {
 	const idle = Object.values(state.snapshot?.units || {})
-	.filter((unit) => unit.ownerId === state.playerId && unitBehavior(unit).canGather() && (!unit.command || unit.command.type === "idle"))
+	.filter((unit) => unit.ownerId === state.playerId && unitBehavior(unit).canGather && (!unit.command || unit.command.type === "idle"))
 	.sort((a, b) => a.id.localeCompare(b.id));
 	state.selectedIds.clear();
 	if (idle.length > 0) {
@@ -746,7 +746,7 @@ function canAfford(cost: Partial<Record<ResourceType, number>> = {}) {
 }
 
 function canPlacePreview(buildingType: BuildingType, x: number, y: number) {
-	if (!state.snapshot || !BUILDINGS[buildingType as keyof typeof BUILDINGS]) return false;
+	if (!state.snapshot || !BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES]) return false;
 	const size = buildingSize(buildingType);
 	if (x < 0 || y < 0 || x + size > state.snapshot.map.size || y + size > state.snapshot.map.size) return false;
 	for (const building of Object.values(state.snapshot.buildings)) {
@@ -759,7 +759,7 @@ function canPlacePreview(buildingType: BuildingType, x: number, y: number) {
 }
 
 function buildingSize(type: BuildingType) {
-	if (type in BUILDING_DEFS) return BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].stats.size;
+	if (type in BUILDING_TYPES) return BUILDING_TYPES[type as keyof typeof BUILDING_TYPES].size;
 	if (type === "barracks") return 3;
 	if (type === "house") return 2;
 	return 1;
