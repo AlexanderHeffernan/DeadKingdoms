@@ -12,6 +12,7 @@ import soldierBase from "./soldier_base.png";
 import soldierFlag from "./soldier_flag.png";
 import villagerBase from "./villager_base.png";
 import villagerFlag from "./villager_flag.png";
+import zombieVil from "./zombie_vil.png";
 
 import type { SpriteName } from "../../../src/shared/types.js";
 
@@ -35,5 +36,6 @@ export const pngSprites: Partial<Record<SpriteName, PngSprite>> = {
   berry: { base: berryBush, width: 16, height: 16 },
   townCenter: { base: townCenterBase, flag: townCenterFlag, width: 64, height: 64 },
   soldier: { base: soldierBase, flag: soldierFlag, width: 16, height: 16 },
-  villager: { base: villagerBase, flag: villagerFlag, width: 16, height: 16 }
+  villager: { base: villagerBase, flag: villagerFlag, width: 16, height: 16 },
+  zombie: { base: zombieVil, width: 16, height: 16 }
 };

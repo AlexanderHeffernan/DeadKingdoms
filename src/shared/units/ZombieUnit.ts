@@ -9,7 +9,7 @@ const ZOMBIE_PROGRESS_EPSILON = 0.03;
 export class ZombieUnit extends BaseUnit {
 	public static readonly type = "zombie";
 	public static readonly label = "Zombie";
-	public static readonly sprite = "zombie";
+	public static readonly sprite = "zombie_vil";
 	public static readonly maxHp = 34;
 	public static readonly speed = 1;
 	public static readonly attack = 5;
