@@ -28,7 +28,7 @@ export class ZombieUnit extends BaseUnit {
 		// Check for nearby units before following horde movement.
 		const target = this.findNearestUnitTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
 		if (target) {
-			this.engageTarget(context, zombie, target, dt);
+			this.engageTarget(context, zombie, this.targetOrBlockingBuilding(context, zombie, target), dt);
 			return;
 		}
 
@@ -71,6 +71,13 @@ export class ZombieUnit extends BaseUnit {
 		context.damage(target, this.attack, zombie.ownerId);
 		zombie.cooldown = this.cooldown;
 		zombie.attackFlash = 0.22;
+	}
+
+	private targetOrBlockingBuilding(context: UnitSimulationContext, zombie: Unit, target: Unit): UnitCombatTarget {
+		const targetPoint = context.centerOf(target);
+		const range = this.range + (target.size || 0.6);
+		if (context.hasPathToTarget(zombie, targetPoint, range)) return target;
+		return context.blockingBuildingToward(zombie, targetPoint) || target;
 	}
 
 	private followHordeTarget(context: UnitSimulationContext, zombie: Unit, target: Vec2, dt: number) {

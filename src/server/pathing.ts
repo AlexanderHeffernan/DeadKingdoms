@@ -828,6 +828,14 @@ export function findSharedPath(world: World, unit: Unit, target: Vec2, maxNodes 
 	return path;
 }
 
+export function hasPathToInteractionRange(world: World, unit: Unit, target: Vec2, range: number): boolean {
+	if (distance(unit, target) <= range) return true;
+	const start = worldTile(unit);
+	if (!isInMap(start.x, start.y)) return false;
+	const field = interactionRangeFlowFieldFor(world, target, range);
+	return field.distance[tileId(start.x, start.y)] !== FLOW_UNREACHED;
+}
+
 function commandCrowd(command: UnitCommand): number {
 	return Math.max(1, command.pathCrowd || 1);
 }
@@ -871,6 +879,19 @@ function flowFieldFor(world: World, goal: { x: number; y: number }, clearanceRad
 	const cached = state.flowFields.get(cacheKey) as FlowField | undefined;
 	if (cached && world.tick - cached.createdTick <= FLOW_FIELD_CACHE_TICKS) return cached;
 	const field = buildFlowField(world, goalId, clearanceRadius);
+	state.flowFields.set(cacheKey, field);
+	if (state.flowFields.size > 48) pruneFlowFields(state.flowFields as Map<string, FlowField>, world.tick);
+	return field;
+}
+
+function interactionRangeFlowFieldFor(world: World, target: Vec2, range: number): FlowField {
+	const state = pathingState(world);
+	const targetTile = worldTile(target);
+	const rangeKey = Math.ceil(range * 10);
+	const cacheKey = `${state.occupancyVersion}:interaction:${targetTile.x}:${targetTile.y}:${rangeKey}`;
+	const cached = state.flowFields.get(cacheKey) as FlowField | undefined;
+	if (cached && world.tick - cached.createdTick <= FLOW_FIELD_CACHE_TICKS) return cached;
+	const field = buildInteractionRangeFlowField(world, target, range);
 	state.flowFields.set(cacheKey, field);
 	if (state.flowFields.size > 48) pruneFlowFields(state.flowFields as Map<string, FlowField>, world.tick);
 	return field;
@@ -923,6 +944,48 @@ function buildUnweightedFlowField(world: World, goalId: number): FlowField {
 		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x, y - 1, nextDistance)) tail += 1;
 	}
 	return { goalId, createdTick: world.tick, clearanceRadius: 0, distance: distanceGrid, next };
+}
+
+function buildInteractionRangeFlowField(world: World, target: Vec2, range: number): FlowField {
+	const goals = interactionGoalIds(world, target, range);
+	const goalId = goals[0] ?? -1;
+	const distanceGrid = new Uint32Array(MAP_SIZE * MAP_SIZE);
+	distanceGrid.fill(FLOW_UNREACHED);
+	const next = new Int32Array(MAP_SIZE * MAP_SIZE);
+	next.fill(-1);
+	const queue = new Int32Array(MAP_SIZE * MAP_SIZE);
+	let head = 0;
+	let tail = 0;
+	for (const id of goals) {
+		distanceGrid[id] = 0;
+		next[id] = id;
+		queue[tail++] = id;
+	}
+	while (head < tail) {
+		const current = queue[head++]!;
+		const x = current % MAP_SIZE;
+		const y = Math.floor(current / MAP_SIZE);
+		const nextDistance = distanceGrid[current]! + FLOW_BASE_COST;
+		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x + 1, y, nextDistance)) tail += 1;
+		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x - 1, y, nextDistance)) tail += 1;
+		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x, y + 1, nextDistance)) tail += 1;
+		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x, y - 1, nextDistance)) tail += 1;
+	}
+	return { goalId, createdTick: world.tick, clearanceRadius: 0, distance: distanceGrid, next };
+}
+
+function interactionGoalIds(world: World, target: Vec2, range: number): number[] {
+	const origin = worldTile(target);
+	const searchRadius = Math.max(1, Math.ceil(range) + 1);
+	const goals: number[] = [];
+	for (let y = origin.y - searchRadius; y <= origin.y + searchRadius; y += 1) {
+		for (let x = origin.x - searchRadius; x <= origin.x + searchRadius; x += 1) {
+			if (!isWalkable(world, x, y)) continue;
+			if (distance(tileCenter({ x, y }), target) > range) continue;
+			goals.push(tileId(x, y));
+		}
+	}
+	return goals;
 }
 
 function touchUnweightedFlowNeighbor(

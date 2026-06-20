@@ -15,7 +15,7 @@ import type { UnitSimulationContext } from "../shared/units/index.js";
 import type { GatherTarget } from "../shared/buildings/base/index.js";
 import { id } from "./id.js";
 import { clamp, distance, footprintHeight, footprintWidth, rectsOverlap, type Footprint } from "./math.js";
-import { isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
+import { hasPathToInteractionRange, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { stepZombieDirector } from "./zombieDirector.js";
@@ -372,6 +372,8 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		findNextBuildSite: (unit) => findNextBuildSite(world, unit),
 		assignPostBuildGather: (unit, resourceKind, builtFarm = null) => assignPostBuildGather(world, unit, resourceKind, builtFarm),
 		attackBlockingBuilding: (unit, targetPoint) => attackBlockingBuilding(world, unit, targetPoint),
+		hasPathToTarget: (unit, targetPoint, range) => hasPathToInteractionRange(world, unit, targetPoint, range),
+		blockingBuildingToward: (unit, targetPoint) => blockingBuildingToward(world, unit, targetPoint),
 		createZombie: (point) => createZombie(world, point.x, point.y),
 		isWalkable: (x, y) => isWalkable(world, x, y),
 		weightedWorldSound: () => weightedWorldSound(world),
@@ -1040,9 +1042,19 @@ function blockingBuildingToward(world: World, zombie: Unit, targetPoint: { x: nu
 	const dx = targetPoint.x - zombie.x;
 	const dy = targetPoint.y - zombie.y;
 	const length = Math.hypot(dx, dy) || 1;
-	const x = zombie.x + (dx / length) * 0.65;
-	const y = zombie.y + (dy / length) * 0.65;
-	return Object.values(world.buildings).find((building) => pointInsideEntity(Math.round(x), Math.round(y), building)) || null;
+	const step = 0.35;
+	for (let distanceToTarget = 0.65; distanceToTarget <= length; distanceToTarget += step) {
+		const x = Math.floor(zombie.x + (dx / length) * distanceToTarget);
+		const y = Math.floor(zombie.y + (dy / length) * distanceToTarget);
+		const building = Object.values(world.buildings).find((candidate) => (
+			candidate.ownerId !== zombie.ownerId &&
+			candidate.hp > 0 &&
+			candidate.walkBlocking &&
+			pointInsideEntity(x, y, candidate)
+		));
+		if (building) return building;
+	}
+	return null;
 }
 
 function stepResourceDecay(world: World, dt: number) {

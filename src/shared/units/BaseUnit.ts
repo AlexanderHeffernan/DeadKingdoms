@@ -130,6 +130,12 @@ export type UnitSimulationContext = {
 
 	/** Lets a blocked melee unit damage the building obstructing its path. */
 	attackBlockingBuilding(unit: Unit, targetPoint: { x: number; y: number }): void;
+
+	/** Whether this unit can find a walkable route into interaction range of the target point. */
+	hasPathToTarget(unit: Unit, targetPoint: { x: number; y: number }, range: number): boolean;
+
+	/** Finds the first enemy building obstructing a unit's route toward a target point. */
+	blockingBuildingToward(unit: Unit, targetPoint: { x: number; y: number }): Building | null;
 };
 
 /**

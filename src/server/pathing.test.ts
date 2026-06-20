@@ -3,7 +3,7 @@ import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Building, ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
 import { ZombieUnit, type UnitSimulationContext } from "../shared/units/index.js";
-import { findPath, findSharedPath, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
+import { findPath, findSharedPath, hasPathToInteractionRange, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 	const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -172,6 +172,23 @@ test("findPath returns an empty path for an out-of-map destination", () => {
 	const path = findPath(world, makeUnit(10.5, 10.5), { x: -20, y: -20 });
 
 	assert.equal(path.length, 0);
+});
+
+test("hasPathToInteractionRange stays false when only a sealed wall corner is broken", () => {
+	const blocked = [];
+	for (let x = 9; x <= 13; x += 1) {
+		for (let y = 9; y <= 13; y += 1) {
+			if (x > 9 && x < 13 && y > 9 && y < 13) continue;
+			if (x === 9 && y === 9) continue;
+			blocked.push({ x, y });
+		}
+	}
+	const world = makeWorld(blocked);
+	const zombie = makeUnit(7, 11, "z-corner-check");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+
+	assert.equal(hasPathToInteractionRange(world, zombie, { x: 11, y: 11 }, 1.15), false);
 });
 
 test("resolveUnitSeparation pushes overlapping units in the same grid cell apart", () => {
@@ -407,6 +424,8 @@ test("nearby combat aggro overrides zombie horde goals", () => {
 		},
 		moveAroundSmallObstacle: () => false,
 		moveZombieWithPath: () => false,
+		hasPathToTarget: () => true,
+		blockingBuildingToward: () => null,
 		damage: () => {
 			damaged = true;
 		},
@@ -469,6 +488,8 @@ test("zombie prioritizes visible units over adjacent buildings", () => {
 		},
 		moveAroundSmallObstacle: () => false,
 		moveZombieWithPath: () => false,
+		hasPathToTarget: () => true,
+		blockingBuildingToward: () => null,
 		damage: () => {
 			damaged = true;
 		},
@@ -478,6 +499,53 @@ test("zombie prioritizes visible units over adjacent buildings", () => {
 
 	assert.deepEqual(movementTarget, { x: unit.x, y: unit.y });
 	assert.equal(damaged, false);
+});
+
+test("zombie attacks a blocking building when a visible unit has no path around it", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-wall-blocked");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	const unit = makeUnit(18.3, 10, "u-behind-wall");
+	const wall = {
+		...makeBuilding(10, 10, "b-wall"),
+		type: "wall",
+		width: 1,
+		height: 1,
+		size: 1,
+		walkBlocking: true,
+	} as Building;
+	let damagedTarget: Building | Unit | null = null;
+	let movementTarget: { x: number; y: number } | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [unit],
+		nearestEnemy: () => wall,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: (_unit: Unit, target: { x: number; y: number }) => {
+			movementTarget = target;
+			return false;
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasPathToTarget: () => false,
+		blockingBuildingToward: () => wall,
+		damage: (target: Building | Unit) => {
+			damagedTarget = target;
+		},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(movementTarget, { x: wall.x, y: wall.y });
+	assert.equal(damagedTarget, null);
+
+	zombie.x = 9.5;
+	behavior.step(context, zombie, 0.1);
+
+	assert.equal(damagedTarget, wall);
 });
 
 test("zombie unit does not clear director horde target after reaching it", () => {
