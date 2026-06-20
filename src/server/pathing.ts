@@ -161,18 +161,20 @@ function zombieCrowdPush(world: World, unit: Unit, desired: Vec2): Vec2 {
 	let pushX = 0;
 	let pushY = 0;
 	const side = { x: -desired.y, y: desired.x };
-	for (const entry of movingZombieGrid(world).nearby(unit, ZOMBIE_CROWD_RADIUS, ZOMBIE_CROWD_NEIGHBORS)) {
+	let neighbors = 0;
+	movingZombieGrid(world).forNearby(unit, ZOMBIE_CROWD_RADIUS, (entry) => {
 		const other = entry.item;
-		if (other === unit || other.ownerId !== unit.ownerId) continue;
+		if (other === unit || other.ownerId !== unit.ownerId) return;
 		const dx = unit.x - other.x;
 		const dy = unit.y - other.y;
 		const dist = Math.hypot(dx, dy);
-		if (dist >= ZOMBIE_CROWD_RADIUS) continue;
+		if (dist >= ZOMBIE_CROWD_RADIUS) return;
+		neighbors += 1;
 		if (dist <= 0.001) {
 			const angle = (unitHash(unit) % 360) * Math.PI / 180;
 			pushX += Math.cos(angle);
 			pushY += Math.sin(angle);
-			continue;
+			return neighbors < ZOMBIE_CROWD_NEIGHBORS;
 		}
 		const strength = (ZOMBIE_CROWD_RADIUS - dist) / ZOMBIE_CROWD_RADIUS;
 		const away = { x: dx / dist, y: dy / dist };
@@ -183,7 +185,8 @@ function zombieCrowdPush(world: World, unit: Unit, desired: Vec2): Vec2 {
 			pushX += side.x * lateralSide * strength;
 			pushY += side.y * lateralSide * strength;
 		}
-	}
+		return neighbors < ZOMBIE_CROWD_NEIGHBORS;
+	});
 	const length = Math.hypot(pushX, pushY);
 	if (length <= 0.001) return { x: 0, y: 0 };
 	return { x: pushX / length, y: pushY / length };

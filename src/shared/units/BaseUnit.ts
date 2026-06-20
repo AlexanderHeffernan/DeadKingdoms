@@ -83,6 +83,12 @@ export type UnitSimulationContext = {
 	/** Finds living non-zombie units near the supplied point. */
 	nearbyTargetUnits(source: { x: number; y: number }, range: number): Unit[];
 
+	/** Finds the nearest living non-zombie unit near the supplied point. */
+	nearestTargetUnit(source: { x: number; y: number }, range: number): Unit | null;
+
+	/** Finds the nearest enemy building near the supplied unit. */
+	nearestTargetBuilding(source: Unit, range: number): Building | null;
+
 	/** Applies damage to a unit or building and performs any death side effects. */
 	damage(target: UnitCombatTarget, amount: number, attackerId: Unit["ownerId"]): void;
 

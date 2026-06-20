@@ -17,24 +17,29 @@ export class SpatialGrid<T extends { x: number; y: number }> {
 	}
 
 	public nearby(point: { x: number; y: number }, radius: number, limit = Infinity): SpatialGridEntry<T>[] {
+		const entries: SpatialGridEntry<T>[] = [];
+		this.forNearby(point, radius, (entry) => {
+			entries.push(entry);
+			return entries.length < limit;
+		});
+		return entries;
+	}
+
+	public forNearby(point: { x: number; y: number }, radius: number, fn: (entry: SpatialGridEntry<T>) => boolean | void) {
 		const minCellX = Math.floor((point.x - radius) / this.cellSize);
 		const maxCellX = Math.floor((point.x + radius) / this.cellSize);
 		const minCellY = Math.floor((point.y - radius) / this.cellSize);
 		const maxCellY = Math.floor((point.y + radius) / this.cellSize);
-		const entries: SpatialGridEntry<T>[] = [];
 
 		for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
 			for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
 				const bucket = this.buckets.get(this.key(cellX, cellY));
 				if (!bucket) continue;
 				for (const entry of bucket) {
-					entries.push(entry);
-					if (entries.length >= limit) return entries;
+					if (fn(entry) === false) return;
 				}
 			}
 		}
-
-		return entries;
 	}
 
 	private add(item: T, index: number) {

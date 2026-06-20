@@ -39,6 +39,16 @@ function main() {
 	console.log("");
 	printWorldResults([
 		runWorldBenchmark({
+			name: "500 spread zombies, quiet full tick",
+			repeats: 500,
+			world: worldWithZombies(spreadZombies(500)),
+		}),
+		runWorldBenchmark({
+			name: "500 clustered zombies, quiet full tick",
+			repeats: 500,
+			world: worldWithZombies(clusteredZombies(500)),
+		}),
+		runWorldBenchmark({
 			name: "500 spread zombies, full world tick",
 			repeats: 500,
 			world: worldWithZombies(spreadZombies(500), [{ x: 120, y: 120, sound: ACTION_SOUND_DEFS.build.sound }]),
@@ -47,6 +57,16 @@ function main() {
 			name: "500 clustered zombies, full world tick",
 			repeats: 500,
 			world: worldWithZombies(clusteredZombies(500), [{ x: 120, y: 120, sound: ACTION_SOUND_DEFS.build.sound }]),
+		}),
+		runWorldBenchmark({
+			name: "1000 clustered zombies, quiet full tick",
+			repeats: 300,
+			world: worldWithZombies(clusteredZombies(1000)),
+		}),
+		runWorldBenchmark({
+			name: "1000 clustered zombies, active full tick",
+			repeats: 300,
+			world: worldWithZombies(clusteredZombies(1000), [{ x: 120, y: 120, sound: ACTION_SOUND_DEFS.build.sound }]),
 		}),
 	]);
 }

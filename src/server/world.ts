@@ -377,6 +377,8 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 			.nearby(source, range)
 			.map((entry) => entry.item)
 			.filter((unit) => world.units[unit.id] === unit && unit.type !== "zombie" && unit.hp > 0),
+		nearestTargetUnit: (source, range) => nearestTargetUnit(world, targetUnitGrid, source, range),
+		nearestTargetBuilding: (source, range) => nearestTargetBuilding(world, buildingGrid, source, range),
 		damage: (target, amount, attackerId) => damage(world, target, amount, attackerId),
 		emitActionSound: (action, point) => emitActionSound(world, action, point),
 		gatherTarget: (targetId, playerId) => world.resources[targetId as keyof typeof world.resources] || gatherableBuilding(world.buildings[targetId as BuildingId], playerId),
@@ -1385,6 +1387,38 @@ function nearestEnemy(world: World, unitGridsByOwner: Map<PlayerId, SpatialGrid<
 			bestDist = d;
 		}
 	}
+	return best;
+}
+
+function nearestTargetUnit(world: World, targetUnitGrid: SpatialGrid<Unit>, source: { x: number; y: number }, range: number) {
+	let best: Unit | null = null;
+	let bestDist = range;
+	const sourceCenter = centerOf(source);
+	targetUnitGrid.forNearby(sourceCenter, range, (entry) => {
+		const unit = entry.item;
+		if (unit.hp <= 0 || unit.type === "zombie" || world.units[unit.id] !== unit) return;
+		const d = distance(sourceCenter, centerOf(unit));
+		if (d < bestDist) {
+			best = unit;
+			bestDist = d;
+		}
+	});
+	return best;
+}
+
+function nearestTargetBuilding(world: World, buildingGrid: SpatialGrid<Building>, source: Unit, range: number) {
+	let best: Building | null = null;
+	let bestDist = range;
+	const sourceCenter = centerOf(source);
+	buildingGrid.forNearby(sourceCenter, range, (entry) => {
+		const building = entry.item;
+		if (building.ownerId === source.ownerId || building.hp <= 0 || world.buildings[building.id] !== building) return;
+		const d = distance(sourceCenter, centerOf(building));
+		if (d < bestDist) {
+			best = building;
+			bestDist = d;
+		}
+	});
 	return best;
 }
 
