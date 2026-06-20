@@ -354,15 +354,19 @@ function stepUnits(world: World, context: UnitSimulationContext, dt: number, pro
 			else behavior.step(context, step.unit, step.dt);
 	}
 	if (!zombieAiWorker.step(world, dt, zombieSteps, (attack) => applyZombieAiAttack(world, attack), unitProfiler)) {
-		for (const zombieStep of zombieSteps) {
-			const unit = world.units[zombieStep.id];
-			if (!unit) continue;
-			const behavior = unitBehavior(unit);
-			if (unitProfiler) unitProfiler.measureUnit(unit, () => behavior.step(context, unit, zombieStep.dt));
-				else behavior.step(context, unit, zombieStep.dt);
-		}
+		stepZombieBatch(world, context, zombieSteps, unitProfiler);
 	}
 	if (unitProfiler) world._unitAiPerf = unitProfiler.stats();
+}
+
+function stepZombieBatch(world: World, context: UnitSimulationContext, zombieSteps: ZombieAiStep[], unitProfiler: UnitAiProfiler | null) {
+	for (const zombieStep of zombieSteps) {
+		const unit = world.units[zombieStep.id];
+		if (!unit) continue;
+		const behavior = unitBehavior(unit);
+		if (unitProfiler) unitProfiler.measureUnit(unit, () => behavior.step(context, unit, zombieStep.dt));
+			else behavior.step(context, unit, zombieStep.dt);
+	}
 }
 
 function collectUnitSteps(
@@ -393,7 +397,6 @@ function applyZombieAiAttack(world: World, attack: ZombieAiAttackIntent) {
 	const attacker = world.units[attack.attackerId];
 	const target = world.units[attack.targetId as UnitId] || world.buildings[attack.targetId as BuildingId] || world.corpses[attack.targetId as keyof typeof world.corpses];
 	if (!attacker || attacker.type !== "zombie" || attacker.hp <= 0 || !target) return;
-	if (attacker.cooldown > 0) return;
 	damage(world, target, attack.amount, attack.attackerOwnerId);
 	attacker.cooldown = attack.cooldown;
 	attacker.attackFlash = attack.attackFlash;
@@ -583,6 +586,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		hasPathToTarget: (unit, targetPoint, range) => hasPathToInteractionRange(world, unit, targetPoint, range),
 		hasReasonablePathToTarget: (unit, targetPoint, range) => hasReasonableZombiePathToTarget(world, unit, targetPoint, range),
 		blockingBuildingToward: (unit, targetPoint) => blockingBuildingToward(world, unit, targetPoint),
+		wallLikeBlockingBuildingToward: (unit, targetPoint) => wallLikeBlockingBuildingToward(world, unit, targetPoint),
 		zombieUpdateCadence: (unit) => zombieCadence.cadenceFor(unit),
 		zombieAiCadence: (unit) => zombieCadence.cadenceFor(unit),
 		createZombie: (point) => createZombie(world, point.x, point.y),
@@ -1356,6 +1360,26 @@ function blockingBuildingToward(world: World, zombie: Unit, targetPoint: { x: nu
 		if (building && building.hp > 0) return building;
 	}
 	return null;
+}
+
+function wallLikeBlockingBuildingToward(world: World, zombie: Unit, targetPoint: { x: number; y: number }): Building | null {
+	const building = blockingBuildingToward(world, zombie, targetPoint);
+	if (!building) return null;
+	return isWallLikeBlocker(world, building) ? building : null;
+}
+
+function isWallLikeBlocker(world: World, building: Building): boolean {
+	if (building.type === "wall" || building.type === "gate") return true;
+	if (building.width > 1 || building.height > 1) return true;
+	const blockers = blockingBuildingsByTile(world);
+	const x = Math.floor(building.x);
+	const y = Math.floor(building.y);
+	let connected = 0;
+	for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+		const other = blockers.get((y + dy) * MAP_SIZE + x + dx);
+		if (other && other.ownerId !== ZOMBIE_OWNER_ID && other.hp > 0) connected += 1;
+	}
+	return connected >= 2;
 }
 
 function blockingBuildingsByTile(world: World): Map<number, Building> {

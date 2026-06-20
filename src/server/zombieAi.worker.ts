@@ -19,7 +19,8 @@ import type {
 } from "./zombieAiWorkerProtocol.js";
 
 const TARGET_UNIT_GRID_CELL_SIZE = 4;
-const REASONABLE_PATH_CHECKS_PER_BATCH = 180;
+const TARGET_LOOKUP_CACHE_CELL_SIZE = 2;
+const REASONABLE_PATH_CHECKS_PER_BATCH = 80;
 
 if (!parentPort) throw new Error("Zombie AI worker requires a parent port.");
 
@@ -154,6 +155,7 @@ function createZombieSimulationContext(
 		TARGET_UNIT_GRID_CELL_SIZE,
 	);
 	const pathChecks = new ReasonableZombiePathChecks(world, profiler);
+	const targetLookup = new ZombieTargetLookupCache(world, profiler, targetUnitGrid, buildingGrid);
 	return {
 		world,
 		targetById: (targetId) => world.units[targetId] || world.buildings[targetId] || world.corpses[targetId as keyof typeof world.corpses] || null,
@@ -174,8 +176,8 @@ function createZombieSimulationContext(
 			.nearby(source, range)
 			.map((entry) => entry.item)
 			.filter((unit) => world.units[unit.id] === unit && unit.type !== "zombie" && unit.hp > 0)),
-		nearestTargetUnit: (source, range) => profiler.measure("nearestTargetUnit", "Nearest target unit", 1, () => nearestTargetUnit(world, targetUnitGrid, source, range)),
-		nearestTargetBuilding: (source, range) => profiler.measure("nearestTargetBuilding", "Nearest target building", 1, () => nearestTargetBuilding(world, buildingGrid, source, range)),
+		nearestTargetUnit: (source, range) => targetLookup.nearestUnit(source, range),
+		nearestTargetBuilding: (source, range) => targetLookup.nearestBuilding(source, range),
 		damage: (target, amount, attackerId, attacker) => {
 			if (attacker) recorder.damage(target, amount, attackerId, attacker);
 		},
@@ -197,8 +199,53 @@ function createZombieSimulationContext(
 		hasPathToTarget: (unit, targetPoint, range) => profiler.measure("hasPathToTarget", "Path to target check", 1, () => hasPathToInteractionRange(world, unit, targetPoint, range)),
 		hasReasonablePathToTarget: (unit, targetPoint, range) => pathChecks.hasPath(unit, targetPoint, range),
 		blockingBuildingToward: (unit, targetPoint) => profiler.measure("blockingBuilding", "Blocking building lookup", 1, () => blockingBuildingToward(world, unit, targetPoint)),
+		wallLikeBlockingBuildingToward: (unit, targetPoint) => profiler.measure("wallLikeBlockingBuilding", "Wall-like blocker lookup", 1, () => wallLikeBlockingBuildingToward(world, unit, targetPoint)),
 		zombieAiCadence: (unit) => cadenceByZombie.get(unit.id) ?? 1,
 	};
+}
+
+class ZombieTargetLookupCache {
+	private readonly unitCache = new Map<string, Unit | null>();
+	private readonly buildingCache = new Map<string, Building | null>();
+
+	constructor(
+		private readonly world: World,
+		private readonly profiler: ZombieAiWorkerProfiler,
+		private readonly targetUnitGrid: SpatialGrid<Unit>,
+		private readonly buildingGrid: SpatialGrid<Building>,
+	) {}
+
+	nearestUnit(source: Vec2, range: number) {
+		const key = this.cacheKey(source, range);
+		if (this.unitCache.has(key)) {
+			this.profiler.measure("nearestTargetUnitCacheHit", "Nearest target unit cache hit", 1, () => undefined);
+			return this.unitCache.get(key) ?? null;
+		}
+		const target = this.profiler.measure("nearestTargetUnit", "Nearest target unit", 1, () => (
+			nearestTargetUnit(this.world, this.targetUnitGrid, source, range)
+		));
+		this.unitCache.set(key, target);
+		return target;
+	}
+
+	nearestBuilding(source: Unit, range: number) {
+		const key = this.cacheKey(source, range);
+		if (this.buildingCache.has(key)) {
+			this.profiler.measure("nearestTargetBuildingCacheHit", "Nearest target building cache hit", 1, () => undefined);
+			return this.buildingCache.get(key) ?? null;
+		}
+		const target = this.profiler.measure("nearestTargetBuilding", "Nearest target building", 1, () => (
+			nearestTargetBuilding(this.world, this.buildingGrid, source, range)
+		));
+		this.buildingCache.set(key, target);
+		return target;
+	}
+
+	private cacheKey(source: Vec2, range: number) {
+		const cellX = Math.floor(source.x / TARGET_LOOKUP_CACHE_CELL_SIZE);
+		const cellY = Math.floor(source.y / TARGET_LOOKUP_CACHE_CELL_SIZE);
+		return `${cellX},${cellY}:${Math.round(range * 10)}`;
+	}
 }
 
 class ReasonableZombiePathChecks {
@@ -290,6 +337,26 @@ function blockingBuildingToward(world: World, zombie: Unit, targetPoint: Vec2): 
 		if (building && building.hp > 0) return building;
 	}
 	return null;
+}
+
+function wallLikeBlockingBuildingToward(world: World, zombie: Unit, targetPoint: Vec2): Building | null {
+	const building = blockingBuildingToward(world, zombie, targetPoint);
+	if (!building) return null;
+	return isWallLikeBlocker(world, building) ? building : null;
+}
+
+function isWallLikeBlocker(world: World, building: Building): boolean {
+	if (building.type === "wall" || building.type === "gate") return true;
+	if (building.width > 1 || building.height > 1) return true;
+	const blockers = blockingBuildingsByTile(world);
+	const x = Math.floor(building.x);
+	const y = Math.floor(building.y);
+	let connected = 0;
+	for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+		const other = blockers.get((y + dy) * MAP_SIZE + x + dx);
+		if (other && other.ownerId !== ZOMBIE_OWNER_ID && other.hp > 0) connected += 1;
+	}
+	return connected >= 2;
 }
 
 function blockingBuildingsByTile(world: World): Map<number, Building> {

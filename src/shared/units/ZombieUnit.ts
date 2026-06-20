@@ -119,7 +119,9 @@ export class ZombieUnit extends BaseUnit {
 	private targetOrBlockingBuilding(context: UnitSimulationContext, zombie: Unit, target: Unit): UnitCombatTarget {
 		const targetPoint = context.centerOf(target);
 		const range = this.range + (target.size || 0.6);
+		const wallLikeBlocker = context.wallLikeBlockingBuildingToward?.(zombie, targetPoint);
 		if (context.hasReasonablePathToTarget(zombie, targetPoint, range)) return target;
+		if (wallLikeBlocker) return wallLikeBlocker;
 		return context.blockingBuildingToward(zombie, targetPoint) || target;
 	}
 
@@ -154,7 +156,9 @@ export class ZombieUnit extends BaseUnit {
 	private blockingBuildingTowardSound(context: UnitSimulationContext, zombie: Unit, target: Vec2) {
 		if (zombie.zombieGoalKind !== "sound") return null;
 		const sourceTarget = zombie.zombieHordeSourceTarget || target;
+		const wallLikeBlocker = context.wallLikeBlockingBuildingToward?.(zombie, sourceTarget);
 		if (context.hasReasonablePathToTarget(zombie, sourceTarget, 0.45)) return null;
+		if (wallLikeBlocker) return wallLikeBlocker;
 		return context.blockingBuildingToward(zombie, sourceTarget);
 	}
 
