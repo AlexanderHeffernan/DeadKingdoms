@@ -3,6 +3,12 @@ import type { ClientSnapshot, ViewState } from "./clientTypes.js";
 import { isoToScreen } from "./iso.js";
 
 const LIGHT_SMOOTHING = 0.055;
+const FULL_DETAIL_TILE_LIGHT_ZOOM = 0.85;
+const MEDIUM_DETAIL_TILE_LIGHT_ZOOM = 0.45;
+const FAR_TILE_LIGHT_SAMPLE_SIZE = 4;
+const MEDIUM_TILE_LIGHT_SAMPLE_SIZE = 2;
+const LIGHT_FLICKER_FRAME_MS = 120;
+const TERRAIN_LIGHT_FRAME_STEP = 5;
 
 type LitBuilding = {
 	id: string;
@@ -17,14 +23,17 @@ export class DayNightVisuals {
 	private visualNight = 0;
 	private visualWarmth = 0;
 	private buildings: LitBuilding[] = [];
-	private tileTintCache = new Map<string, number>();
+	private tileTintCache = new Map<number, number>();
 	private entityTintCache = new Map<string, number>();
 	private frameKey = "";
+	private terrainFrameKey = "";
+	private tileLightSampleSize = 1;
 
 	draw(snapshot: ClientSnapshot, view: ViewState) {
 		this.visualNight = smoothToward(this.visualNight, 1 - snapshot.dayNight.light);
 		this.visualWarmth = smoothToward(this.visualWarmth, phaseWarmth(snapshot.dayNight.phase));
 		this.buildings = visibleLightBuildings(snapshot, view);
+		this.tileLightSampleSize = tileLightSampleSizeFor(view.camera.zoom || 1);
 		this.updateFrameKey(snapshot);
 	}
 
@@ -33,13 +42,19 @@ export class DayNightVisuals {
 		this.tileTintCache.clear();
 		this.entityTintCache.clear();
 		this.frameKey = "";
+		this.terrainFrameKey = "";
+	}
+
+	get terrainCacheKey() {
+		return this.terrainFrameKey;
 	}
 
 	tileTint(x: number, y: number, visible: boolean) {
-		const key = `${this.frameKey}:tile:${visible ? 1 : 0}:${x}:${y}`;
+		const sample = this.tileLightSample(x, y);
+		const key = tileTintKey(sample.x, sample.y, visible);
 		const cached = this.tileTintCache.get(key);
 		if (cached !== undefined) return cached;
-		const light = visible ? this.lightIntensityAt(x + 0.5, y + 0.5) : 0;
+		const light = visible ? this.lightIntensityAt(sample.x + 0.5, sample.y + 0.5) : 0;
 		const base = visible ? { r: 255, g: 255, b: 255 } : { r: 120, g: 138, b: 124 };
 		const night = this.visualNight;
 		const warm = this.visualWarmth;
@@ -49,6 +64,15 @@ export class DayNightVisuals {
 		const tint = rgbToNumber(lit);
 		this.tileTintCache.set(key, tint);
 		return tint;
+	}
+
+	private tileLightSample(x: number, y: number) {
+		const size = this.tileLightSampleSize;
+		if (size <= 1) return { x, y };
+		return {
+			x: Math.floor(x / size) * size + (size - 1) / 2,
+			y: Math.floor(y / size) * size + (size - 1) / 2,
+		};
 	}
 
 	entityTint(entity: { kind: string; x: number; y: number; size?: number; width?: number; height?: number }) {
@@ -94,22 +118,44 @@ export class DayNightVisuals {
 		const key = [
 			Math.round(this.visualNight * 100),
 			Math.round(this.visualWarmth * 100),
+			this.tileLightSampleSize,
 			buildingKey,
 		].join(":");
 		if (key === this.frameKey) return;
 		this.frameKey = key;
+		this.terrainFrameKey = [
+			roundToStep(this.visualNight * 100, TERRAIN_LIGHT_FRAME_STEP),
+			roundToStep(this.visualWarmth * 100, TERRAIN_LIGHT_FRAME_STEP),
+			this.tileLightSampleSize,
+			this.buildings.map((building) => building.id).join("|"),
+		].join(":");
 		this.tileTintCache.clear();
 		this.entityTintCache.clear();
 	}
 }
 
+function roundToStep(value: number, step: number) {
+	return Math.round(value / step) * step;
+}
+
+function tileLightSampleSizeFor(zoom: number) {
+	if (zoom < MEDIUM_DETAIL_TILE_LIGHT_ZOOM) return FAR_TILE_LIGHT_SAMPLE_SIZE;
+	if (zoom < FULL_DETAIL_TILE_LIGHT_ZOOM) return MEDIUM_TILE_LIGHT_SAMPLE_SIZE;
+	return 1;
+}
+
+function tileTintKey(x: number, y: number, visible: boolean) {
+	return ((visible ? 1 : 0) * 100000000) + y * 10000 + x;
+}
+
 function visibleLightBuildings(snapshot: ClientSnapshot, view: ViewState): LitBuilding[] {
+	const now = quantizedFlickerNow();
 	return Object.values(snapshot.buildings)
 		.filter((building) => isBuildingNearViewport(building, view))
 		.map((building) => {
 			const width = building.width || building.size || 1;
 			const height = building.height || building.size || 1;
-			const flicker = flickerFor(building.id, performance.now());
+			const flicker = flickerFor(building.id, now);
 			return {
 				id: building.id,
 				x: building.x + (width - 1) / 2,
@@ -119,6 +165,10 @@ function visibleLightBuildings(snapshot: ClientSnapshot, view: ViewState): LitBu
 				scale: Math.round(flicker.scale * 100) / 100,
 			};
 		});
+}
+
+function quantizedFlickerNow() {
+	return Math.floor(performance.now() / LIGHT_FLICKER_FRAME_MS) * LIGHT_FLICKER_FRAME_MS;
 }
 
 function smoothToward(current: number, target: number) {

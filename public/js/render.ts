@@ -3,6 +3,7 @@ import {
 	BLEND_MODES,
 	Container,
 	Graphics,
+	Rectangle,
 	SCALE_MODES,
 	Sprite,
 	Texture,
@@ -47,8 +48,34 @@ type RenderedSpriteRect = {
 	height: number;
 };
 type RenderedAlphaMask = { rect: RenderedSpriteRect; mask: SpriteAlphaMask; flipped: boolean };
+type TerrainChunk = {
+	key: string;
+	startX: number;
+	startY: number;
+	endX: number;
+	endY: number;
+	renderStartX: number;
+	renderStartY: number;
+	renderEndX: number;
+	renderEndY: number;
+	worldX: number;
+	worldY: number;
+	worldWidth: number;
+	worldHeight: number;
+	signature: string;
+	sprite: Sprite;
+	texture: Texture | null;
+};
 
 const UNIT_OCCLUSION_OUTLINE_THRESHOLD = 0.8;
+const TERRAIN_CHUNK_SIZE = 32;
+const TERRAIN_CHUNK_PADDING = 4;
+const TERRAIN_CHUNK_TILE_OVERLAP = 1;
+const OVERVIEW_RENDER_RESOLUTION_ZOOM = 0.55;
+const MAX_RENDER_RESOLUTION = 2;
+const OVERVIEW_RENDER_RESOLUTION = 1;
+const MEDIUM_RENDER_RESOLUTION = 1.25;
+const OVERVIEW_ENTITY_DETAIL_ZOOM = 0.55;
 
 export class Renderer {
 	canvas: HTMLCanvasElement;
@@ -60,8 +87,9 @@ export class Renderer {
 	entityLayer: Container;
 	overlayLayer: Graphics;
 	currentZoom: number;
+	private currentResolution = 1;
 
-	private tilePool: Sprite[] = [];
+	private terrainChunks = new Map<string, TerrainChunk>();
 	private selectionSprites: Sprite[] = [];
 	private activeSelectionSprites = 0;
 	private entitySprites = new Map<string, Sprite>();
@@ -84,7 +112,7 @@ export class Renderer {
 			view: canvas,
 			width: window.innerWidth,
 			height: window.innerHeight,
-			resolution: Math.max(1, window.devicePixelRatio || 1),
+			resolution: desiredRenderResolution(1),
 			autoDensity: true,
 			autoStart: false,
 			antialias: false,
@@ -121,12 +149,15 @@ export class Renderer {
 	}
 
 	resize() {
-		this.app.renderer.resolution = Math.max(1, window.devicePixelRatio || 1);
+		this.currentResolution = desiredRenderResolution(this.currentZoom);
+		this.app.renderer.resolution = this.currentResolution;
 		this.app.renderer.resize(window.innerWidth, window.innerHeight);
 	}
 
 	draw(state: GameState, view: ViewState) {
 		this.currentZoom = view.camera.zoom || 1;
+		this.updateRenderResolution();
+		this.updateEntityLayerSorting(view.camera);
 		this.drawBackground(state);
 		this.overlayLayer.clear();
 		this.selectionLayer.clear();
@@ -134,13 +165,13 @@ export class Renderer {
 		if (!state.snapshot) {
 			this.hideAllEntitySprites(new Set());
 			this.dayNightVisuals.hide();
-			this.hideUnusedTiles(0);
+			this.hideUnusedTerrainChunks(new Set());
 			this.app.render();
 			return;
 		}
 
 		this.dayNightVisuals.draw(state.snapshot, view);
-		this.drawTiles(
+		this.drawTerrainChunks(
 			state.snapshot.map.size,
 			view.camera,
 			state.snapshot.visibility,
@@ -163,6 +194,18 @@ export class Renderer {
 		this.app.render();
 	}
 
+	private updateRenderResolution() {
+		const resolution = desiredRenderResolution(this.currentZoom);
+		if (Math.abs(resolution - this.currentResolution) < 0.01) return;
+		this.currentResolution = resolution;
+		this.app.renderer.resolution = resolution;
+		this.app.renderer.resize(window.innerWidth, window.innerHeight);
+	}
+
+	private updateEntityLayerSorting(camera: CameraState) {
+		this.entityLayer.sortableChildren = shouldSortEntityLayer(camera);
+	}
+
 	private drawBackground(state: GameState) {
 		const color = state.snapshot?.visibility ? 0x111813 : 0x315f3c;
 		this.app.renderer.background.color = color;
@@ -172,59 +215,169 @@ export class Renderer {
 		this.background.endFill();
 	}
 
-	private drawTiles(
+	private drawTerrainChunks(
 		size: number,
 		camera: CameraState,
 		visibility: ClientSnapshot["visibility"],
 	) {
+		const bounds = visibleTileBounds(size, camera);
+		const active = new Set<string>();
+		const minChunkX = Math.floor(bounds.minX / TERRAIN_CHUNK_SIZE);
+		const maxChunkX = Math.floor(bounds.maxX / TERRAIN_CHUNK_SIZE);
+		const minChunkY = Math.floor(bounds.minY / TERRAIN_CHUNK_SIZE);
+		const maxChunkY = Math.floor(bounds.maxY / TERRAIN_CHUNK_SIZE);
+		for (let chunkY = minChunkY; chunkY <= maxChunkY; chunkY += 1) {
+			for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
+				const chunk = this.terrainChunk(size, chunkX, chunkY);
+				if (!chunk) continue;
+				active.add(chunk.key);
+				this.updateTerrainChunk(chunk, size, visibility);
+				this.placeTerrainChunk(chunk, camera);
+			}
+		}
+		this.hideUnusedTerrainChunks(active);
+	}
+
+	private terrainChunk(size: number, chunkX: number, chunkY: number) {
+		const startX = chunkX * TERRAIN_CHUNK_SIZE;
+		const startY = chunkY * TERRAIN_CHUNK_SIZE;
+		if (startX >= size || startY >= size) return null;
+		const endX = Math.min(size - 1, startX + TERRAIN_CHUNK_SIZE - 1);
+		const endY = Math.min(size - 1, startY + TERRAIN_CHUNK_SIZE - 1);
+		const renderStartX = Math.max(0, startX - TERRAIN_CHUNK_TILE_OVERLAP);
+		const renderStartY = Math.max(0, startY - TERRAIN_CHUNK_TILE_OVERLAP);
+		const renderEndX = Math.min(size - 1, endX + TERRAIN_CHUNK_TILE_OVERLAP);
+		const renderEndY = Math.min(size - 1, endY + TERRAIN_CHUNK_TILE_OVERLAP);
+		const key = `${chunkX}:${chunkY}`;
+		let chunk = this.terrainChunks.get(key);
+		if (chunk) return chunk;
+		const bounds = terrainChunkWorldBounds(renderStartX, renderStartY, renderEndX, renderEndY);
+		chunk = {
+			key,
+			startX,
+			startY,
+			endX,
+			endY,
+			renderStartX,
+			renderStartY,
+			renderEndX,
+			renderEndY,
+			worldX: bounds.x,
+			worldY: bounds.y,
+			worldWidth: bounds.width,
+			worldHeight: bounds.height,
+			signature: "",
+			sprite: new Sprite(),
+			texture: null,
+		};
+		chunk.sprite.texture = Texture.EMPTY;
+		chunk.sprite.visible = false;
+		this.terrainChunks.set(key, chunk);
+		this.terrainLayer.addChild(chunk.sprite);
+		return chunk;
+	}
+
+	private updateTerrainChunk(
+		chunk: TerrainChunk,
+		size: number,
+		visibility: ClientSnapshot["visibility"],
+	) {
+		const signature = this.terrainChunkSignature(chunk, size, visibility);
+		if (chunk.texture && chunk.signature === signature) return;
+		chunk.signature = signature;
+		chunk.texture?.destroy(true);
+		chunk.texture = this.buildTerrainChunkTexture(chunk, size, visibility);
+		chunk.sprite.texture = chunk.texture;
+	}
+
+	private terrainChunkSignature(
+		chunk: TerrainChunk,
+		size: number,
+		visibility: ClientSnapshot["visibility"],
+	) {
+		const visibilityKey = visibility
+			? this.terrainChunkVisibilitySignature(chunk, size, visibility)
+			: "all";
+		return `${this.dayNightVisuals.terrainCacheKey}:${visibilityKey}`;
+	}
+
+	private terrainChunkVisibilitySignature(
+		chunk: TerrainChunk,
+		size: number,
+		visibility: ClientSnapshot["visibility"],
+	) {
 		const exploredSet = visibility?.exploredSet;
 		const visibleSet = visibility?.visibleSet;
-		const bounds = visibleTileBounds(size, camera);
-		let index = 0;
-		for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
-			for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+		let hash = 2166136261;
+		for (let y = chunk.renderStartY; y <= chunk.renderEndY; y += 1) {
+			for (let x = chunk.renderStartX; x <= chunk.renderEndX; x += 1) {
+				const key = y * size + x;
+				const value = (exploredSet?.has(key) ? 1 : 0) | (visibleSet?.has(key) ? 2 : 0);
+				hash ^= value + key;
+				hash = Math.imul(hash, 16777619);
+			}
+		}
+		return `${hash >>> 0}`;
+	}
+
+	private buildTerrainChunkTexture(
+		chunk: TerrainChunk,
+		size: number,
+		visibility: ClientSnapshot["visibility"],
+	) {
+		const container = new Container();
+		const exploredSet = visibility?.exploredSet;
+		const visibleSet = visibility?.visibleSet;
+		for (let y = chunk.renderStartY; y <= chunk.renderEndY; y += 1) {
+			for (let x = chunk.renderStartX; x <= chunk.renderEndX; x += 1) {
 				const key = y * size + x;
 				if (visibility && !exploredSet?.has(key)) continue;
-				const screen = isoToScreen(x, y, camera);
-				if (
-					screen.x < -90 ||
-						screen.x > window.innerWidth + 90 ||
-						screen.y < -60 ||
-						screen.y > window.innerHeight + 60
-				)
-					continue;
 				const visible = !visibility || (visibleSet?.has(key) ?? false);
-				const color = visible ? null : "#1e3025";
-				const tile = this.tileAt(index++);
-				tile.texture = this.tileTexture(visible, (y % 2) + (x % 2) == 1);
+				const tile = new Sprite(this.tileTexture(visible, (y % 2) + (x % 2) == 1));
+				tile.anchor.set(0.5);
 				tile.tint = this.dayNightVisuals.tileTint(x, y, visible);
 				const overdraw = 0.75;
 				tile.scale.set(
-					this.currentZoom + overdraw / tile.texture.width,
-					this.currentZoom + overdraw / tile.texture.height,
+					1 + overdraw / tile.texture.width,
+					1 + overdraw / tile.texture.height,
 				);
-				tile.x = screen.x;
-				tile.y = screen.y;
-				tile.visible = true;
+				const world = isoToWorld(x, y);
+				tile.x = world.x - chunk.worldX;
+				tile.y = world.y - chunk.worldY;
+				container.addChild(tile);
 			}
 		}
-		this.hideUnusedTiles(index);
+		const texture = this.app.renderer.generateTexture(container, {
+			region: new Rectangle(0, 0, chunk.worldWidth, chunk.worldHeight),
+			resolution: 1,
+		});
+		texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+		container.destroy({ children: true, texture: false, baseTexture: false });
+		return texture;
 	}
 
-	private tileAt(index: number) {
-		let tile = this.tilePool[index];
-		if (!tile) {
-			tile = new Sprite();
-			tile.anchor.set(0.5);
-			this.tilePool[index] = tile;
-			this.terrainLayer.addChild(tile);
+	private placeTerrainChunk(chunk: TerrainChunk, camera: CameraState) {
+		const zoom = camera.zoom || 1;
+		const margin = 96;
+		const x = camera.x + chunk.worldX * zoom;
+		const y = camera.y + chunk.worldY * zoom;
+		const width = chunk.worldWidth * zoom;
+		const height = chunk.worldHeight * zoom;
+		chunk.sprite.visible = (
+			x <= window.innerWidth + margin &&
+			x + width >= -margin &&
+			y <= window.innerHeight + margin &&
+			y + height >= -margin
+		);
+		chunk.sprite.x = x;
+		chunk.sprite.y = y;
+		chunk.sprite.scale.set(zoom);
+	}
+
+	private hideUnusedTerrainChunks(active: Set<string>) {
+		for (const [key, chunk] of this.terrainChunks) {
+			if (!active.has(key)) chunk.sprite.visible = false;
 		}
-		return tile;
-	}
-
-	private hideUnusedTiles(start: number) {
-		for (let i = start; i < this.tilePool.length; i += 1)
-		this.tilePool[i]!.visible = false;
 	}
 
 	private tileTexture(visible: boolean, isDark: boolean) {
@@ -235,53 +388,70 @@ export class Renderer {
 		const cached = this.tileTextureCache.get(key);
 		if (cached) return cached;
 
-		// The canvas must be exactly one tile so that, when drawTiles centres the
-		// texture on isoToScreen(x, y), the grass diamond's centre lands on that
-		// point too. Using an oversized canvas with the diamond in the top-left
-		// quadrant shifted every tile half a tile up-left of where entities,
-		// selection markers, and hit-testing place it.
+		this.buildTileTextureAtlas();
+		return this.tileTextureCache.get(key)!;
+	}
+
+	private buildTileTextureAtlas() {
+		if (this.tileTextureCache.size > 0) return;
 		const canvas = document.createElement("canvas");
-		canvas.width = TILE_W;
+		canvas.width = TILE_W * 4;
 		canvas.height = TILE_H;
 
 		const ctx = canvas.getContext("2d")!;
 		ctx.imageSmoothingEnabled = false;
 
-		const grassImage = isDark ? this.grassDarkImage : this.grassLightImage;
+		this.drawTileTextureVariant(ctx, this.grassLightImage, true, 0);
+		this.drawTileTextureVariant(ctx, this.grassLightImage, false, 1);
+		this.drawTileTextureVariant(ctx, this.grassDarkImage, true, 2);
+		this.drawTileTextureVariant(ctx, this.grassDarkImage, false, 3);
 
-		ctx.drawImage(grassImage, 0, 0, TILE_W, TILE_H);
+		const base = Texture.from(canvas).baseTexture;
+		base.scaleMode = SCALE_MODES.NEAREST;
+		this.tileTextureCache.set("grassLight:1", new Texture(base, new Rectangle(0, 0, TILE_W, TILE_H)));
+		this.tileTextureCache.set("grassLight:0", new Texture(base, new Rectangle(TILE_W, 0, TILE_W, TILE_H)));
+		this.tileTextureCache.set("grassDark:1", new Texture(base, new Rectangle(TILE_W * 2, 0, TILE_W, TILE_H)));
+		this.tileTextureCache.set("grassDark:0", new Texture(base, new Rectangle(TILE_W * 3, 0, TILE_W, TILE_H)));
+	}
 
-		if (!visible) {
-			ctx.save();
-
-			// Only affect existing non-transparent pixels
-			ctx.globalCompositeOperation = "source-atop";
-
-			// Darken the visible grass pixels
-			ctx.fillStyle = "rgba(10, 16, 12, 0.62)";
-			ctx.fillRect(0, 0, TILE_W, TILE_H);
-
-			ctx.restore();
-		}
-
-		const texture = Texture.from(canvas);
-		texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
-		this.tileTextureCache.set(key, texture);
-
-		return texture;
+	private drawTileTextureVariant(
+		ctx: CanvasRenderingContext2D,
+		image: HTMLImageElement,
+		visible: boolean,
+		index: number,
+	) {
+		const x = index * TILE_W;
+		ctx.drawImage(image, x, 0, TILE_W, TILE_H);
+		if (visible) return;
+		ctx.save();
+		ctx.globalCompositeOperation = "source-atop";
+		ctx.fillStyle = "rgba(10, 16, 12, 0.62)";
+		ctx.fillRect(x, 0, TILE_W, TILE_H);
+		ctx.restore();
 	}
 
 	private drawEntities(state: GameState, view: ViewState, active: Set<string>) {
 		const snap = state.snapshot!;
-		const entities = [
-			...Object.values(snap.resources),
-			...Object.values(snap.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
-			...Object.values(snap.corpses),
-			...Object.values(snap.buildings),
-			...Object.values(snap.units),
-		].filter((entity) => isEntityNearViewport(entity, view.camera));
-		for (const entity of entities)
-		this.updateEntitySprite(entity, state, view, active, 1, entity.id);
+		for (const entity of Object.values(snap.resources)) {
+			if (isEntityNearViewport(entity, view.camera))
+				this.updateEntitySprite(entity, state, view, active, 1, entity.id);
+		}
+		for (const ruin of Object.values(snap.ruins)) {
+			if (isEntityNearViewport(ruin, view.camera))
+				this.updateEntitySprite({ ...ruin, sprite: "ruin" } as RenderEntity, state, view, active, 1, ruin.id);
+		}
+		for (const entity of Object.values(snap.corpses)) {
+			if (isEntityNearViewport(entity, view.camera))
+				this.updateEntitySprite(entity, state, view, active, 1, entity.id);
+		}
+		for (const entity of Object.values(snap.buildings)) {
+			if (isEntityNearViewport(entity, view.camera))
+				this.updateEntitySprite(entity, state, view, active, 1, entity.id);
+		}
+		for (const entity of Object.values(snap.units)) {
+			if (isEntityNearViewport(entity, view.camera))
+				this.updateEntitySprite(entity, state, view, active, 1, entity.id);
+		}
 	}
 
 	private drawLastSeen(state: GameState, view: ViewState, active: Set<string>) {
@@ -351,6 +521,7 @@ export class Renderer {
 				? redTint(flash.amount)
 				: 0xffffff;
 		const entityTint = this.dayNightVisuals.entityTint(entity);
+		const detailed = shouldDrawEntityDetails(view.camera);
 
 		let texture: Texture;
 		if (png) {
@@ -420,6 +591,17 @@ export class Renderer {
 			sprite.tint = flashTint === 0xffffff ? entityTint : flashTint;
 		}
 		active.add(key);
+		if (!detailed) {
+			if (view.selectedIds.has(entity.id))
+				this.drawSelectionMarker(
+					entity,
+					view.camera,
+					center.x,
+					center.y,
+					ownerColor || "#f4efe6",
+				);
+			return;
+		}
 			this.updateFlashOverlay(
 				key,
 				this.entitySprites.get(key)!,
@@ -469,6 +651,7 @@ export class Renderer {
 	}
 
 	private drawOccludedUnitOutlines(state: GameState, view: ViewState, active: Set<string>) {
+		if (!shouldDrawEntityDetails(view.camera)) return;
 		const snap = state.snapshot;
 		if (!snap) return;
 		const blockers = [
@@ -696,14 +879,17 @@ export class Renderer {
 			this.entitySprites.set(key, sprite);
 			this.entityLayer.addChild(sprite);
 		}
-		sprite.texture = texture;
-		sprite.scale.set(flip ? -px : px, px);
-		sprite.x = flip ? x + texture.width * px : x;
-		sprite.y = y;
+		if (sprite.texture !== texture) sprite.texture = texture;
+		const scaleX = flip ? -px : px;
+		if (sprite.scale.x !== scaleX || sprite.scale.y !== px)
+			sprite.scale.set(scaleX, px);
+		const nextX = flip ? x + texture.width * px : x;
+		if (sprite.x !== nextX) sprite.x = nextX;
+		if (sprite.y !== y) sprite.y = y;
 		sprite.alpha = alpha;
 		sprite.tint = 0xffffff;
 		sprite.visible = true;
-		sprite.zIndex = zIndex;
+		if (sprite.zIndex !== zIndex) sprite.zIndex = zIndex;
 		return sprite;
 	}
 
@@ -1021,6 +1207,7 @@ export class Renderer {
 	}
 
 		private drawZombieDebug(state: GameState, view: ViewState) {
+			if (!shouldDrawEntityDetails(view.camera)) return;
 			const zombies = Object.values(state.snapshot?.units || {}).filter((unit) => unit.type === "zombie" && unit.zombieDebugState);
 			if (!zombies.length) return;
 		const zoom = view.camera.zoom || 1;
@@ -2079,6 +2266,42 @@ function screenToIsoLocal(x: number, y: number, camera: CameraState) {
 	};
 }
 
+function isoToWorld(x: number, y: number) {
+	return {
+		x: (x - y) * TILE_W / 2,
+		y: (x + y) * TILE_H / 2,
+	};
+}
+
+function terrainChunkWorldBounds(
+	startX: number,
+	startY: number,
+	endX: number,
+	endY: number,
+) {
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	for (const corner of [
+		isoToWorld(startX, startY),
+		isoToWorld(startX, endY),
+		isoToWorld(endX, startY),
+		isoToWorld(endX, endY),
+	]) {
+		minX = Math.min(minX, corner.x - TILE_W / 2);
+		minY = Math.min(minY, corner.y - TILE_H / 2);
+		maxX = Math.max(maxX, corner.x + TILE_W / 2);
+		maxY = Math.max(maxY, corner.y + TILE_H / 2);
+	}
+	return {
+		x: Math.floor(minX) - TERRAIN_CHUNK_PADDING,
+		y: Math.floor(minY) - TERRAIN_CHUNK_PADDING,
+		width: Math.ceil(maxX - minX) + TERRAIN_CHUNK_PADDING * 2,
+		height: Math.ceil(maxY - minY) + TERRAIN_CHUNK_PADDING * 2,
+	};
+}
+
 function visibleTileBounds(size: number, camera: CameraState) {
 	const margin = 140;
 	const corners = [
@@ -2117,6 +2340,21 @@ function visibleTileBounds(size: number, camera: CameraState) {
 
 function clampInt(value: number, min: number, max: number) {
 	return Math.max(min, Math.min(max, value));
+}
+
+function desiredRenderResolution(zoom: number) {
+	const native = Math.max(1, window.devicePixelRatio || 1);
+	if (zoom <= OVERVIEW_RENDER_RESOLUTION_ZOOM) return OVERVIEW_RENDER_RESOLUTION;
+	if (zoom <= 0.75) return Math.min(native, MEDIUM_RENDER_RESOLUTION);
+	return Math.min(native, MAX_RENDER_RESOLUTION);
+}
+
+function shouldDrawEntityDetails(camera: CameraState) {
+	return (camera.zoom || 1) > OVERVIEW_ENTITY_DETAIL_ZOOM;
+}
+
+function shouldSortEntityLayer(camera: CameraState) {
+	return (camera.zoom || 1) > OVERVIEW_ENTITY_DETAIL_ZOOM;
 }
 
 function minimapIsoToScreen(
