@@ -8,7 +8,7 @@ import { BUILDING_TYPES, deserializeBuilding } from "../../src/shared/buildings/
 import { allUnitClasses, unitBehaviorFor } from "../../src/shared/unitRegistry.js";
 import { spriteMetrics } from "./sprites/spriteInfo.js";
 import { Logs } from "../../src/shared/logs.js";
-import type { Building, BuildingType, CommandPayload, EntityId, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
+import type { Building, BuildingType, CommandPayload, Corpse, EntityId, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
 import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
 const state: GameState = {
@@ -455,7 +455,7 @@ function hydrateSnapshot(snap: Snapshot): ClientSnapshot {
 	const buildings = Object.fromEntries(
 		Object.entries(snap.buildings).map(([id, building]) => [id, deserializeBuilding(building)]),
 	) as ClientSnapshot["buildings"];
-	return { ...snap, buildings };
+	return { ...snap, buildings, corpses: snap.corpses || {} };
 }
 
 let centered = false;
@@ -577,10 +577,11 @@ function handleRightClick(event: MouseEvent) {
 			addTargetFlash(hit.id, result.ok ? "white" : "red");
 			sfx.play(result.ok ? commandSoundForTarget(hit) : "ui_error", { point: hit });
 		});
-	} else if (hit?.ownerId && hit.ownerId !== state.playerId) {
-		issue({ type: "attack", unitIds: ownUnits, targetId: hit.id }, { silent: true }).then((result) => {
-			addTargetFlash(hit.id, result.ok ? "white" : "red");
-			sfx.play(result.ok ? "ui_command_attack" : "ui_error", { point: hit });
+	} else if (isAttackClickTarget(hit)) {
+		const target = hit;
+		issue({ type: "attack", unitIds: ownUnits, targetId: target.id }, { silent: true }).then((result) => {
+			addTargetFlash(target.id, result.ok ? "white" : "red");
+			sfx.play(result.ok ? "ui_command_attack" : "ui_error", { point: target });
 		});
 	} else {
 		const iso = screenToIso(event.clientX, event.clientY, view.camera);
@@ -593,6 +594,12 @@ function handleRightClick(event: MouseEvent) {
 
 function canGatherFromClickTarget(target: Building) {
 	return target.canBeGatheredBy(state.playerId!) || (target.ownerId === state.playerId && target.isComplete() && !!target.depotGatherKind());
+}
+
+function isAttackClickTarget(target: Unit | Building | ResourceNode | Corpse | null): target is Unit | Building | Corpse {
+	if (!target) return false;
+	if (target.kind === "corpse") return true;
+	return !!target.ownerId && target.ownerId !== state.playerId;
 }
 
 function emitNoiseFromScreen(x: number, y: number) {
@@ -900,6 +907,9 @@ function canPlacePreview(buildingType: BuildingType, x: number, y: number) {
 	for (const resource of Object.values(state.snapshot.resources)) {
 		if (pointInFootprint(Math.floor(resource.x), Math.floor(resource.y), x, y, footprint)) return false;
 	}
+	for (const corpse of Object.values(state.snapshot.corpses)) {
+		if (pointInFootprint(Math.floor(corpse.x), Math.floor(corpse.y), x, y, footprint)) return false;
+	}
 	return true;
 }
 
@@ -1081,6 +1091,7 @@ function hitTest(x: number, y: number) {
 		...Object.values(state.snapshot.units),
 		...Object.values(state.snapshot.buildings),
 		...Object.values(state.snapshot.resources),
+		...Object.values(state.snapshot.corpses),
 	];
 	return closestHit(x, y, candidates);
 }
@@ -1092,7 +1103,7 @@ function hitTestForSelection(x: number, y: number) {
 	return hitTest(x, y);
 }
 
-function closestHit<T extends Unit | Building | ResourceNode>(x: number, y: number, candidates: T[]) {
+function closestHit<T extends Unit | Building | ResourceNode | Corpse>(x: number, y: number, candidates: T[]) {
 	let best = null;
 	let bestDistance = Infinity;
 	for (const entity of candidates) {
@@ -1108,10 +1119,10 @@ function closestHit<T extends Unit | Building | ResourceNode>(x: number, y: numb
 	return best;
 }
 
-function renderedEntityRect(entity: Unit | Building | ResourceNode) {
+function renderedEntityRect(entity: Unit | Building | ResourceNode | Corpse) {
 	const bounds = spriteMetrics(entity.type);
 	const scale = entityPixel(entity, view.camera.zoom || 1);
-	const center = entity.kind === "building" || entity.kind === "resource"
+	const center = entity.kind === "building" || entity.kind === "resource" || entity.kind === "corpse"
 		? isoToScreen(entity.x + (entityWidth(entity) - 1) / 2, entity.y + (entityHeight(entity) - 1) / 2, view.camera)
 		: isoToScreen(entity.x + entityWidth(entity) / 2, entity.y + entityHeight(entity) / 2, view.camera);
 	const visualWidth = bounds.width * scale;
@@ -1150,7 +1161,7 @@ function worldPixel(zoom: number) {
 	return SCALE * zoom;
 }
 
-function entityPixel(entity: Unit | Building | ResourceNode, zoom: number) {
+function entityPixel(entity: Unit | Building | ResourceNode | Corpse, zoom: number) {
 	return worldPixel(zoom);
 }
 
@@ -1168,6 +1179,6 @@ function unitTypeForShortcut(key: string): UnitType | null {
 function cullSelection() {
 	if (!state.snapshot) return;
 	for (const id of [...state.selectedIds]) {
-		if (!state.snapshot.units[id] && !state.snapshot.buildings[id] && !state.snapshot.resources[id]) state.selectedIds.delete(id);
+		if (!state.snapshot.units[id] && !state.snapshot.buildings[id] && !state.snapshot.resources[id] && !state.snapshot.corpses[id]) state.selectedIds.delete(id);
 	}
 }

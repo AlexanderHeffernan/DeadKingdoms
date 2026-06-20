@@ -1,5 +1,6 @@
 import barracks from "./barracks.js";
 import berry from "./berry.js";
+import corpse from "./corpse.js";
 import farm from "./farm.js";
 import foodDepot from "./foodDepot.js";
 import gate from "./gate.js";
@@ -27,6 +28,7 @@ import type { SpriteName } from "../../../src/shared/types.js";
 export const sprites: Record<SpriteName, readonly string[]> = {
   barracks,
   berry,
+  corpse,
   farm,
   foodDepot,
   gate,
@@ -48,4 +50,7 @@ export const sprites: Record<SpriteName, readonly string[]> = {
   wallSouthWest,
   watchTower,
   zombie,
+  zombie_def: zombie,
+  zombie_vil: zombie,
+  zombie_sol: zombie,
 } as const;

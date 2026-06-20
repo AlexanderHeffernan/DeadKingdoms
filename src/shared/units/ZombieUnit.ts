@@ -10,7 +10,7 @@ const ZOMBIE_SIDEWAYS_PROGRESS_TOLERANCE = 0.015;
 export class ZombieUnit extends BaseUnit {
 	public static readonly type = "zombie";
 	public static readonly label = "Zombie";
-	public static readonly sprite = "zombie_vil";
+	public static readonly sprite = "zombie_def";
 	public static readonly maxHp = 10;
 	public static readonly speed = 1;
 	public static readonly attack = 2;

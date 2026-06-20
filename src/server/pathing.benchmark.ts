@@ -398,6 +398,7 @@ function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 		buildings: {},
 		resources: {},
 		ruins: {},
+		corpses: {},
 		notices: [],
 		adminLogs: [],
 		actionNoises: [],

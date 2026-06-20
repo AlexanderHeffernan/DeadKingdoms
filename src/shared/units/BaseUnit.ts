@@ -1,5 +1,5 @@
 import type { GatherTarget } from "../buildings/base/index.js";
-import type { Building, ResourceCost, ResourceNode, Unit, UnitCommand, UnitType, World } from "../types.js";
+import type { Building, Corpse, ResourceCost, ResourceNode, Unit, UnitCommand, UnitType, World } from "../types.js";
 
 export type UnitStats = {
 	maxHp: number;
@@ -36,7 +36,7 @@ export type UnitClass<T extends BaseUnit = BaseUnit> = {
 	readonly trainShortcut?: string | undefined;
 };
 
-export type UnitCombatTarget = Unit | Building;
+export type UnitCombatTarget = Unit | Building | Corpse;
 
 export type UnitSimulationContext = {
 	readonly world: World;
@@ -272,7 +272,7 @@ export abstract class BaseUnit implements UnitBehavior {
 
 	protected stepAttack(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "attack" }>, dt: number) {
 		const target = context.targetById(command.targetId);
-		const explicitTarget = target && target.ownerId !== unit.ownerId ? target : null;
+		const explicitTarget = target && (target.kind === "corpse" || target.ownerId !== unit.ownerId) ? target : null;
 		if (!explicitTarget) {
 			const nextTarget = context.nearestEnemy(unit, 5.5);
 			unit.command = nextTarget ? { type: "attack", targetId: nextTarget.id } : { type: "idle" };

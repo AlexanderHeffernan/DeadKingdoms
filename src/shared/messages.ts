@@ -67,6 +67,7 @@ export function makeSnapshot(
 		),
 		resources: filterVisible(world.resources),
 		ruins: filterVisible(world.ruins),
+		corpses: filterVisible(world.corpses),
 		visibility: visible
 			? {
 				visible: [...visible.visible],
@@ -136,6 +137,7 @@ function serializeUnit(unit: Unit, includeZombieDebug: boolean): Unit {
 		facing: unit.facing,
 		carried: unit.carried,
 		selected: unit.selected,
+		...(unit.sprite ? { sprite: unit.sprite } : {}),
 		...(unit.vision !== undefined ? { vision: unit.vision } : {}),
 		...(includeZombieDebug && unit.type === "zombie" ? { zombieDebugState: zombieDebugState(unit), zombieHordeColor: zombieHordeColor(unit) } : {}),
 	};

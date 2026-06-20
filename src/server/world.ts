@@ -28,6 +28,7 @@ import type {
 	BuildingType,
 	CommandPayload,
 	CommandResult,
+	Corpse,
 	EntityId,
 	Player,
 	PlayerId,
@@ -74,6 +75,7 @@ export function createWorld(): World {
 		buildings: {},
 		resources: {},
 		ruins: {},
+		corpses: {},
 		notices: [],
 		adminLogs: [],
 		actionNoises: [],
@@ -267,6 +269,7 @@ export function stepWorld(world: World, dt: number) {
 		stepActionNoises(world, dt);
 		stepResourceDecay(world, dt);
 		stepRuinDecay(world, dt);
+		stepCorpseDecay(world, dt);
 		for (const unit of Object.values(world.units)) unitBehavior(unit).step(context, unit, dt);
 		resolveUnitSeparation(world);
 		for (const building of Object.values(world.buildings)) stepBuilding(world, building, dt);
@@ -334,7 +337,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 	);
 	return {
 		world,
-		targetById: (targetId) => world.units[targetId as UnitId] || world.buildings[targetId as BuildingId] || null,
+		targetById: (targetId) => world.units[targetId as UnitId] || world.buildings[targetId as BuildingId] || world.corpses[targetId as keyof typeof world.corpses] || null,
 		buildingById: (buildingId) => world.buildings[buildingId as BuildingId] || null,
 		isComplete,
 		unitSoundLevel: (unit) => unitBehavior(unit).soundLevel(),
@@ -632,10 +635,30 @@ function createUnit(world: World, ownerId: PlayerId, type: UnitType, x: number, 
 	return unit;
 }
 
-function createZombie(world: World, x: number, y: number): Unit {
+function createZombie(world: World, x: number, y: number, sprite: Unit["sprite"] = "zombie_def"): Unit {
 	const zombie = createUnit(world, ZOMBIE_OWNER_ID, "zombie", x, y);
+	zombie.sprite = sprite;
 	zombie.retargetIn = Math.random() * ZOMBIE_INITIAL_RETARGET_SECONDS;
 	return zombie;
+}
+
+function createCorpse(world: World, unit: Unit) {
+	if (unit.type === "zombie") return;
+	const corpse: Corpse = {
+		id: id("c"),
+		kind: "corpse",
+		type: "corpse",
+		originUnitType: unit.type,
+		x: Math.floor(unit.x),
+		y: Math.floor(unit.y),
+		size: 1,
+		hp: 1,
+		maxHp: 1,
+		ownerId: unit.ownerId,
+		remaining: 10 + Math.random() * 20,
+		zombieSprite: unit.type === "soldier" ? "zombie_sol" : "zombie_vil",
+	};
+	world.corpses[corpse.id] = corpse;
 }
 
 function createBuilding(world: World, ownerId: PlayerId, type: BuildingType, x: number, y: number, free = false): Building | null {
@@ -729,10 +752,11 @@ function moveFormationCommand(target: { x: number; y: number }, crowd: number, f
 }
 
 function commandAttack(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "attack" }>): CommandResult {
-	const target = world.units[body.targetId] || world.buildings[body.targetId];
-	if (!target || target.ownerId === playerId) return { ok: false, error: "Invalid target." };
+	const target = world.units[body.targetId] || world.buildings[body.targetId] || world.corpses[body.targetId as keyof typeof world.corpses];
+	if (!target || (target.kind !== "corpse" && target.ownerId === playerId)) return { ok: false, error: "Invalid target." };
 	let assigned = false;
 	forOwnUnitClusters(world, playerId, body.unitIds, (unit, cluster) => {
+		if (target.kind === "corpse" && unit.type !== "soldier") return;
 		unit.command = { type: "attack", targetId: target.id, path: null, pathCrowd: cluster.length };
 		assigned = true;
 	});
@@ -1095,6 +1119,15 @@ function stepRuinDecay(world: World, dt: number) {
 	}
 }
 
+function stepCorpseDecay(world: World, dt: number) {
+	for (const corpse of Object.values(world.corpses)) {
+		corpse.remaining -= dt;
+		if (corpse.remaining > 0) continue;
+		delete world.corpses[corpse.id];
+		createZombie(world, corpse.x + 0.5, corpse.y + 0.5, corpse.zombieSprite);
+	}
+}
+
 function weightedWorldSound(world: World): { point: { x: number; y: number }; strength: number } | null {
 	const sources = buildSoundField(collectWorldSoundSources(world, ZOMBIE_OWNER_ID)).map((cell) => ({ point: { x: cell.x, y: cell.y }, strength: cell.strength }));
 	let total = 0;
@@ -1327,7 +1360,12 @@ function gatherTargetFor(entity: ResourceNode | Building): GatherTarget {
 	};
 }
 
-function damage(world: World, target: Unit | Building, amount: number, attackerId: PlayerId) {
+function damage(world: World, target: Unit | Building | Corpse, amount: number, attackerId: PlayerId) {
+	if (target.kind === "corpse") {
+		target.hp -= amount;
+		if (target.hp <= 0) delete world.corpses[target.id];
+		return;
+	}
 	if (target.kind === "building" && target.invincible) return;
 	target.hp -= amount;
 	if (target.kind === "building" && target.repairPaidUntilHp !== undefined) {
@@ -1341,9 +1379,8 @@ function damage(world: World, target: Unit | Building, amount: number, attackerI
 		if (target.type === "townCenter") defeatPlayer(world, target.ownerId, attackerId);
 	} else {
 		const shouldTurn = attackerId === ZOMBIE_OWNER_ID && target.ownerId !== ZOMBIE_OWNER_ID;
-		const deathPoint = { x: target.x, y: target.y };
 		delete world.units[target.id];
-		if (shouldTurn) createZombie(world, deathPoint.x, deathPoint.y);
+		if (shouldTurn) createCorpse(world, target);
 	}
 }
 

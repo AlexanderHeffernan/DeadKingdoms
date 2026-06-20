@@ -1,5 +1,5 @@
-import type { Building, Player, ResourceNode, Ruin, Unit } from "./entities.js";
-import type { BuildingId, MapDef, PlayerId, ResourceId, RuinId, UnitId, Vec2 } from "./core.js";
+import type { Building, Corpse, Player, ResourceNode, Ruin, Unit } from "./entities.js";
+import type { BuildingId, CorpseId, MapDef, PlayerId, ResourceId, RuinId, UnitId, Vec2 } from "./core.js";
 import type { AdminLogEntry, LeaderboardEntry, Notice, ServerPerfSample, ServerPerfStats } from "./snapshot.js";
 
 export interface ActionNoise extends Vec2 {
@@ -52,6 +52,7 @@ export interface World {
 	buildings: Record<BuildingId, Building>;
 	resources: Record<ResourceId, ResourceNode>;
 	ruins: Record<RuinId, Ruin>;
+	corpses: Record<CorpseId, Corpse>;
 	notices: Notice[];
 	adminLogs: AdminLogEntry[];
 	actionNoises: ActionNoise[];

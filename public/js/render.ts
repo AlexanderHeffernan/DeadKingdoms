@@ -18,6 +18,7 @@ import grassLightTileUrl from "./sprites/grass_tile_light.png";
 import grassDarkTileUrl from "./sprites/grass_tile_dark.png";
 import type {
 	Building,
+	Corpse,
 	ResourceNode,
 	ResourceType,
 	Ruin,
@@ -33,7 +34,7 @@ import type {
 	ViewState,
 } from "./clientTypes.js";
 
-type RenderEntity = Unit | Building | ResourceNode | Ruin;
+type RenderEntity = Unit | Building | ResourceNode | Ruin | Corpse;
 type Footprint = { x: number; y: number; size?: number; width?: number; height?: number };
 type SpriteAlphaMask = { width: number; height: number; alpha: Uint8ClampedArray };
 type RenderedSpriteRect = {
@@ -268,6 +269,7 @@ export class Renderer {
 		const entities = [
 			...Object.values(snap.resources),
 			...Object.values(snap.ruins).map((ruin) => ({ ...ruin, sprite: "ruin" })),
+			...Object.values(snap.corpses),
 			...Object.values(snap.buildings),
 			...Object.values(snap.units),
 		].filter((entity) => isEntityNearViewport(entity, view.camera));
@@ -1379,6 +1381,8 @@ function drawMinimapCanvas(state: GameState, view: ViewState) {
 
 function spriteNameFor(entity: RenderEntity, state: GameState): SpriteName {
 	if (entity.kind === "ruin") return "ruin";
+	if (entity.kind === "corpse") return "corpse";
+	if (entity.kind === "unit" && entity.sprite) return entity.sprite;
 	if (entity.kind === "resource") {
 		if (
 			entity.type === "tree" ||
@@ -1542,7 +1546,7 @@ function rectsOverlap(
 }
 
 function entityCenter(entity: RenderEntity, camera: CameraState) {
-	if (entity.kind === "building" || entity.kind === "ruin" || entity.kind === "resource")
+	if (entity.kind === "building" || entity.kind === "ruin" || entity.kind === "resource" || entity.kind === "corpse")
 		return footprintCenter(entity.x, entity.y, entityWidth(entity), entityHeight(entity), camera);
 	return isoToScreen(
 		entity.x + (entity.size || 0) / 2,

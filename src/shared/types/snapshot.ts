@@ -1,5 +1,5 @@
-import type { Player, ResourceNode, Ruin, SerializedBuilding, Unit } from "./entities.js";
-import type { BuildingId, MapDef, PlayerId, ResourceId, ResourceType, RuinId, UnitId } from "./core.js";
+import type { Corpse, Player, ResourceNode, Ruin, SerializedBuilding, Unit } from "./entities.js";
+import type { BuildingId, CorpseId, MapDef, PlayerId, ResourceId, ResourceType, RuinId, UnitId } from "./core.js";
 import type { VisibilityPayload } from "./visibility.js";
 
 /** Short-lived player-facing notice sent with snapshots. */
@@ -106,6 +106,7 @@ export interface Snapshot {
 	buildings: Record<BuildingId, SerializedBuilding>;
 	resources: Record<ResourceId, ResourceNode>;
 	ruins: Record<RuinId, Ruin>;
+	corpses: Record<CorpseId, Corpse>;
 	visibility: VisibilityPayload | null;
 	leaderboard: LeaderboardEntry[];
 	notices: Notice[];

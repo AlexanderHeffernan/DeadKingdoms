@@ -9,6 +9,7 @@ import type {
 	ResourceNodeType,
 	ResourceType,
 	RuinId,
+	CorpseId,
 	UnitId,
 	UnitType,
 	Vec2,
@@ -60,7 +61,7 @@ export interface Player {
 /** Common position and identity fields for every world entity. */
 export interface BaseEntity extends Vec2 {
 	id: EntityId;
-	kind: "unit" | "building" | "resource" | "ruin";
+	kind: "unit" | "building" | "resource" | "ruin" | "corpse";
 	type: string;
 	ownerId?: PlayerId;
 	size?: number;
@@ -95,6 +96,22 @@ export interface Unit extends BaseEntity {
 	hordeId?: string | null;
 	zombieDriftDirection?: Vec2 | null;
 	zombieHordeSourceTarget?: Vec2 | null;
+	sprite?: "zombie_def" | "zombie_vil" | "zombie_sol";
+}
+
+export interface Corpse extends BaseEntity {
+	id: CorpseId;
+	kind: "corpse";
+	type: "corpse";
+	originUnitType: Exclude<UnitType, "zombie">;
+	x: number;
+	y: number;
+	size: 1;
+	hp: number;
+	maxHp: number;
+	ownerId: PlayerId;
+	remaining: number;
+	zombieSprite: "zombie_vil" | "zombie_sol";
 }
 
 /** Pending unit-production entry for train-capable buildings. */

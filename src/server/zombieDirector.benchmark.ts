@@ -130,6 +130,7 @@ function makeWorld(): World {
 		buildings: {},
 		resources: {},
 		ruins: {},
+		corpses: {},
 		notices: [],
 		adminLogs: [],
 		actionNoises: [],

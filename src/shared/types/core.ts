@@ -28,6 +28,10 @@ export type ResourceNodeType = keyof typeof RESOURCE_DEFS;
 /** Sprite keys that can be requested by renderer and UI code. */
 export type SpriteName =
 	| UnitType
+	| "zombie_def"
+	| "zombie_vil"
+	| "zombie_sol"
+	| "corpse"
 	| BuildingType
 	| "wallPillar"
 	| "wallNorthEast"
@@ -55,8 +59,11 @@ export type ResourceId = string;
 /** Stable ruin identifier used across snapshots and world state. */
 export type RuinId = string;
 
+/** Stable corpse identifier used across snapshots and world state. */
+export type CorpseId = string;
+
 /** Any entity identifier that can be targeted or selected. */
-export type EntityId = UnitId | BuildingId | ResourceId | RuinId;
+export type EntityId = UnitId | BuildingId | ResourceId | RuinId | CorpseId;
 
 /** Horizontal facing used by mobile combat and worker sprites. */
 export type Facing = "left" | "right";
