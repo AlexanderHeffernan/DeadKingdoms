@@ -6,6 +6,7 @@ const ZOMBIE_TARGET_SIGHT_RANGE = 21;
 const ZOMBIE_PATH_STUCK_TICKS = 10;
 const ZOMBIE_PROGRESS_EPSILON = 0.03;
 const ZOMBIE_SIDEWAYS_PROGRESS_TOLERANCE = 0.015;
+const ZOMBIE_MID_LOCAL_TARGET_SCAN_TICKS = 3;
 
 export class ZombieUnit extends BaseUnit {
 	public static readonly type = "zombie";
@@ -25,8 +26,15 @@ export class ZombieUnit extends BaseUnit {
 	public step(context: UnitSimulationContext, zombie: Unit, dt: number) {
 		this.updateTimers(zombie, dt);
 
+		if (this.shouldPrioritizeHordeBeforeLocalTargets(context, zombie)) {
+			this.followHordeTarget(context, zombie, zombie.hordeTarget, dt);
+			return;
+		}
+
 		// Check for nearby units before following horde movement.
-		const target = this.findNearestUnitTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
+		const target = this.shouldScanLocalTargets(context, zombie)
+			? this.findNearestUnitTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE)
+			: null;
 		if (target) {
 			this.engageTarget(context, zombie, this.targetOrBlockingBuilding(context, zombie, target), dt);
 			return;
@@ -37,7 +45,9 @@ export class ZombieUnit extends BaseUnit {
 			return;
 		}
 
-		const buildingTarget = this.findNearestBuildingTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
+		const buildingTarget = this.shouldScanLocalBuildings(context, zombie)
+			? this.findNearestBuildingTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE)
+			: null;
 		if (buildingTarget) {
 			this.engageTarget(context, zombie, buildingTarget, dt);
 			return;
@@ -59,6 +69,30 @@ export class ZombieUnit extends BaseUnit {
 
 	private shouldPrioritizeHordeTarget(zombie: Unit): zombie is Unit & { hordeTarget: Vec2 } {
 		return !!zombie.hordeTarget && zombie.zombieGoalKind === "sound";
+	}
+
+	private shouldPrioritizeHordeBeforeLocalTargets(context: UnitSimulationContext, zombie: Unit): zombie is Unit & { hordeTarget: Vec2 } {
+		if (!this.shouldPrioritizeHordeTarget(zombie)) return false;
+		const cadence = context.zombieAiCadence?.(zombie) ?? 1;
+		return cadence > 1;
+	}
+
+	private shouldScanLocalTargets(context: UnitSimulationContext, zombie: Unit) {
+		const cadence = context.zombieAiCadence?.(zombie) ?? 1;
+		if (cadence <= 1) return true;
+		if (cadence > 3) return false;
+		return this.isMidCadenceScanTick(context, zombie);
+	}
+
+	private shouldScanLocalBuildings(context: UnitSimulationContext, zombie: Unit) {
+		const cadence = context.zombieAiCadence?.(zombie) ?? 1;
+		if (cadence <= 1) return true;
+		if (cadence > 3) return false;
+		return this.isMidCadenceScanTick(context, zombie);
+	}
+
+	private isMidCadenceScanTick(context: UnitSimulationContext, zombie: Unit) {
+		return context.world.tick % ZOMBIE_MID_LOCAL_TARGET_SCAN_TICKS === this.unitHash(zombie.id) % ZOMBIE_MID_LOCAL_TARGET_SCAN_TICKS;
 	}
 
 	private engageTarget(context: UnitSimulationContext, zombie: Unit, target: UnitCombatTarget, dt: number) {
@@ -202,4 +236,9 @@ export class ZombieUnit extends BaseUnit {
 		zombie.zombieHordeSourceTarget = null;
 	}
 
+	private unitHash(idValue: string): number {
+		let hash = 0;
+		for (let i = 0; i < idValue.length; i += 1) hash = (hash * 31 + idValue.charCodeAt(i)) | 0;
+		return Math.abs(hash);
+	}
 }

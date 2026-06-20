@@ -148,6 +148,9 @@ export type UnitSimulationContext = {
 
 	/** Returns how many normal ticks this zombie should wait between AI updates. */
 	zombieUpdateCadence?(unit: Unit): number;
+
+	/** Returns the distance-based zombie AI cadence band for the current step. */
+	zombieAiCadence?(unit: Unit): number;
 };
 
 /**

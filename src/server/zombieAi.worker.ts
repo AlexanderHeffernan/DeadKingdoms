@@ -12,12 +12,14 @@ import type {
 	ZombieAiAttackIntent,
 	ZombieAiAttackRecorder,
 	ZombieAiUnitState,
+	ZombieAiWorkerDetail,
 	ZombieAiWorkerRequest,
 	ZombieAiWorkerResponse,
 	ZombieAiWorkerSnapshot,
 } from "./zombieAiWorkerProtocol.js";
 
 const TARGET_UNIT_GRID_CELL_SIZE = 4;
+const REASONABLE_PATH_CHECKS_PER_BATCH = 180;
 
 if (!parentPort) throw new Error("Zombie AI worker requires a parent port.");
 
@@ -26,23 +28,29 @@ parentPort.on("message", (message: ZombieAiWorkerRequest) => {
 	const { snapshot } = message;
 	try {
 		const startedAt = performance.now();
-		const world = worldFromSnapshot(snapshot);
-		const recorder = new ZombieAiAttackIntents(world);
-		const context = createZombieSimulationContext(world, recorder);
-		for (const step of snapshot.zombies) {
+		const profiler = new ZombieAiWorkerProfiler();
+		const world = profiler.measure("world", "Worker world setup", 1, () => worldFromSnapshot(snapshot));
+		const recorder = new ZombieAiAttackIntents(world, profiler);
+		const cadenceByZombie = new Map(snapshot.zombies.map((step) => [step.id, step.cadence]));
+		const context = profiler.measure("context", "Worker context grids", 1, () => createZombieSimulationContext(world, recorder, profiler, cadenceByZombie));
+		profiler.measure("zombieStep", "Zombie step total", snapshot.zombies.length, () => {
+			for (const step of snapshot.zombies) {
 			const zombie = world.units[step.id];
 			if (!zombie || zombie.ownerId !== ZOMBIE_OWNER_ID || zombie.hp <= 0) continue;
 			unitBehaviorFor("zombie").step(context, zombie, step.dt);
-		}
+			}
+		});
+		const units = profiler.measure("serialize", "Worker result serialization", snapshot.zombies.length, () => snapshot.zombies
+		.map((step) => world.units[step.id])
+		.filter((unit): unit is Unit => !!unit)
+		.map(zombieState));
 		const result = {
 			id: snapshot.id,
 			tick: snapshot.tick,
 			durationMs: performance.now() - startedAt,
-			units: snapshot.zombies
-			.map((step) => world.units[step.id])
-			.filter((unit): unit is Unit => !!unit)
-			.map(zombieState),
+			units,
 			attacks: recorder.attacks,
+			detail: profiler.stats(),
 		};
 		parentPort!.postMessage({ type: "result", result } satisfies ZombieAiWorkerResponse);
 	} catch (error) {
@@ -75,24 +83,55 @@ function worldFromSnapshot(snapshot: ZombieAiWorkerSnapshot): World {
 	return world;
 }
 
+class ZombieAiWorkerProfiler {
+	private readonly buckets = new Map<string, { label: string; count: number; ms: number }>();
+
+	measure<T>(name: string, label: string, count: number, work: () => T): T {
+		const startedAt = performance.now();
+		try {
+			return work();
+		} finally {
+			const bucket = this.buckets.get(name) ?? { label, count: 0, ms: 0 };
+			bucket.count += count;
+			bucket.ms += performance.now() - startedAt;
+			this.buckets.set(name, bucket);
+		}
+	}
+
+	stats(): ZombieAiWorkerDetail[] {
+		return [...this.buckets.entries()]
+		.map(([name, bucket]) => ({
+			name,
+			label: bucket.label,
+			count: bucket.count,
+			ms: bucket.ms,
+			averageMs: bucket.count > 0 ? bucket.ms / bucket.count : 0,
+		}))
+		.sort((a, b) => b.ms - a.ms);
+	}
+}
+
 class ZombieAiAttackIntents implements ZombieAiAttackRecorder {
 	public readonly attacks: ZombieAiAttackIntent[] = [];
 
-	constructor(private readonly world: World) {}
+	constructor(
+		private readonly world: World,
+		private readonly profiler: ZombieAiWorkerProfiler,
+	) {}
 
 	damage(target: Unit | Building | Corpse, amount: number, attackerId: Unit["ownerId"], attacker: Unit) {
-		this.attacks.push({
+		this.profiler.measure("attackIntent", "Attack intent generation", 1, () => this.attacks.push({
 			attackerId: attacker.id,
 			targetId: target.id,
 			amount,
 			attackerOwnerId: attackerId,
 			cooldown: unitBehaviorFor(attacker.type).cooldown,
 			attackFlash: 0.22,
-		});
+		}));
 	}
 
 	attackBlockingBuilding(attacker: Unit, targetPoint: Vec2) {
-		const building = blockingBuildingToward(this.world, attacker, targetPoint);
+		const building = this.profiler.measure("blockingBuilding", "Blocking building lookup", 1, () => blockingBuildingToward(this.world, attacker, targetPoint));
 		if (!building || attacker.cooldown > 0) return;
 		this.damage(building, unitBehaviorFor(attacker.type).attack, attacker.ownerId, attacker);
 		attacker.cooldown = unitBehaviorFor(attacker.type).cooldown;
@@ -100,7 +139,12 @@ class ZombieAiAttackIntents implements ZombieAiAttackRecorder {
 	}
 }
 
-function createZombieSimulationContext(world: World, recorder: ZombieAiAttackRecorder): UnitSimulationContext {
+function createZombieSimulationContext(
+	world: World,
+	recorder: ZombieAiAttackRecorder,
+	profiler: ZombieAiWorkerProfiler,
+	cadenceByZombie: Map<string, number>,
+): UnitSimulationContext {
 	const buildingGrid = new SpatialGrid(
 		Object.values(world.buildings).filter((building) => building.hp > 0),
 		TARGET_UNIT_GRID_CELL_SIZE,
@@ -109,28 +153,29 @@ function createZombieSimulationContext(world: World, recorder: ZombieAiAttackRec
 		Object.values(world.units).filter((unit) => unit.type !== "zombie" && unit.hp > 0),
 		TARGET_UNIT_GRID_CELL_SIZE,
 	);
+	const pathChecks = new ReasonableZombiePathChecks(world, profiler);
 	return {
 		world,
 		targetById: (targetId) => world.units[targetId] || world.buildings[targetId] || world.corpses[targetId as keyof typeof world.corpses] || null,
 		buildingById: (buildingId) => world.buildings[buildingId] || null,
 		isComplete: (building) => building.hp >= building.maxHp,
 		unitSoundLevel: (unit) => unitBehaviorFor(unit.type).soundLevel(),
-		moveWithPath: (unit, command, maxStep) => moveWithPath(world, unit, command, maxStep),
-		moveNearTarget: (unit, command, target, range, maxStep) => moveNearTarget(world, unit, command, target, range, maxStep),
-		moveUnit: (unit, target, maxStep) => moveUnit(world, unit, target, maxStep),
-		moveZombieWithPath: (unit, target, maxStep) => moveZombieWithPath(world, unit, target, maxStep),
-		moveZombieSteered: (unit, target, maxStep) => moveZombieSteered(world, unit, target, maxStep),
-		moveAroundSmallObstacle: (unit, target, maxStep) => moveAroundSmallObstacle(world, unit, target, maxStep),
+		moveWithPath: (unit, command, maxStep) => profiler.measure("moveWithPath", "Move with path", 1, () => moveWithPath(world, unit, command, maxStep)),
+		moveNearTarget: (unit, command, target, range, maxStep) => profiler.measure("moveNearTarget", "Move near target", 1, () => moveNearTarget(world, unit, command, target, range, maxStep)),
+		moveUnit: (unit, target, maxStep) => profiler.measure("moveUnit", "Direct movement", 1, () => moveUnit(world, unit, target, maxStep)),
+		moveZombieWithPath: (unit, target, maxStep) => profiler.measure("moveZombieWithPath", "Zombie path movement", 1, () => moveZombieWithPath(world, unit, target, maxStep)),
+		moveZombieSteered: (unit, target, maxStep) => profiler.measure("moveZombieSteered", "Zombie steering movement", 1, () => moveZombieSteered(world, unit, target, maxStep)),
+		moveAroundSmallObstacle: (unit, target, maxStep) => profiler.measure("moveAroundSmallObstacle", "Small obstacle movement", 1, () => moveAroundSmallObstacle(world, unit, target, maxStep)),
 		centerOf,
 		distance,
 		nearestEnemy: (source, range) => nearestEnemy(world, buildingGrid, source, range),
 		nearbyTargetUnits: (source, range) =>
-			targetUnitGrid
+			profiler.measure("nearbyTargetUnits", "Nearby target units", 1, () => targetUnitGrid
 			.nearby(source, range)
 			.map((entry) => entry.item)
-			.filter((unit) => world.units[unit.id] === unit && unit.type !== "zombie" && unit.hp > 0),
-		nearestTargetUnit: (source, range) => nearestTargetUnit(world, targetUnitGrid, source, range),
-		nearestTargetBuilding: (source, range) => nearestTargetBuilding(world, buildingGrid, source, range),
+			.filter((unit) => world.units[unit.id] === unit && unit.type !== "zombie" && unit.hp > 0)),
+		nearestTargetUnit: (source, range) => profiler.measure("nearestTargetUnit", "Nearest target unit", 1, () => nearestTargetUnit(world, targetUnitGrid, source, range)),
+		nearestTargetBuilding: (source, range) => profiler.measure("nearestTargetBuilding", "Nearest target building", 1, () => nearestTargetBuilding(world, buildingGrid, source, range)),
 		damage: (target, amount, attackerId, attacker) => {
 			if (attacker) recorder.damage(target, amount, attackerId, attacker);
 		},
@@ -148,11 +193,50 @@ function createZombieSimulationContext(world: World, recorder: ZombieAiAttackRec
 		depositResource: () => {},
 		findNextBuildSite: () => null,
 		assignPostBuildGather: () => {},
-		attackBlockingBuilding: (unit, targetPoint) => recorder.attackBlockingBuilding(unit, targetPoint),
-		hasPathToTarget: (unit, targetPoint, range) => hasPathToInteractionRange(world, unit, targetPoint, range),
-		hasReasonablePathToTarget: (unit, targetPoint, range) => hasReasonableZombiePathToTarget(world, unit, targetPoint, range),
-		blockingBuildingToward: (unit, targetPoint) => blockingBuildingToward(world, unit, targetPoint),
+		attackBlockingBuilding: (unit, targetPoint) => profiler.measure("attackBlockingBuilding", "Attack blocking building", 1, () => recorder.attackBlockingBuilding(unit, targetPoint)),
+		hasPathToTarget: (unit, targetPoint, range) => profiler.measure("hasPathToTarget", "Path to target check", 1, () => hasPathToInteractionRange(world, unit, targetPoint, range)),
+		hasReasonablePathToTarget: (unit, targetPoint, range) => pathChecks.hasPath(unit, targetPoint, range),
+		blockingBuildingToward: (unit, targetPoint) => profiler.measure("blockingBuilding", "Blocking building lookup", 1, () => blockingBuildingToward(world, unit, targetPoint)),
+		zombieAiCadence: (unit) => cadenceByZombie.get(unit.id) ?? 1,
 	};
+}
+
+class ReasonableZombiePathChecks {
+	private readonly cache = new Map<string, boolean>();
+	private checks = 0;
+
+	constructor(
+		private readonly world: World,
+		private readonly profiler: ZombieAiWorkerProfiler,
+	) {}
+
+	hasPath(unit: Unit, targetPoint: Vec2, range: number) {
+		const key = this.cacheKey(unit, targetPoint, range);
+		const cached = this.cache.get(key);
+		if (cached !== undefined) {
+			this.profiler.measure("hasReasonablePathCacheHit", "Reasonable path cache hit", 1, () => undefined);
+			return cached;
+		}
+		if (this.checks >= REASONABLE_PATH_CHECKS_PER_BATCH) {
+			this.profiler.measure("hasReasonablePathDeferred", "Reasonable path deferred", 1, () => undefined);
+			return true;
+		}
+		this.checks += 1;
+		const result = this.profiler.measure("hasReasonablePathToTarget", "Reasonable zombie path check", 1, () => (
+			hasReasonableZombiePathToTarget(this.world, unit, targetPoint, range)
+		));
+		this.cache.set(key, result);
+		return result;
+	}
+
+	private cacheKey(unit: Unit, targetPoint: Vec2, range: number) {
+		const startX = Math.floor(unit.x);
+		const startY = Math.floor(unit.y);
+		const targetX = Math.floor(targetPoint.x);
+		const targetY = Math.floor(targetPoint.y);
+		const rangeKey = Math.round(range * 10);
+		return `${startX},${startY}:${targetX},${targetY}:${rangeKey}`;
+	}
 }
 
 function nearestEnemy(world: World, buildingGrid: SpatialGrid<Building>, source: Unit | Building, range: number): UnitCombatTarget | null {

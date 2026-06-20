@@ -382,7 +382,7 @@ function collectUnitSteps(
 		}
 		if (unit.type === "zombie") {
 			zombiePerf.stepped += 1;
-			zombieSteps.push({ id: unit.id, dt: dt * cadence });
+			zombieSteps.push({ id: unit.id, dt: dt * cadence, cadence });
 			continue;
 		}
 		playerSteps.push({ unit, dt: dt * cadence });
@@ -584,6 +584,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		hasReasonablePathToTarget: (unit, targetPoint, range) => hasReasonableZombiePathToTarget(world, unit, targetPoint, range),
 		blockingBuildingToward: (unit, targetPoint) => blockingBuildingToward(world, unit, targetPoint),
 		zombieUpdateCadence: (unit) => zombieCadence.cadenceFor(unit),
+		zombieAiCadence: (unit) => zombieCadence.cadenceFor(unit),
 		createZombie: (point) => createZombie(world, point.x, point.y),
 		isWalkable: (x, y) => isWalkable(world, x, y),
 		weightedWorldSound: () => weightedWorldSound(world),

@@ -97,7 +97,16 @@ export interface ServerPerfWorkerStats {
 	lastAppliedTick: number | null;
 	failures: number;
 	mode: "worker" | "fallback";
+	detail?: ServerPerfWorkerDetail[];
 	lastError?: string;
+}
+
+export interface ServerPerfWorkerDetail {
+	name: string;
+	label: string;
+	count: number;
+	ms: number;
+	averageMs: number;
 }
 
 export interface ServerPerfSample {

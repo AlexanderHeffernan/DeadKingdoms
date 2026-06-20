@@ -15,6 +15,7 @@ export type ZombieAiWorkerSnapshot = {
 export type ZombieAiStep = {
 	id: UnitId;
 	dt: number;
+	cadence: number;
 };
 
 export type ZombieAiWorkerBuilding = Pick<
@@ -54,6 +55,15 @@ export type ZombieAiWorkerResult = {
 	durationMs: number;
 	units: ZombieAiUnitState[];
 	attacks: ZombieAiAttackIntent[];
+	detail: ZombieAiWorkerDetail[];
+};
+
+export type ZombieAiWorkerDetail = {
+	name: string;
+	label: string;
+	count: number;
+	ms: number;
+	averageMs: number;
 };
 
 export type ZombieAiWorkerRequest = {

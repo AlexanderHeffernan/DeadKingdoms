@@ -330,6 +330,8 @@ button:disabled {
 .admin-panel {
 	top: 12px;
 	left: 292px;
+	display: flex;
+	flex-direction: column;
 	width: 342px;
 	height: 430px;
 	min-width: 280px;
@@ -337,7 +339,7 @@ button:disabled {
 	max-width: calc(100vw - 24px);
 	max-height: calc(100vh - 24px);
 	padding: 10px;
-	overflow: auto;
+	overflow: hidden;
 	resize: none;
 }
 
@@ -509,6 +511,7 @@ button:disabled {
 }
 
 .admin-tabs {
+	flex: 0 0 auto;
 	display: flex;
 	gap: 8px;
 	border-bottom: 1px solid rgb(244 239 230 / 0.16);
@@ -527,15 +530,17 @@ button:disabled {
 }
 
 .admin-tab-view {
+	flex: 1 1 auto;
 	min-height: 0;
 	overflow: auto;
 }
 
 #adminPerformanceView {
 	display: grid;
-	grid-template-rows: auto minmax(0, 1fr);
+	grid-template-rows: auto auto minmax(220px, 420px);
 	gap: 10px;
-	overflow: hidden;
+	overflow-x: hidden;
+	overflow-y: auto;
 }
 
 #adminPerformanceView.hidden {
@@ -754,9 +759,8 @@ button:disabled {
 #adminFullscreenChart {
 	display: block;
 	width: 100%;
-	height: 100%;
+	height: min(38vh, 420px);
 	min-height: 280px;
-	max-height: 100%;
 	border: 1px solid rgb(244 239 230 / 0.2);
 	background: #101410;
 }

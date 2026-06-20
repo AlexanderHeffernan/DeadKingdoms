@@ -24,6 +24,7 @@ export class ZombieAiWorkerClient {
 	private lastAppliedTick: number | null = null;
 	private lastCompletedTick: number | null = null;
 	private lastDurationMs = 0;
+	private lastDetail: ZombieAiWorkerResult["detail"] = [];
 	private failures = 0;
 	private lastError: string | null = null;
 	private fallback = WORKER_DISABLED;
@@ -91,6 +92,7 @@ export class ZombieAiWorkerClient {
 		this.latestResult = message.result;
 		this.lastCompletedTick = message.result.tick;
 		this.lastDurationMs = message.result.durationMs;
+		this.lastDetail = message.result.detail;
 	}
 
 	private applyLatestResult(world: World, applyAttack: (attack: ZombieAiAttackIntent) => void) {
@@ -156,6 +158,7 @@ export class ZombieAiWorkerClient {
 			lastAppliedTick: this.lastAppliedTick,
 			failures: this.failures,
 			mode,
+			detail: this.lastDetail,
 			...(this.lastError ? { lastError: this.lastError } : {}),
 		};
 	}

@@ -252,6 +252,9 @@ export class AdminDashboard {
 		const zombies = admin.serverPerf.zombies;
 		const worker = admin.serverPerf.zombieWorker;
 		const zombieAiWorker = admin.serverPerf.zombieAiWorker;
+		const zombieAiWorkerDetail = [...(zombieAiWorker?.detail ?? [])]
+		.filter((bucket) => bucket.name !== "zombieStep")
+		.sort((a, b) => b.ms - a.ms);
 		const totalPhaseMs = phases.reduce((sum, phase) => sum + phase.ms, 0);
 		const unitAiPhaseMs = phases.find((phase) => phase.name === "units")?.ms ?? 0;
 		const unitAiDetailMs = unitAi.reduce((sum, bucket) => sum + bucket.ms, 0);
@@ -303,6 +306,19 @@ ${unitAi.map((bucket) => `
 		<strong>${bucket.ms.toFixed(2)}ms</strong>
 		<em>${bucket.count} · ${bucket.averageMs.toFixed(3)}ms avg</em>
 		<i style="--phase-width:${Math.min(100, Math.max(1, unitAiPhaseMs > 0 ? (bucket.ms / unitAiPhaseMs) * 100 : 1)).toFixed(1)}%"></i>
+	</div>
+`).join("")}
+</div>
+` : ""}
+${zombieAiWorkerDetail.length ? `
+<div class="admin-perf-section-title">Zombie AI worker detail · ${zombieAiWorkerDetail.reduce((sum, bucket) => sum + bucket.ms, 0).toFixed(2)}ms / ${zombieAiWorker?.lastDurationMs.toFixed(2) ?? "0.00"}ms</div>
+<div class="admin-perf-phase-list">
+${zombieAiWorkerDetail.map((bucket) => `
+	<div class="admin-perf-phase admin-perf-unit">
+		<span>${escapeHtml(bucket.label)}</span>
+		<strong>${bucket.ms.toFixed(2)}ms</strong>
+		<em>${bucket.count} · ${bucket.averageMs.toFixed(3)}ms avg</em>
+		<i style="--phase-width:${Math.min(100, Math.max(1, zombieAiWorker && zombieAiWorker.lastDurationMs > 0 ? (bucket.ms / zombieAiWorker.lastDurationMs) * 100 : 1)).toFixed(1)}%"></i>
 	</div>
 `).join("")}
 </div>
