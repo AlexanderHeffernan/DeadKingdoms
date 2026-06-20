@@ -4,6 +4,7 @@ import { makeSnapshot } from "../shared/messages.js";
 import { MAX_PLAYERS } from "../shared/config.js";
 import { addAdminLog, addPlayer, command, emitDevBang, grantPlayerSoldiers, removePlayer, spawnZombieHorde, toggleTownCenterInvincibility } from "./world.js";
 import { Logs } from "../shared/logs.js";
+import type { ServerState } from "./serverState.js";
 import type { AdminLevel, CommandPayload, Player, PlayerId, World } from "../shared/types.js";
 
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
@@ -25,40 +26,52 @@ const BACKPRESSURE_BYTES = 256 * 1024;
 
 export type Client = { playerId: PlayerId | null; res: import("node:http").ServerResponse; sentExplored: Set<number> | null };
 
-export function createHandler(world: World, clients: Set<Client>) {
+export function createHandler(state: ServerState, clients: Set<Client>) {
 	return async function handler(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) {
 		const host = req.headers.host || "localhost";
 		const url = new URL(req.url ?? "/", `http://${host}`);
-		if (req.method === "POST" && url.pathname === "/api/join") return joinGame(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/admin-access") return enableAdminAccess(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/full-map-vision") return enableFullMapVision(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/sound-debug") return enableSoundDebug(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/zombie-debug") return enableZombieDebug(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/path-debug") return enablePathDebug(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/spawn-zombies") return spawnDevZombies(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/grant-soldiers") return grantDevSoldiers(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/town-center-invincible") return toggleTownCenterInvincible(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/dev/emit-noise") return emitDevNoise(req, res, world);
+		if (req.method === "POST" && url.pathname === "/api/join") return joinGame(req, res, state.ensureWorld());
+		if (req.method === "GET" && url.pathname === "/api/status") return serverStatus(res, state);
+		const world = state.currentWorld();
+		if (req.method === "GET" && url.pathname === "/api/snapshot") return world ? json(res, makeSnapshot(world)) : worldUnavailable(res);
+		if (req.method === "GET" && url.pathname === "/events") return world ? streamEvents(req, res, world, clients, url) : worldUnavailable(res);
 		if (req.method === "POST" && url.pathname === "/api/log") return receiveClientLog(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/ping") return receiveClientPing(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/command") return receiveCommand(req, res, world);
-		if (req.method === "POST" && url.pathname === "/api/leave") return leaveGame(req, res, world);
-		if (req.method === "GET" && url.pathname === "/events") return streamEvents(req, res, world, clients, url);
-		if (req.method === "GET" && url.pathname === "/api/status") return serverStatus(res, world);
-		if (req.method === "GET" && url.pathname === "/api/snapshot") return json(res, makeSnapshot(world));
+		if (req.method === "POST" && !world && url.pathname.startsWith("/api/")) return worldUnavailable(res);
+		if (req.method === "POST" && url.pathname.startsWith("/api/")) {
+			if (!world) return worldUnavailable(res);
+			if (url.pathname === "/api/dev/admin-access") return enableAdminAccess(req, res, world);
+			if (url.pathname === "/api/dev/full-map-vision") return enableFullMapVision(req, res, world);
+			if (url.pathname === "/api/dev/sound-debug") return enableSoundDebug(req, res, world);
+			if (url.pathname === "/api/dev/zombie-debug") return enableZombieDebug(req, res, world);
+			if (url.pathname === "/api/dev/path-debug") return enablePathDebug(req, res, world);
+			if (url.pathname === "/api/dev/spawn-zombies") return spawnDevZombies(req, res, world);
+			if (url.pathname === "/api/dev/grant-soldiers") return grantDevSoldiers(req, res, world);
+			if (url.pathname === "/api/dev/town-center-invincible") return toggleTownCenterInvincible(req, res, world);
+			if (url.pathname === "/api/dev/emit-noise") return emitDevNoise(req, res, world);
+			if (url.pathname === "/api/dev/restart-server") return restartServer(req, res, state, clients, world);
+			if (url.pathname === "/api/ping") return receiveClientPing(req, res, world);
+			if (url.pathname === "/api/command") return receiveCommand(req, res, world);
+			if (url.pathname === "/api/leave") return leaveGame(req, res, world);
+		}
 		if (req.method === "GET" && url.pathname === "/api/soundtrack") return listSoundtrack(res);
 		if (req.method === "GET" && url.pathname.startsWith("/assets/soundtrack/")) return serveSoundtrack(req, res, url);
 		return serveStatic(req, res, url);
 	};
 }
 
-async function serverStatus(res: import("node:http").ServerResponse, world: World) {
-	const activePlayers = Object.values(world.players).filter((player) => !player.defeated).length;
+async function serverStatus(res: import("node:http").ServerResponse, state: ServerState) {
+	const world = state.currentWorld();
+	const activePlayers = world ? Object.values(world.players).filter((player) => !player.defeated).length : 0;
 	json(res, {
 		activePlayers,
 		maxPlayers: MAX_PLAYERS,
 		lastUpdate: await lastUpdateTime(),
+		reset: state.resetStatus(activePlayers > 0),
 	});
+}
+
+function worldUnavailable(res: import("node:http").ServerResponse) {
+	return json(res, { ok: false, error: "No active world. Join to start a new map." }, 404);
 }
 
 async function lastUpdateTime(): Promise<string | null> {
@@ -289,12 +302,26 @@ async function emitDevNoise(req: import("node:http").IncomingMessage, res: impor
 	json(res, { ok: true });
 }
 
-async function receiveClientLog(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+async function restartServer(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, state: ServerState, clients: Set<Client>, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown };
+	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+	const player = world.players[body.playerId];
+	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	state.restartNow(player.name);
+	json(res, { ok: true });
+	for (const client of clients) {
+		client.res.end();
+	}
+	clients.clear();
+}
+
+async function receiveClientLog(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World | null) {
 	const body = (await readJson(req)) as { playerId?: unknown; message?: unknown };
 	if (typeof body.message !== "string") return json(res, { ok: false, error: "Log message is required." }, 400);
-	const player = typeof body.playerId === "string" ? world.players[body.playerId] : null;
+	const player = world && typeof body.playerId === "string" ? world.players[body.playerId] : null;
 	const source = player?.name || "client";
-	addAdminLog(world, source, body.message);
+	if (world) addAdminLog(world, source, body.message);
 	json(res, { ok: true });
 }
 

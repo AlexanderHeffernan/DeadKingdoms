@@ -4,6 +4,11 @@ export type ServerStatus = {
 	activePlayers: number;
 	maxPlayers: number;
 	lastUpdate: string | null;
+	reset: {
+		state: "active" | "countdown" | "cold";
+		idleResetMs: number;
+		resetAt: number | null;
+	};
 };
 
 export async function getStatus(): Promise<ServerStatus> {
@@ -65,6 +70,10 @@ export async function toggleTownCenterInvincible(playerId: PlayerId) {
 
 export async function emitNoise(playerId: PlayerId, x: number, y: number) {
 	return post("/api/dev/emit-noise", { playerId, x, y });
+}
+
+export async function restartServer(playerId: PlayerId) {
+	return post("/api/dev/restart-server", { playerId });
 }
 
 async function post(url: string, payload: Record<string, unknown>) {

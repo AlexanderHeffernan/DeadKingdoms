@@ -36,6 +36,7 @@ export class AdminDashboard {
 	private readonly grantSoldiersButton: HTMLButtonElement;
 	private readonly invincibleButton: HTMLButtonElement;
 	private readonly noiseToolButton: HTMLButtonElement;
+	private readonly restartServerButton: HTMLButtonElement;
 	private readonly commandStatus: HTMLElement;
 	private readonly actions: AdminDashboardActions;
 	private activeTab: AdminDashboardTab = "overview";
@@ -79,6 +80,7 @@ export class AdminDashboard {
 		this.grantSoldiersButton = elements.grantSoldiersButton;
 		this.invincibleButton = elements.invincibleButton;
 		this.noiseToolButton = elements.noiseToolButton;
+		this.restartServerButton = elements.restartServerButton;
 		this.commandStatus = elements.commandStatus;
 		this.rangeSeconds = Number(this.range.value) || 30;
 		this.setupEvents();
@@ -163,6 +165,7 @@ export class AdminDashboard {
 			await this.runCommand(this.noiseToolButton, this.actions.toggleNoiseTool);
 			this.hide();
 		});
+		this.restartServerButton.addEventListener("click", () => this.runCommand(this.restartServerButton, this.actions.restartServer));
 	}
 
 	private setActiveTab(tab: AdminDashboardTab) {
@@ -464,6 +467,7 @@ export type AdminDashboardElements = {
 	grantSoldiersButton: HTMLButtonElement;
 	invincibleButton: HTMLButtonElement;
 	noiseToolButton: HTMLButtonElement;
+	restartServerButton: HTMLButtonElement;
 	commandStatus: HTMLElement;
 };
 
@@ -475,6 +479,7 @@ export type AdminDashboardActions = {
 	grantSoldiers: () => Promise<string>;
 	toggleTownCenterInvincible: () => Promise<string>;
 	toggleNoiseTool: () => Promise<string>;
+	restartServer: () => Promise<string>;
 };
 
 type AdminDashboardTab = "overview" | "performance" | "players" | "logs" | "devCommands";

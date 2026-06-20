@@ -57,6 +57,7 @@ export type UIActions = {
 	grantSoldiers: () => Promise<string>;
 	toggleTownCenterInvincible: () => Promise<string>;
 	toggleNoiseTool: () => Promise<string>;
+	restartServer: () => Promise<string>;
 };
 
 export type SelectionEntity = Unit | Building | ResourceNode;

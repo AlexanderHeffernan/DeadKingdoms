@@ -4,16 +4,17 @@ import { TICK_MS } from "../shared/config.js";
 import { Logs } from "../shared/logs.js";
 import { broadcast, createHandler } from "./http.js";
 import type { Client } from "./http.js";
-import { addAdminLog, createWorld, stepWorld } from "./world.js";
+import { ServerState } from "./serverState.js";
+import { stepWorld } from "./world.js";
 
 loadEnvFile();
 
 const port = Number(process.env.PORT || 3000);
-const world = createWorld();
+const state = new ServerState();
 Logs.setSource("server");
-Logs.setSink((entry) => addAdminLog(world, entry.source, entry.message, entry.at));
+Logs.setSink((entry) => state.recordLog(entry.source, entry.message, entry.at));
 const clients = new Set<Client>();
-const server = http.createServer(createHandler(world, clients));
+const server = http.createServer(createHandler(state, clients));
 
 server.listen(port, "0.0.0.0", () => {
 	console.log(`RTS arena running at http://127.0.0.1:${port}`);
@@ -21,9 +22,17 @@ server.listen(port, "0.0.0.0", () => {
 });
 
 setInterval(() => {
-	stepWorld(world, TICK_MS / 1000);
-	broadcast(world, clients);
+	const world = state.currentWorld();
+	if (world) {
+		stepWorld(world, TICK_MS / 1000);
+		broadcast(world, clients);
+	}
+	state.stepIdleReset(hasActivePlayers(world));
 }, TICK_MS);
+
+function hasActivePlayers(world: ReturnType<ServerState["currentWorld"]>) {
+	return !!world && Object.values(world.players).some((player) => !player.defeated);
+}
 
 function loadEnvFile() {
 	try {

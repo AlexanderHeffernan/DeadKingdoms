@@ -49,6 +49,7 @@ export class UI {
 			grantSoldiersButton: mustGet("adminGrantSoldiersButton") as HTMLButtonElement,
 			invincibleButton: mustGet("adminInvincibleButton") as HTMLButtonElement,
 			noiseToolButton: mustGet("adminNoiseToolButton") as HTMLButtonElement,
+			restartServerButton: mustGet("adminRestartServerButton") as HTMLButtonElement,
 			commandStatus: mustGet("adminCommandStatus"),
 		}, {
 			enableFullMapVision: actions.enableFullMapVision,
@@ -58,6 +59,7 @@ export class UI {
 			grantSoldiers: actions.grantSoldiers,
 			toggleTownCenterInvincible: actions.toggleTownCenterInvincible,
 			toggleNoiseTool: actions.toggleNoiseTool,
+			restartServer: actions.restartServer,
 		});
 		this.components = [
 			new ResourcePanel(state, mustGet("resources"), hoverCard),

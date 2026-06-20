@@ -44,6 +44,10 @@
             </form>
             <aside class="update-boxes" aria-label="Server update status">
                 <div class="update-box">
+                    <span>Map reset</span>
+                    <strong id="resetStatus">--</strong>
+                </div>
+                <div class="update-box">
                     <span>Last update date</span>
                     <strong id="lastUpdateDate">--</strong>
                 </div>
@@ -249,6 +253,10 @@
                         <button id="adminNoiseToolButton" type="button">
                             <strong>Noise Tool (Bang)</strong>
                             <span>Closes this panel, then left-click the map to emit a loud bang. Esc or right-click to stop.</span>
+                        </button>
+                        <button id="adminRestartServerButton" type="button">
+                            <strong>Restart Server</strong>
+                            <span>Clear the current map immediately. The next player to join starts a fresh map.</span>
                         </button>
                     </div>
                     <div id="adminCommandStatus" class="admin-command-status"></div>
