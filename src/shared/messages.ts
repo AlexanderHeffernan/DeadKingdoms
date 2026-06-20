@@ -92,6 +92,7 @@ export function makeSnapshot(
 				...(world.serverPerf.zombies ? { zombies: world.serverPerf.zombies } : {}),
 				...(world.serverPerf.unitAi ? { unitAi: world.serverPerf.unitAi } : {}),
 				...(world.serverPerf.zombieWorker ? { zombieWorker: world.serverPerf.zombieWorker } : {}),
+				...(world.serverPerf.zombieAiWorker ? { zombieAiWorker: world.serverPerf.zombieAiWorker } : {}),
 			}
 			: null,
 		admin,
@@ -114,6 +115,7 @@ function buildAdminSnapshot(world: World, level: AdminLevel | undefined): AdminS
 			...(world.serverPerf.zombies ? { zombies: world.serverPerf.zombies } : {}),
 			...(world.serverPerf.unitAi ? { unitAi: world.serverPerf.unitAi } : {}),
 			...(world.serverPerf.zombieWorker ? { zombieWorker: world.serverPerf.zombieWorker } : {}),
+			...(world.serverPerf.zombieAiWorker ? { zombieAiWorker: world.serverPerf.zombieAiWorker } : {}),
 			samples: world.serverPerf.samples.slice(),
 		},
 		players: Object.values(world.players).map((player) => ({

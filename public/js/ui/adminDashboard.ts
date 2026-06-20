@@ -251,7 +251,10 @@ export class AdminDashboard {
 		const unitAi = [...(admin.serverPerf.unitAi ?? [])].sort((a, b) => b.ms - a.ms);
 		const zombies = admin.serverPerf.zombies;
 		const worker = admin.serverPerf.zombieWorker;
+		const zombieAiWorker = admin.serverPerf.zombieAiWorker;
 		const totalPhaseMs = phases.reduce((sum, phase) => sum + phase.ms, 0);
+		const unitAiPhaseMs = phases.find((phase) => phase.name === "units")?.ms ?? 0;
+		const unitAiDetailMs = unitAi.reduce((sum, bucket) => sum + bucket.ms, 0);
 		const zombieSummary = zombies ? `
 <div class="admin-perf-zombies">
 	<span>Zombies</span>
@@ -261,9 +264,16 @@ export class AdminDashboard {
 ` : "";
 		const workerSummary = worker ? `
 <div class="admin-perf-zombies">
-	<span>Zombie worker</span>
+	<span>Zombie director worker</span>
 	<strong>${worker.mode}${worker.pending ? " pending" : ""}</strong>
 	<em>${worker.lastDurationMs.toFixed(2)}ms · done ${worker.lastCompletedTick ?? "--"} · applied ${worker.lastAppliedTick ?? "--"} · failures ${worker.failures}${worker.lastError ? ` · ${escapeHtml(worker.lastError)}` : ""}</em>
+</div>
+` : "";
+		const zombieAiWorkerSummary = zombieAiWorker ? `
+<div class="admin-perf-zombies">
+	<span>Zombie AI worker</span>
+	<strong>${zombieAiWorker.mode}${zombieAiWorker.pending ? " pending" : ""}</strong>
+	<em>${zombieAiWorker.lastDurationMs.toFixed(2)}ms · done ${zombieAiWorker.lastCompletedTick ?? "--"} · applied ${zombieAiWorker.lastAppliedTick ?? "--"} · failures ${zombieAiWorker.failures}${zombieAiWorker.lastError ? ` · ${escapeHtml(zombieAiWorker.lastError)}` : ""}</em>
 </div>
 ` : "";
 		this.perfBreakdown.innerHTML = `
@@ -272,6 +282,7 @@ export class AdminDashboard {
 	<div><span>Smoothed tick</span><strong>${admin.serverPerf.tickMs.toFixed(1)}ms</strong></div>
 	${zombieSummary}
 	${workerSummary}
+	${zombieAiWorkerSummary}
 </div>
 <div class="admin-perf-phase-list">
 ${phases.map((phase) => `
@@ -284,14 +295,14 @@ ${phases.map((phase) => `
 `).join("") || `<div class="admin-perf-empty">No phase samples yet.</div>`}
 </div>
 ${unitAi.length ? `
-<div class="admin-perf-section-title">Unit AI detail</div>
+<div class="admin-perf-section-title">Unit AI detail · ${unitAiDetailMs.toFixed(2)}ms / ${unitAiPhaseMs.toFixed(2)}ms</div>
 <div class="admin-perf-phase-list">
 ${unitAi.map((bucket) => `
 	<div class="admin-perf-phase admin-perf-unit">
 		<span>${escapeHtml(bucket.label)}</span>
 		<strong>${bucket.ms.toFixed(2)}ms</strong>
 		<em>${bucket.count} · ${bucket.averageMs.toFixed(3)}ms avg</em>
-		<i style="--phase-width:${Math.min(100, Math.max(1, totalPhaseMs > 0 ? (bucket.ms / totalPhaseMs) * 100 : 1)).toFixed(1)}%"></i>
+		<i style="--phase-width:${Math.min(100, Math.max(1, unitAiPhaseMs > 0 ? (bucket.ms / unitAiPhaseMs) * 100 : 1)).toFixed(1)}%"></i>
 	</div>
 `).join("")}
 </div>

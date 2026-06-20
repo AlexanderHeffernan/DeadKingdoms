@@ -49,6 +49,7 @@ export interface ServerPerfStats {
 	zombies?: ServerPerfZombieStats;
 	unitAi?: ServerPerfUnitAiStats[];
 	zombieWorker?: ServerPerfZombieWorkerStats;
+	zombieAiWorker?: ServerPerfWorkerStats;
 }
 
 export type AdminLevel = "observer" | "moderator" | "operator";
@@ -88,6 +89,17 @@ export interface ServerPerfZombieWorkerStats {
 	lastError?: string;
 }
 
+export interface ServerPerfWorkerStats {
+	enabled: boolean;
+	pending: boolean;
+	lastDurationMs: number;
+	lastCompletedTick: number | null;
+	lastAppliedTick: number | null;
+	failures: number;
+	mode: "worker" | "fallback";
+	lastError?: string;
+}
+
 export interface ServerPerfSample {
 	tick: number;
 	tps: number;
@@ -97,6 +109,7 @@ export interface ServerPerfSample {
 	zombies?: ServerPerfZombieStats;
 	unitAi?: ServerPerfUnitAiStats[];
 	zombieWorker?: ServerPerfZombieWorkerStats;
+	zombieAiWorker?: ServerPerfWorkerStats;
 }
 
 export interface AdminLogEntry {

@@ -90,7 +90,7 @@ export type UnitSimulationContext = {
 	nearestTargetBuilding(source: Unit, range: number): Building | null;
 
 	/** Applies damage to a unit or building and performs any death side effects. */
-	damage(target: UnitCombatTarget, amount: number, attackerId: Unit["ownerId"]): void;
+	damage(target: UnitCombatTarget, amount: number, attackerId: Unit["ownerId"], attacker?: Unit): void;
 
 	/** Emits a temporary action sound for zombie attraction. */
 	emitActionSound(action: "unitAttack" | "build" | "chopWood" | "mineOre" | "gatherFood", point: { x: number; y: number }): void;

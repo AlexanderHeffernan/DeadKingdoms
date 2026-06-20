@@ -6,8 +6,6 @@ const ZOMBIE_TARGET_SIGHT_RANGE = 21;
 const ZOMBIE_PATH_STUCK_TICKS = 10;
 const ZOMBIE_PROGRESS_EPSILON = 0.03;
 const ZOMBIE_SIDEWAYS_PROGRESS_TOLERANCE = 0.015;
-const ZOMBIE_SOUND_MOVE_CADENCE_TICKS = 4;
-const ZOMBIE_IDLE_MOVE_CADENCE_TICKS = 5;
 
 export class ZombieUnit extends BaseUnit {
 	public static readonly type = "zombie";
@@ -26,7 +24,6 @@ export class ZombieUnit extends BaseUnit {
 
 	public step(context: UnitSimulationContext, zombie: Unit, dt: number) {
 		this.updateTimers(zombie, dt);
-		if (this.shouldSkipLowPriorityAi(context, zombie)) return;
 
 		// Check for nearby units before following horde movement.
 		const target = this.findNearestUnitTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
@@ -36,7 +33,7 @@ export class ZombieUnit extends BaseUnit {
 		}
 
 		if (this.shouldPrioritizeHordeTarget(zombie)) {
-			this.followHordeTarget(context, zombie, zombie.hordeTarget, this.movementDt(context, zombie, dt));
+			this.followHordeTarget(context, zombie, zombie.hordeTarget, dt);
 			return;
 		}
 
@@ -47,7 +44,7 @@ export class ZombieUnit extends BaseUnit {
 		}
 
 		if (zombie.hordeTarget) {
-			this.followHordeTarget(context, zombie, zombie.hordeTarget, this.movementDt(context, zombie, dt));
+			this.followHordeTarget(context, zombie, zombie.hordeTarget, dt);
 			return;
 		}
 
@@ -62,42 +59,6 @@ export class ZombieUnit extends BaseUnit {
 
 	private shouldPrioritizeHordeTarget(zombie: Unit): zombie is Unit & { hordeTarget: Vec2 } {
 		return !!zombie.hordeTarget && zombie.zombieGoalKind === "sound";
-	}
-
-	private movementDt(context: UnitSimulationContext, zombie: Unit, dt: number) {
-		if (this.usesSoundMovementCadence(zombie)) return dt * ZOMBIE_SOUND_MOVE_CADENCE_TICKS;
-		if (!this.usesIdleMovementCadence(zombie)) return dt;
-		return dt * ZOMBIE_IDLE_MOVE_CADENCE_TICKS;
-	}
-
-	private shouldSkipSoundMovement(context: UnitSimulationContext, zombie: Unit) {
-		return this.usesSoundMovementCadence(zombie) && context.world.tick % ZOMBIE_SOUND_MOVE_CADENCE_TICKS !== this.soundMoveSlot(zombie);
-	}
-
-	private shouldSkipIdleMovement(context: UnitSimulationContext, zombie: Unit) {
-		return this.usesIdleMovementCadence(zombie) && context.world.tick % ZOMBIE_IDLE_MOVE_CADENCE_TICKS !== this.idleMoveSlot(zombie);
-	}
-
-	private shouldSkipLowPriorityAi(context: UnitSimulationContext, zombie: Unit) {
-		if (context.world.tick <= 0) return false;
-		return this.shouldSkipSoundMovement(context, zombie) || this.shouldSkipIdleMovement(context, zombie);
-	}
-
-	private usesSoundMovementCadence(zombie: Unit) {
-		return zombie.zombieGoalKind === "sound";
-	}
-
-	private usesIdleMovementCadence(zombie: Unit) {
-		if (zombie.zombieGoalKind !== "wander" && zombie.zombieGoalKind !== "drift") return false;
-		return true;
-	}
-
-	private soundMoveSlot(zombie: Unit) {
-		return this.unitHash(zombie.id) % ZOMBIE_SOUND_MOVE_CADENCE_TICKS;
-	}
-
-	private idleMoveSlot(zombie: Unit) {
-		return this.unitHash(zombie.id) % ZOMBIE_IDLE_MOVE_CADENCE_TICKS;
 	}
 
 	private engageTarget(context: UnitSimulationContext, zombie: Unit, target: UnitCombatTarget, dt: number) {
@@ -116,7 +77,7 @@ export class ZombieUnit extends BaseUnit {
 
 	private attackTarget(context: UnitSimulationContext, zombie: Unit, target: UnitCombatTarget) {
 		if (zombie.cooldown > 0) return;
-		context.damage(target, this.attack, zombie.ownerId);
+		context.damage(target, this.attack, zombie.ownerId, zombie);
 		zombie.cooldown = this.cooldown;
 		zombie.attackFlash = 0.22;
 	}
@@ -223,14 +184,13 @@ export class ZombieUnit extends BaseUnit {
 	private driftForward(context: UnitSimulationContext, zombie: Unit, dt: number) {
 		const direction = zombie.zombieDriftDirection;
 		if (!direction) return;
-		const movementDt = this.movementDt(context, zombie, dt);
 
 		const target = {
 			x: zombie.x + direction.x * 10,
 			y: zombie.y + direction.y * 10,
 		};
 		zombie.facing = direction.x < 0 ? "left" : "right";
-		this.moveTowardGoal(context, zombie, target, movementDt);
+		this.moveTowardGoal(context, zombie, target, dt);
 	}
 
 	private clearMovementState(zombie: Unit) {
@@ -242,9 +202,4 @@ export class ZombieUnit extends BaseUnit {
 		zombie.zombieHordeSourceTarget = null;
 	}
 
-	private unitHash(idValue: string): number {
-		let hash = 0;
-		for (let i = 0; i < idValue.length; i += 1) hash = (hash * 31 + idValue.charCodeAt(i)) | 0;
-		return Math.abs(hash);
-	}
 }

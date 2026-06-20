@@ -18,6 +18,8 @@ import { clamp, distance, footprintHeight, footprintWidth, rectsOverlap, type Fo
 import { hasPathToInteractionRange, hasReasonableZombiePathToTarget, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
+import { ZombieAiWorkerClient } from "./zombieAiWorkerClient.js";
+import type { ZombieAiAttackIntent, ZombieAiStep } from "./zombieAiWorkerProtocol.js";
 import { ZombieDirectorWorkerClient } from "./zombieDirectorWorkerClient.js";
 import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
 import { Logs } from "../shared/logs.js";
@@ -74,6 +76,9 @@ const ZOMBIE_MID_VISION_DISTANCE = 72;
 const ZOMBIE_NEAR_CADENCE_TICKS = 1;
 const ZOMBIE_MID_CADENCE_TICKS = 3;
 const ZOMBIE_FAR_CADENCE_TICKS = 8;
+const ZOMBIE_CADENCE_FIELD_CELL_SIZE = 4;
+const ZOMBIE_CADENCE_FIELD_REBUILD_TICKS = 4;
+const zombieAiWorker = new ZombieAiWorkerClient();
 const zombieDirector = new ZombieDirectorWorkerClient();
 
 export function createWorld(): World {
@@ -337,7 +342,37 @@ class TickProfiler {
 function stepUnits(world: World, context: UnitSimulationContext, dt: number, profiling: boolean) {
 	const zombiePerf: ServerPerfZombieStats = { total: 0, stepped: 0, skipped: 0, near: 0, mid: 0, far: 0 };
 	const unitProfiler = profiling ? new UnitAiProfiler() : null;
+	const zombieSteps: ZombieAiStep[] = [];
+	const playerSteps: Array<{ unit: Unit; dt: number }> = [];
 	world._zombiePerf = zombiePerf;
+	const scanUnits = () => collectUnitSteps(world, context, dt, zombiePerf, zombieSteps, playerSteps);
+	if (unitProfiler) unitProfiler.measurePhase("unitAiScan", "Unit AI scan/cadence", Object.keys(world.units).length, scanUnits);
+		else scanUnits();
+	for (const step of playerSteps) {
+		const behavior = unitBehavior(step.unit);
+		if (unitProfiler) unitProfiler.measureUnit(step.unit, () => behavior.step(context, step.unit, step.dt));
+			else behavior.step(context, step.unit, step.dt);
+	}
+	if (!zombieAiWorker.step(world, dt, zombieSteps, (attack) => applyZombieAiAttack(world, attack), unitProfiler)) {
+		for (const zombieStep of zombieSteps) {
+			const unit = world.units[zombieStep.id];
+			if (!unit) continue;
+			const behavior = unitBehavior(unit);
+			if (unitProfiler) unitProfiler.measureUnit(unit, () => behavior.step(context, unit, zombieStep.dt));
+				else behavior.step(context, unit, zombieStep.dt);
+		}
+	}
+	if (unitProfiler) world._unitAiPerf = unitProfiler.stats();
+}
+
+function collectUnitSteps(
+	world: World,
+	context: UnitSimulationContext,
+	dt: number,
+	zombiePerf: ServerPerfZombieStats,
+	zombieSteps: ZombieAiStep[],
+	playerSteps: Array<{ unit: Unit; dt: number }>,
+) {
 	for (const unit of Object.values(world.units)) {
 		const cadence = unit.type === "zombie" ? Math.max(1, context.zombieUpdateCadence?.(unit) ?? 1) : 1;
 		if (unit.type === "zombie") recordZombieCadence(zombiePerf, cadence);
@@ -345,25 +380,48 @@ function stepUnits(world: World, context: UnitSimulationContext, dt: number, pro
 			if (unit.type === "zombie") zombiePerf.skipped += 1;
 			continue;
 		}
-		if (unit.type === "zombie") zombiePerf.stepped += 1;
-		const behavior = unitBehavior(unit);
-		if (unitProfiler) unitProfiler.measure(unit, () => behavior.step(context, unit, dt * cadence));
-			else behavior.step(context, unit, dt * cadence);
+		if (unit.type === "zombie") {
+			zombiePerf.stepped += 1;
+			zombieSteps.push({ id: unit.id, dt: dt * cadence });
+			continue;
+		}
+		playerSteps.push({ unit, dt: dt * cadence });
 	}
-	if (unitProfiler) world._unitAiPerf = unitProfiler.stats();
+}
+
+function applyZombieAiAttack(world: World, attack: ZombieAiAttackIntent) {
+	const attacker = world.units[attack.attackerId];
+	const target = world.units[attack.targetId as UnitId] || world.buildings[attack.targetId as BuildingId] || world.corpses[attack.targetId as keyof typeof world.corpses];
+	if (!attacker || attacker.type !== "zombie" || attacker.hp <= 0 || !target) return;
+	if (attacker.cooldown > 0) return;
+	damage(world, target, attack.amount, attack.attackerOwnerId);
+	attacker.cooldown = attack.cooldown;
+	attacker.attackFlash = attack.attackFlash;
 }
 
 class UnitAiProfiler {
 	private readonly buckets = new Map<string, { label: string; count: number; ms: number }>();
 
-	measure(unit: Unit, work: () => void) {
+	measureUnit(unit: Unit, work: () => void) {
 		const name = this.bucketName(unit);
+		this.measureBucket(name, this.bucketLabel(unit), 1, work);
+	}
+
+	measurePhase<T>(name: string, label: string, count: number, work: () => T): T {
+		return this.measureBucket(name, label, count, work);
+	}
+
+	measure<T>(name: string, label: string, count: number, work: () => T): T {
+		return this.measureBucket(name, label, count, work);
+	}
+
+	private measureBucket<T>(name: string, label: string, count: number, work: () => T): T {
 		const startedAt = performance.now();
 		try {
-			work();
+			return work();
 		} finally {
-			const bucket = this.buckets.get(name) ?? { label: this.bucketLabel(unit), count: 0, ms: 0 };
-			bucket.count += 1;
+			const bucket = this.buckets.get(name) ?? { label, count: 0, ms: 0 };
+			bucket.count += count;
 			bucket.ms += performance.now() - startedAt;
 			this.buckets.set(name, bucket);
 		}
@@ -442,6 +500,7 @@ function updateServerTickDuration(world: World, tickMs: number, phases: ServerPe
 	if (world._zombiePerf) world.serverPerf.zombies = world._zombiePerf;
 	if (world._unitAiPerf) world.serverPerf.unitAi = world._unitAiPerf;
 	if (world._zombieWorkerPerf) world.serverPerf.zombieWorker = world._zombieWorkerPerf;
+	if (world._zombieAiWorkerPerf) world.serverPerf.zombieAiWorker = world._zombieAiWorkerPerf;
 	const sample = {
 		tick: world.tick,
 		tps: world.serverPerf.tps,
@@ -451,6 +510,7 @@ function updateServerTickDuration(world: World, tickMs: number, phases: ServerPe
 		...(world._zombiePerf ? { zombies: world._zombiePerf } : {}),
 		...(world._unitAiPerf ? { unitAi: world._unitAiPerf } : {}),
 		...(world._zombieWorkerPerf ? { zombieWorker: world._zombieWorkerPerf } : {}),
+		...(world._zombieAiWorkerPerf ? { zombieAiWorker: world._zombieAiWorkerPerf } : {}),
 	};
 	world.serverPerf.samples.push(sample);
 	if (world.serverPerf.samples.length > SERVER_PERF_SAMPLE_LIMIT) {
@@ -533,18 +593,40 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 }
 
 class ZombieUpdateCadence {
-	private readonly watchedPoints: Vec2[];
+	private readonly state: NonNullable<World["_zombieCadenceField"]>;
 
 	constructor(private readonly world: World) {
-		this.watchedPoints = this.collectWatchedPoints();
+		this.state = this.currentField();
 	}
 
 	cadenceFor(unit: Unit) {
-		if (this.watchedPoints.length === 0) return ZOMBIE_FAR_CADENCE_TICKS;
-		const distanceToVision = this.distanceToNearestWatchedPoint(unit);
-		if (distanceToVision <= ZOMBIE_NEAR_VISION_DISTANCE) return ZOMBIE_NEAR_CADENCE_TICKS;
-		if (distanceToVision <= ZOMBIE_MID_VISION_DISTANCE) return ZOMBIE_MID_CADENCE_TICKS;
-		return ZOMBIE_FAR_CADENCE_TICKS;
+		if (this.state.watchedPoints === 0) return ZOMBIE_FAR_CADENCE_TICKS;
+		const cellX = clamp(Math.floor(unit.x / this.state.cellSize), 0, this.state.width - 1);
+		const cellY = clamp(Math.floor(unit.y / this.state.cellSize), 0, this.state.height - 1);
+		return this.state.field[cellY * this.state.width + cellX] || ZOMBIE_FAR_CADENCE_TICKS;
+	}
+
+	private currentField() {
+		const cached = this.world._zombieCadenceField;
+		if (cached && cached.cellSize === ZOMBIE_CADENCE_FIELD_CELL_SIZE && this.world.tick - cached.builtTick < ZOMBIE_CADENCE_FIELD_REBUILD_TICKS) {
+			return cached;
+		}
+		const watchedPoints = this.collectWatchedPoints();
+		const width = Math.ceil(MAP_SIZE / ZOMBIE_CADENCE_FIELD_CELL_SIZE);
+		const height = Math.ceil(MAP_SIZE / ZOMBIE_CADENCE_FIELD_CELL_SIZE);
+		const field = new Uint8Array(width * height);
+		field.fill(ZOMBIE_FAR_CADENCE_TICKS);
+		for (const point of watchedPoints) this.stampCadence(field, width, height, point, ZOMBIE_MID_VISION_DISTANCE, ZOMBIE_MID_CADENCE_TICKS);
+		for (const point of watchedPoints) this.stampCadence(field, width, height, point, ZOMBIE_NEAR_VISION_DISTANCE, ZOMBIE_NEAR_CADENCE_TICKS);
+		this.world._zombieCadenceField = {
+			builtTick: this.world.tick,
+			cellSize: ZOMBIE_CADENCE_FIELD_CELL_SIZE,
+			width,
+			height,
+			field,
+			watchedPoints: watchedPoints.length,
+		};
+		return this.world._zombieCadenceField;
 	}
 
 	private collectWatchedPoints() {
@@ -560,13 +642,24 @@ class ZombieUpdateCadence {
 		return points;
 	}
 
-	private distanceToNearestWatchedPoint(unit: Unit) {
-		let nearest = Infinity;
-		for (const point of this.watchedPoints) {
-			const d = distance(unit, point);
-			if (d < nearest) nearest = d;
+	private stampCadence(field: Uint8Array, width: number, height: number, point: Vec2, radius: number, cadence: number) {
+		const cellSize = ZOMBIE_CADENCE_FIELD_CELL_SIZE;
+		const minCellX = clamp(Math.floor((point.x - radius) / cellSize), 0, width - 1);
+		const maxCellX = clamp(Math.floor((point.x + radius) / cellSize), 0, width - 1);
+		const minCellY = clamp(Math.floor((point.y - radius) / cellSize), 0, height - 1);
+		const maxCellY = clamp(Math.floor((point.y + radius) / cellSize), 0, height - 1);
+		const radiusSq = radius * radius;
+		for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
+			const y = cellY * cellSize + cellSize / 2;
+			for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+				const x = cellX * cellSize + cellSize / 2;
+				const dx = x - point.x;
+				const dy = y - point.y;
+				if (dx * dx + dy * dy > radiusSq) continue;
+				const index = cellY * width + cellX;
+				if (cadence < field[index]!) field[index] = cadence;
+			}
 		}
-		return nearest;
 	}
 }
 
