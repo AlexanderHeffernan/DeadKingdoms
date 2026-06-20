@@ -134,6 +134,9 @@ export type UnitSimulationContext = {
 	/** Whether this unit can find a walkable route into interaction range of the target point. */
 	hasPathToTarget(unit: Unit, targetPoint: { x: number; y: number }, range: number): boolean;
 
+	/** Whether a zombie can find a short enough route worth following to the target point. */
+	hasReasonablePathToTarget(unit: Unit, targetPoint: { x: number; y: number }, range: number): boolean;
+
 	/** Finds the first enemy building obstructing a unit's route toward a target point. */
 	blockingBuildingToward(unit: Unit, targetPoint: { x: number; y: number }): Building | null;
 };

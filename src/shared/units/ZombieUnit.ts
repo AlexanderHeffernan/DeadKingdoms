@@ -32,6 +32,11 @@ export class ZombieUnit extends BaseUnit {
 			return;
 		}
 
+		if (this.shouldPrioritizeHordeTarget(zombie)) {
+			this.followHordeTarget(context, zombie, zombie.hordeTarget, dt);
+			return;
+		}
+
 		const buildingTarget = this.findNearestBuildingTarget(context, zombie, ZOMBIE_TARGET_SIGHT_RANGE);
 		if (buildingTarget) {
 			this.engageTarget(context, zombie, buildingTarget, dt);
@@ -52,13 +57,17 @@ export class ZombieUnit extends BaseUnit {
 		this.clearMovementState(zombie);
 	}
 
+	private shouldPrioritizeHordeTarget(zombie: Unit): zombie is Unit & { hordeTarget: Vec2 } {
+		return !!zombie.hordeTarget && zombie.zombieGoalKind === "sound";
+	}
+
 	private engageTarget(context: UnitSimulationContext, zombie: Unit, target: UnitCombatTarget, dt: number) {
 		const targetPoint = context.centerOf(target);
 		const range = this.range + (target.size || 0.6);
 		zombie.facing = targetPoint.x < zombie.x ? "left" : "right";
 		if (context.distance(zombie, targetPoint) > range) {
 			const movement = this.moveTowardGoal(context, zombie, targetPoint, dt);
-			if (!movement.moved && movement.usedPath && context.distance(zombie, targetPoint) > range) {
+			if (this.shouldAttackBlockedRoute(movement, zombie) && context.distance(zombie, targetPoint) > range) {
 				context.attackBlockingBuilding(zombie, targetPoint);
 			}
 			return;
@@ -76,11 +85,17 @@ export class ZombieUnit extends BaseUnit {
 	private targetOrBlockingBuilding(context: UnitSimulationContext, zombie: Unit, target: Unit): UnitCombatTarget {
 		const targetPoint = context.centerOf(target);
 		const range = this.range + (target.size || 0.6);
-		if (context.hasPathToTarget(zombie, targetPoint, range)) return target;
+		if (context.hasReasonablePathToTarget(zombie, targetPoint, range)) return target;
 		return context.blockingBuildingToward(zombie, targetPoint) || target;
 	}
 
 	private followHordeTarget(context: UnitSimulationContext, zombie: Unit, target: Vec2, dt: number) {
+		const blockingBuilding = this.blockingBuildingTowardSound(context, zombie, target);
+		if (blockingBuilding) {
+			this.engageTarget(context, zombie, blockingBuilding, dt);
+			return;
+		}
+
 		zombie.facing = target.x < zombie.x ? "left" : "right";
 		if (context.distance(zombie, target) <= 0.45) {
 			zombie.zombieStuckTicks = 0;
@@ -89,10 +104,24 @@ export class ZombieUnit extends BaseUnit {
 			zombie.retargetIn = 0;
 			return;
 		}
-		this.moveTowardGoal(context, zombie, target, dt);
+		const movement = this.moveTowardGoal(context, zombie, target, dt);
+		if (this.shouldAttackBlockedRoute(movement, zombie)) {
+			context.attackBlockingBuilding(zombie, zombie.zombieHordeSourceTarget || target);
+		}
 		if (context.distance(zombie, target) >= 0.45) return;
 		zombie.zombieStuckTicks = 0;
 		zombie.retargetIn = 0;
+	}
+
+	private shouldAttackBlockedRoute(movement: { moved: boolean; pathFound: boolean; usedPath: boolean }, zombie: Unit) {
+		return movement.usedPath && (!movement.pathFound || !movement.moved || (zombie.zombieStuckTicks || 0) >= ZOMBIE_PATH_STUCK_TICKS);
+	}
+
+	private blockingBuildingTowardSound(context: UnitSimulationContext, zombie: Unit, target: Vec2) {
+		if (zombie.zombieGoalKind !== "sound") return null;
+		const sourceTarget = zombie.zombieHordeSourceTarget || target;
+		if (context.hasReasonablePathToTarget(zombie, sourceTarget, 0.45)) return null;
+		return context.blockingBuildingToward(zombie, sourceTarget);
 	}
 
 	private findNearestUnitTarget(context: UnitSimulationContext, zombie: Unit, range: number): Unit | null {
@@ -134,9 +163,9 @@ export class ZombieUnit extends BaseUnit {
 		if (moved) {
 			this.rememberDriftDirection(context, zombie, before);
 		}
-		if (madeProgress || movedAroundObstacle) zombie.zombieStuckTicks = 0;
+		if (madeProgress || (!usedPath && movedAroundObstacle)) zombie.zombieStuckTicks = 0;
 		else zombie.zombieStuckTicks = (zombie.zombieStuckTicks || 0) + 1;
-		return { moved, usedPath };
+		return { moved, pathFound: !usedPath || !!zombie.zombiePath, usedPath };
 	}
 
 	private rememberDriftDirection(context: UnitSimulationContext, zombie: Unit, before: Vec2) {

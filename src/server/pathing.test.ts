@@ -3,7 +3,7 @@ import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Building, ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
 import { ZombieUnit, type UnitSimulationContext } from "../shared/units/index.js";
-import { findPath, findSharedPath, hasPathToInteractionRange, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
+import { findPath, findSharedPath, hasPathToInteractionRange, hasReasonableZombiePathToTarget, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 	const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -190,6 +190,26 @@ test("hasPathToInteractionRange stays false when only a sealed wall corner is br
 	zombie.ownerId = "zombies" as Unit["ownerId"];
 
 	assert.equal(hasPathToInteractionRange(world, zombie, { x: 11, y: 11 }, 1.15), false);
+});
+
+test("hasReasonableZombiePathToTarget rejects long detours through distant openings", () => {
+	const blocked = [];
+	for (let y = 0; y <= 40; y += 1) {
+		if (y === 40) continue;
+		blocked.push({ x: 20, y });
+	}
+	const world = makeWorld(blocked);
+	const zombie = makeUnit(18, 10, "z-reasonable-path");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+
+	assert.equal(hasPathToInteractionRange(world, zombie, { x: 22, y: 10 }, 0.6), true);
+	assert.equal(hasReasonableZombiePathToTarget(world, zombie, { x: 22, y: 10 }, 0.6), false);
+
+	world._occupancy![20 * MAP_SIZE + 20] = 0;
+	delete world._pathing;
+
+	assert.equal(hasReasonableZombiePathToTarget(world, zombie, { x: 22, y: 10 }, 0.6), true);
 });
 
 test("resolveUnitSeparation pushes overlapping units in the same grid cell apart", () => {
@@ -393,6 +413,7 @@ test("zombie movement escalates to pathing when sidesteps do not make progress",
 			unit.x += 0.2;
 			return false;
 		},
+		attackBlockingBuilding: () => {},
 	} as unknown as UnitSimulationContext;
 
 	for (let tick = 0; tick < 11; tick += 1) behavior.step(context, zombie, 0.1);
@@ -426,6 +447,7 @@ test("nearby combat aggro overrides zombie horde goals", () => {
 		moveAroundSmallObstacle: () => false,
 		moveZombieWithPath: () => false,
 		hasPathToTarget: () => true,
+		hasReasonablePathToTarget: () => true,
 		blockingBuildingToward: () => null,
 		damage: () => {
 			damaged = true;
@@ -467,6 +489,165 @@ test("zombie attacks nearby buildings when no units are visible", () => {
 	assert.equal(damagedTarget, building);
 });
 
+test("zombie prioritizes sound horde goals over adjacent buildings", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-sound-over-building");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.hordeTarget = { x: 14, y: 10 };
+	zombie.zombieGoalKind = "sound";
+	const building = makeBuilding(8.4, 10, "b-adjacent");
+	let movementTarget: { x: number; y: number } | null = null;
+	let damagedTarget: Building | Unit | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		nearestEnemy: () => building,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: (_unit: Unit, target: { x: number; y: number }) => {
+			movementTarget = target;
+			return false;
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasPathToTarget: () => true,
+		hasReasonablePathToTarget: () => true,
+		blockingBuildingToward: () => null,
+		damage: (target: Building | Unit) => {
+			damagedTarget = target;
+		},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(movementTarget, { x: 14, y: 10 });
+	assert.equal(damagedTarget, null);
+});
+
+test("zombie attacks a blocking building when sound has no path around it", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-sound-wall-blocked");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.hordeTarget = { x: 9, y: 10 };
+	zombie.zombieHordeSourceTarget = { x: 18.3, y: 10 };
+	zombie.zombieGoalKind = "sound";
+	const wall = {
+		...makeBuilding(10, 10, "b-sound-wall"),
+		type: "wall",
+		width: 1,
+		height: 1,
+		size: 1,
+		walkBlocking: true,
+	} as Building;
+	let damagedTarget: Building | Unit | null = null;
+	let movementTarget: { x: number; y: number } | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		nearestEnemy: () => null,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: (_unit: Unit, target: { x: number; y: number }) => {
+			movementTarget = target;
+			return false;
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasPathToTarget: (_unit: Unit, target: { x: number; y: number }) => target.x < 12,
+		hasReasonablePathToTarget: (_unit: Unit, target: { x: number; y: number }) => target.x < 12,
+		blockingBuildingToward: (_unit: Unit, target: { x: number; y: number }) => target.x > 12 ? wall : null,
+		damage: (target: Building | Unit) => {
+			damagedTarget = target;
+		},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(movementTarget, { x: wall.x, y: wall.y });
+	assert.equal(damagedTarget, null);
+
+	zombie.x = 9.5;
+	behavior.step(context, zombie, 0.1);
+
+	assert.equal(damagedTarget, wall);
+});
+
+test("zombie attacks a blocking building when limited pathing cannot progress toward reachable sound", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-sound-limited-path-blocked");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.hordeTarget = { x: 18.3, y: 10 };
+	zombie.zombieHordeSourceTarget = { x: 18.3, y: 10 };
+	zombie.zombieGoalKind = "sound";
+	zombie.zombieStuckTicks = 10;
+	let attackedBlockingTarget: { x: number; y: number } | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		nearestEnemy: () => null,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: () => false,
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasPathToTarget: () => true,
+		hasReasonablePathToTarget: () => true,
+		blockingBuildingToward: () => null,
+		attackBlockingBuilding: (_unit: Unit, target: { x: number; y: number }) => {
+			attackedBlockingTarget = target;
+		},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(attackedBlockingTarget, { x: 18.3, y: 10 });
+	assert.equal(zombie.zombiePath, undefined);
+});
+
+test("zombie attacks when limited pathing shuffles without progress toward reachable sound", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-sound-path-shuffle");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.hordeTarget = { x: 18.3, y: 10 };
+	zombie.zombieHordeSourceTarget = { x: 18.3, y: 10 };
+	zombie.zombieGoalKind = "sound";
+	zombie.zombieStuckTicks = 10;
+	let attackedBlockingTarget: { x: number; y: number } | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		nearestEnemy: () => null,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: () => false,
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: (unit: Unit) => {
+			unit.y += 0.3;
+			unit.zombiePath = [{ x: 8, y: 11 }];
+			return false;
+		},
+		hasPathToTarget: () => true,
+		hasReasonablePathToTarget: () => true,
+		blockingBuildingToward: () => null,
+		attackBlockingBuilding: (_unit: Unit, target: { x: number; y: number }) => {
+			attackedBlockingTarget = target;
+		},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(attackedBlockingTarget, { x: 18.3, y: 10 });
+	assert.ok((zombie.zombieStuckTicks || 0) > 10);
+});
+
 test("zombie prioritizes visible units over adjacent buildings", () => {
 	const world = makeWorld();
 	const zombie = makeUnit(8, 10, "z-unit-over-building");
@@ -490,6 +671,7 @@ test("zombie prioritizes visible units over adjacent buildings", () => {
 		moveAroundSmallObstacle: () => false,
 		moveZombieWithPath: () => false,
 		hasPathToTarget: () => true,
+		hasReasonablePathToTarget: () => true,
 		blockingBuildingToward: () => null,
 		damage: () => {
 			damaged = true;
@@ -532,6 +714,7 @@ test("zombie attacks a blocking building when a visible unit has no path around 
 		moveAroundSmallObstacle: () => false,
 		moveZombieWithPath: () => false,
 		hasPathToTarget: () => false,
+		hasReasonablePathToTarget: () => false,
 		blockingBuildingToward: () => wall,
 		damage: (target: Building | Unit) => {
 			damagedTarget = target;
@@ -547,6 +730,115 @@ test("zombie attacks a blocking building when a visible unit has no path around 
 	behavior.step(context, zombie, 0.1);
 
 	assert.equal(damagedTarget, wall);
+});
+
+test("zombie attacks a blocking building when only an unreasonable path reaches a visible unit", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-unreasonable-path");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	const unit = makeUnit(18.3, 10, "u-unreasonable-path");
+	const wall = {
+		...makeBuilding(10, 10, "b-unreasonable-wall"),
+		type: "wall",
+		width: 1,
+		height: 1,
+		size: 1,
+		walkBlocking: true,
+	} as Building;
+	let movementTarget: { x: number; y: number } | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [unit],
+		nearestEnemy: () => wall,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: (_unit: Unit, target: { x: number; y: number }) => {
+			movementTarget = target;
+			return false;
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasPathToTarget: () => true,
+		hasReasonablePathToTarget: () => false,
+		blockingBuildingToward: () => wall,
+		damage: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(movementTarget, { x: wall.x, y: wall.y });
+});
+
+test("zombie attacks a blocking building when limited pathing cannot progress toward reachable unit", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-unit-limited-path-blocked");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.zombieStuckTicks = 10;
+	const unit = makeUnit(18.3, 10, "u-reachable-behind-wall");
+	let attackedBlockingTarget: { x: number; y: number } | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [unit],
+		nearestEnemy: () => null,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: () => false,
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasPathToTarget: () => true,
+		hasReasonablePathToTarget: () => true,
+		blockingBuildingToward: () => null,
+		attackBlockingBuilding: (_unit: Unit, target: { x: number; y: number }) => {
+			attackedBlockingTarget = target;
+		},
+		damage: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(attackedBlockingTarget, { x: unit.x, y: unit.y });
+	assert.equal(zombie.zombiePath, undefined);
+});
+
+test("zombie attacks when limited pathing shuffles without progress toward reachable unit", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-unit-path-shuffle");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.zombieStuckTicks = 10;
+	const unit = makeUnit(18.3, 10, "u-shuffle-behind-wall");
+	let attackedBlockingTarget: { x: number; y: number } | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [unit],
+		nearestEnemy: () => null,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: () => false,
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: (movingUnit: Unit) => {
+			movingUnit.y += 0.3;
+			movingUnit.zombiePath = [{ x: 8, y: 11 }];
+			return false;
+		},
+		hasPathToTarget: () => true,
+		hasReasonablePathToTarget: () => true,
+		blockingBuildingToward: () => null,
+		attackBlockingBuilding: (_unit: Unit, target: { x: number; y: number }) => {
+			attackedBlockingTarget = target;
+		},
+		damage: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(attackedBlockingTarget, { x: unit.x, y: unit.y });
+	assert.ok((zombie.zombieStuckTicks || 0) > 10);
 });
 
 test("zombie unit does not clear director horde target after reaching it", () => {

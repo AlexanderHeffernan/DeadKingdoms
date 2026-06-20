@@ -15,7 +15,7 @@ import type { UnitSimulationContext } from "../shared/units/index.js";
 import type { GatherTarget } from "../shared/buildings/base/index.js";
 import { id } from "./id.js";
 import { clamp, distance, footprintHeight, footprintWidth, rectsOverlap, type Footprint } from "./math.js";
-import { hasPathToInteractionRange, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
+import { hasPathToInteractionRange, hasReasonableZombiePathToTarget, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { stepZombieDirector } from "./zombieDirector.js";
@@ -331,6 +331,10 @@ function smoothMetric(current: number, next: number) {
 
 function createSimulationContext(world: World): UnitSimulationContext & import("./zombieSpawning.js").ZombieSpawnContext {
 	const unitGridsByOwner = unitTargetGridsByOwner(world);
+	const buildingGrid = new SpatialGrid(
+		Object.values(world.buildings).filter((building) => building.hp > 0),
+		TARGET_UNIT_GRID_CELL_SIZE,
+	);
 	const targetUnitGrid = new SpatialGrid(
 		Object.values(world.units).filter((unit) => unit.type !== "zombie" && unit.hp > 0),
 		TARGET_UNIT_GRID_CELL_SIZE,
@@ -349,7 +353,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		moveAroundSmallObstacle: (unit, target, maxStep) => moveAroundSmallObstacle(world, unit, target, maxStep),
 		centerOf,
 		distance,
-		nearestEnemy: (source, range) => nearestEnemy(world, unitGridsByOwner, source, range),
+		nearestEnemy: (source, range) => nearestEnemy(world, unitGridsByOwner, buildingGrid, source, range),
 		nearbyTargetUnits: (source, range) =>
 			targetUnitGrid
 			.nearby(source, range)
@@ -376,6 +380,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		assignPostBuildGather: (unit, resourceKind, builtFarm = null) => assignPostBuildGather(world, unit, resourceKind, builtFarm),
 		attackBlockingBuilding: (unit, targetPoint) => attackBlockingBuilding(world, unit, targetPoint),
 		hasPathToTarget: (unit, targetPoint, range) => hasPathToInteractionRange(world, unit, targetPoint, range),
+		hasReasonablePathToTarget: (unit, targetPoint, range) => hasReasonableZombiePathToTarget(world, unit, targetPoint, range),
 		blockingBuildingToward: (unit, targetPoint) => blockingBuildingToward(world, unit, targetPoint),
 		createZombie: (point) => createZombie(world, point.x, point.y),
 		isWalkable: (x, y) => isWalkable(world, x, y),
@@ -1043,7 +1048,8 @@ function stepBuilding(world: World, building: Building, dt: number) {
 		}
 	}
 	if (building.canAttack) {
-		const target = nearestEnemy(world, unitTargetGridsByOwner(world), building, building.attackRange);
+		const buildingGrid = new SpatialGrid(Object.values(world.buildings).filter((candidate) => candidate.hp > 0), TARGET_UNIT_GRID_CELL_SIZE);
+		const target = nearestEnemy(world, unitTargetGridsByOwner(world), buildingGrid, building, building.attackRange);
 		if (target && (building.cooldown ?? 0) <= 0) {
 			damage(world, target, building.attack, building.ownerId);
 			emitActionSound(world, "towerAttack", centerOf(building));
@@ -1067,18 +1073,37 @@ function blockingBuildingToward(world: World, zombie: Unit, targetPoint: { x: nu
 	const dy = targetPoint.y - zombie.y;
 	const length = Math.hypot(dx, dy) || 1;
 	const step = 0.35;
+	const blockingBuildings = blockingBuildingsByTile(world);
 	for (let distanceToTarget = 0.65; distanceToTarget <= length; distanceToTarget += step) {
 		const x = Math.floor(zombie.x + (dx / length) * distanceToTarget);
 		const y = Math.floor(zombie.y + (dy / length) * distanceToTarget);
-		const building = Object.values(world.buildings).find((candidate) => (
-			candidate.ownerId !== zombie.ownerId &&
-			candidate.hp > 0 &&
-			candidate.walkBlocking &&
-			pointInsideEntity(x, y, candidate)
-		));
-		if (building) return building;
+		const building = blockingBuildings.get(y * MAP_SIZE + x);
+		if (building?.ownerId === zombie.ownerId) continue;
+		if (building && building.hp > 0) return building;
 	}
 	return null;
+}
+
+function blockingBuildingsByTile(world: World): Map<number, Building> {
+	world._pathing ??= { occupancyVersion: 0, flowFields: new Map(), clearanceFields: new Map(), arrivalGroups: new Map(), pathRequestsThisTick: 0, lastRequestTick: -1 };
+	const state = world._pathing;
+	if (state.blockingBuildingsByTileVersion === state.occupancyVersion && state.blockingBuildingsByTile) return state.blockingBuildingsByTile;
+
+	const buildings = new Map<number, Building>();
+	for (const building of Object.values(world.buildings)) {
+		if (!building.walkBlocking || building.hp <= 0) continue;
+		for (let dy = 0; dy < building.height; dy += 1) {
+			for (let dx = 0; dx < building.width; dx += 1) {
+				const x = building.x + dx;
+				const y = building.y + dy;
+				if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) continue;
+				buildings.set(y * MAP_SIZE + x, building);
+			}
+		}
+	}
+	state.blockingBuildingsByTile = buildings;
+	state.blockingBuildingsByTileVersion = state.occupancyVersion;
+	return buildings;
 }
 
 function stepResourceDecay(world: World, dt: number) {
@@ -1316,7 +1341,7 @@ function unitTargetGridsByOwner(world: World): Map<PlayerId, SpatialGrid<Unit>> 
 	return new Map([...unitsByOwner.entries()].map(([ownerId, units]) => [ownerId, new SpatialGrid(units, TARGET_UNIT_GRID_CELL_SIZE)]));
 }
 
-function nearestEnemy(world: World, unitGridsByOwner: Map<PlayerId, SpatialGrid<Unit>>, source: Unit | Building, range: number) {
+function nearestEnemy(world: World, unitGridsByOwner: Map<PlayerId, SpatialGrid<Unit>>, buildingGrid: SpatialGrid<Building>, source: Unit | Building, range: number) {
 	let best = null;
 	let bestDist = range;
 	const sourceCenter = centerOf(source);
@@ -1332,8 +1357,10 @@ function nearestEnemy(world: World, unitGridsByOwner: Map<PlayerId, SpatialGrid<
 			}
 		}
 	}
-	for (const building of Object.values(world.buildings)) {
+	for (const entry of buildingGrid.nearby(sourceCenter, range)) {
+		const building = entry.item;
 		if (building.ownerId === source.ownerId || building.hp <= 0) continue;
+		if (world.buildings[building.id] !== building) continue;
 		const d = distance(sourceCenter, centerOf(building));
 		if (d < bestDist) {
 			best = building;

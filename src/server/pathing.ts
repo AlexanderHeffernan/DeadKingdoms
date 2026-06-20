@@ -715,6 +715,7 @@ function isHardOccupied(world: World, unit: Unit | undefined, x: number, y: numb
 	if (!occupied(world, x, y)) return false;
 	if (unit && isOwnGateTile(world, unit, x, y)) return false;
 	if (hardBlockingTiles(world).has(tileId(x, y))) return true;
+	if (unit?.type === "zombie" && isMovingUnit(unit)) return false;
 	if (!unit || !isMovingUnit(unit)) return true;
 	const idleOwners = idleUnitTiles(world).get(tileId(x, y));
 	if (!idleOwners || idleOwners.size !== 1) return true;
@@ -834,6 +835,15 @@ export function hasPathToInteractionRange(world: World, unit: Unit, target: Vec2
 	if (!isInMap(start.x, start.y)) return false;
 	const field = interactionRangeFlowFieldFor(world, target, range);
 	return field.distance[tileId(start.x, start.y)] !== FLOW_UNREACHED;
+}
+
+export function hasReasonableZombiePathToTarget(world: World, unit: Unit, target: Vec2, range: number): boolean {
+	if (distance(unit, target) <= range) return true;
+	const start = worldTile(unit);
+	if (!isInMap(start.x, start.y)) return false;
+	const field = interactionRangeFlowFieldFor(world, target, range);
+	const pathCost = field.distance[tileId(start.x, start.y)]!;
+	return pathCost !== FLOW_UNREACHED && pathCost <= ZOMBIE_PATH_MAX_NODES * FLOW_BASE_COST * 2;
 }
 
 function commandCrowd(command: UnitCommand): number {

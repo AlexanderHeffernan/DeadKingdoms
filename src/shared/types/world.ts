@@ -34,6 +34,8 @@ export interface PathingWorldState {
 	arrivalGroups: Map<string, unknown>;
 	hardBlockingTiles?: Set<number>;
 	hardBlockingTilesVersion?: number;
+	blockingBuildingsByTile?: Map<number, Building>;
+	blockingBuildingsByTileVersion?: number;
 	idleUnitTiles?: Map<number, Map<PlayerId, number>>;
 	idleUnitTilesTick?: number;
 	movingUnitGrid?: unknown;
