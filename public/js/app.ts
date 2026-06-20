@@ -936,16 +936,24 @@ function wallLineTiles() {
 	if (!view.wallDragStartTile || !view.hoverTile) return [];
 	const start = view.wallDragStartTile;
 	const end = view.hoverTile;
-	const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+	const axis = closestWallAxis(start, end);
+	const length = Math.max(0, Math.round(axis.length));
 	const tiles = [];
-	if (horizontal) {
-		const step = end.x >= start.x ? 1 : -1;
-		for (let x = start.x; step > 0 ? x <= end.x : x >= end.x; x += step) tiles.push({ x, y: start.y });
-	} else {
-		const step = end.y >= start.y ? 1 : -1;
-		for (let y = start.y; step > 0 ? y <= end.y : y >= end.y; y += step) tiles.push({ x: start.x, y });
-	}
+	for (let index = 0; index <= length; index += 1)
+		tiles.push({ x: start.x + axis.dx * index, y: start.y + axis.dy * index });
 	return tiles;
+}
+
+function closestWallAxis(start: { x: number; y: number }, end: { x: number; y: number }) {
+	const dx = end.x - start.x;
+	const dy = end.y - start.y;
+	const axes = [
+		{ dx: dx >= 0 ? 1 : -1, dy: 0, length: Math.abs(dx), distance: Math.abs(dy) },
+		{ dx: 0, dy: dy >= 0 ? 1 : -1, length: Math.abs(dy), distance: Math.abs(dx) },
+		{ dx: dx - dy >= 0 ? 1 : -1, dy: dx - dy >= 0 ? -1 : 1, length: Math.abs(dx - dy) / 2, distance: Math.abs(dx + dy) },
+		{ dx: dx + dy >= 0 ? 1 : -1, dy: dx + dy >= 0 ? 1 : -1, length: Math.abs(dx + dy) / 2, distance: Math.abs(dx - dy) },
+	];
+	return axes.sort((a, b) => a.distance - b.distance || b.length - a.length)[0]!;
 }
 
 function canPlacePreview(buildingType: BuildingType, x: number, y: number) {

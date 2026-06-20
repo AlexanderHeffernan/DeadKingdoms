@@ -356,8 +356,8 @@ export class Renderer {
 			// Flag layer underneath, tinted to the owner's colour (the source art is
 			// white so a multiplicative tint recolours it directly).
 			const flagKey = `flagLayer:${key}`;
-			if (png.flag) {
-				const flagTexture = this.pngTexture(png.flag);
+			if (png.flag && png.flagLayer !== "over") {
+				const flagTexture = this.flagMaskTexture(png.flag);
 				const flag = this.placeSprite(
 					flagKey,
 					flagTexture,
@@ -370,7 +370,7 @@ export class Renderer {
 				);
 				flag.tint = ownerColor ? multiplyTint(hexToNumber(ownerColor), entityTint) : entityTint;
 				active.add(flagKey);
-			} else {
+			} else if (!png.flag) {
 				const existingFlag = this.entitySprites.get(flagKey);
 				if (existingFlag) existingFlag.visible = false;
 			}
@@ -386,6 +386,20 @@ export class Renderer {
 				baseZ,
 			);
 			sprite.tint = flashTint === 0xffffff ? entityTint : flashTint;
+			if (png.flag && png.flagLayer === "over") {
+				const flag = this.placeSprite(
+					flagKey,
+					this.flagMaskTexture(png.flag),
+					x,
+					y,
+					px,
+					flip,
+					alpha,
+					baseZ + 0.5,
+				);
+				flag.tint = ownerColor ? multiplyTint(hexToNumber(ownerColor), entityTint) : entityTint;
+				active.add(flagKey);
+			}
 		} else {
 			texture = this.spriteTexture(
 				spriteName,
@@ -563,7 +577,7 @@ export class Renderer {
 			if (png.flag) {
 				const flag = this.placeSprite(
 					flagKey,
-					this.pngTexture(png.flag),
+					this.flagMaskTexture(png.flag),
 					x,
 					y,
 					px,
@@ -701,6 +715,45 @@ export class Renderer {
 		return texture;
 	}
 
+	private flagMaskTexture(url: string) {
+		const key = `flagMask:${url}`;
+		const cached = this.textureCache.get(key);
+		if (cached) return cached;
+
+		const image = new Image();
+		image.onload = () => this.textureCache.delete(key);
+		image.src = url;
+		if (!image.complete || image.naturalWidth <= 0) return Texture.EMPTY;
+
+		const canvas = document.createElement("canvas");
+		canvas.width = image.naturalWidth;
+		canvas.height = image.naturalHeight;
+		const ctx = canvas.getContext("2d")!;
+		ctx.imageSmoothingEnabled = false;
+		ctx.drawImage(image, 0, 0);
+		const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+		for (let index = 0; index < data.data.length; index += 4) {
+			const r = data.data[index]!;
+			const g = data.data[index + 1]!;
+			const b = data.data[index + 2]!;
+			const a = data.data[index + 3]!;
+			const lightness = Math.max(r, g, b);
+			if (a === 0 || lightness < 180) {
+				data.data[index + 3] = 0;
+				continue;
+			}
+			data.data[index] = 255;
+			data.data[index + 1] = 255;
+			data.data[index + 2] = 255;
+		}
+		ctx.putImageData(data, 0, 0);
+
+		const texture = Texture.from(canvas);
+		texture.baseTexture.scaleMode = SCALE_MODES.NEAREST;
+		this.textureCache.set(key, texture);
+		return texture;
+	}
+
 	private unitOutlineTexture(url: string, playerColor: string) {
 		const key = `unitOutline:${url}:${playerColor}`;
 		const cached = this.textureCache.get(key);
@@ -753,7 +806,7 @@ export class Renderer {
 	private alphaMaskFor(spriteName: SpriteName) {
 		const png = pngSprites[spriteName];
 		if (png) return this.pngAlphaMask(png.base);
-		return asciiAlphaMask(spriteName, sprites[spriteName] || sprites.house);
+		return asciiAlphaMask(spriteName, sprites[spriteName] || sprites.house!);
 	}
 
 	private pngAlphaMask(url: string) {
@@ -1221,7 +1274,7 @@ export class Renderer {
 		const footprint = buildingFootprint(mode);
 		this.drawPixelFootprint(view.hoverTile.x, view.hoverTile.y, footprint.width, footprint.height, view.camera, valid ? ownerColor : "#d84b3e");
 		this.drawPlacementPreviewSprite(
-			mode as SpriteName,
+			placementSpriteName(state, mode, view.hoverTile.x, view.hoverTile.y),
 			view.hoverTile.x,
 			view.hoverTile.y,
 			footprint.width,
@@ -1264,10 +1317,10 @@ export class Renderer {
 
 		if (png) {
 			const flagKey = "placementPreview:flag";
-			if (png.flag) {
+			if (png.flag && png.flagLayer !== "over") {
 				const flag = this.placeSprite(
 					flagKey,
-					this.pngTexture(png.flag),
+					this.flagMaskTexture(png.flag),
 					spriteX,
 					topY,
 					px,
@@ -1276,7 +1329,7 @@ export class Renderer {
 					zIndex - 0.5,
 				);
 				flag.tint = hexToNumber(ownerColor);
-			} else {
+			} else if (!png.flag) {
 				const existingFlag = this.entitySprites.get(flagKey);
 				if (existingFlag) existingFlag.visible = false;
 			}
@@ -1291,6 +1344,19 @@ export class Renderer {
 				zIndex,
 			);
 			sprite.tint = tint;
+			if (png.flag && png.flagLayer === "over") {
+				const flag = this.placeSprite(
+					flagKey,
+					this.flagMaskTexture(png.flag),
+					spriteX,
+					topY,
+					px,
+					false,
+					alpha,
+					zIndex + 0.5,
+				);
+				flag.tint = hexToNumber(ownerColor);
+			}
 			return;
 		}
 
@@ -1401,26 +1467,147 @@ function spriteNameFor(entity: RenderEntity, state: GameState): SpriteName {
 			return entity.type;
 	}
 	if (entity.kind === "building" && entity.type === "wall") return wallSpriteName(entity, state);
+	if (entity.kind === "building" && entity.type === "gate") return gateSpriteName(entity, state);
 	return entity.type as SpriteName;
 }
 
 function wallSpriteName(wall: Building, state: GameState): SpriteName {
-	const hasWest = hasWallAt(state, wall, wall.x - 1, wall.y);
-	const hasEast = hasWallAt(state, wall, wall.x + 1, wall.y);
-	const hasNorth = hasWallAt(state, wall, wall.x, wall.y - 1);
-	const hasSouth = hasWallAt(state, wall, wall.x, wall.y + 1);
-	if (hasWest && hasEast) return "wallNorthEast";
-	if (hasNorth && hasSouth) return "wallSouthEast";
-	return "wallPillar";
+	const orientation = wallOrientation(wall, state);
+	if (!orientation) return "pillarBase";
+	if (orientation.kind === "pillar") return pillarSpriteName(orientation);
+	return wallSegmentSpriteName(orientation.axis);
 }
 
-function hasWallAt(state: GameState, wall: Building, x: number, y: number) {
+function gateSpriteName(gate: Building, state: GameState): SpriteName {
+	const orientation = wallOrientation(gate, state);
+	return gateSpriteNameForAxis(orientation?.axis ?? "x");
+}
+
+function wallOrientation(wall: Building, state: GameState): WallOrientation | null {
+	const connections = wallConnections(wall, state);
+	const connected = connections.filter((connection) => connection.before || connection.after);
+	if (!connected.length) return null;
+	const straightConnections = connected.filter((connection) => connection.before && connection.after);
+	const straight = straightConnections[0];
+	if (straightConnections.length > 1) {
+		return {
+			axis: straight!.axis.name,
+			kind: "pillar",
+			before: true,
+			after: true,
+		};
+	}
+	if (straight && isScreenCrossJunction(wall, state, connections, straight)) {
+		return {
+			axis: straight.axis.name,
+			kind: "pillar",
+			before: true,
+			after: true,
+		};
+	}
+	const connection = straight ?? connected[0]!;
+	return {
+		axis: connection.axis.name,
+		kind: connection.before && connection.after
+			? "segment"
+			: "pillar",
+		before: connection.before,
+		after: connection.after,
+	};
+}
+
+function isScreenCrossJunction(wall: Building, state: GameState, connections: WallConnection[], straight: WallConnection) {
+	if (!isScreenStraightAxis(straight.axis.name)) return false;
+	const otherAxis = straight.axis.name === "hori" ? "verti" : "hori";
+	if (!connections.some((connection) => connection.axis.name === otherAxis && (connection.before || connection.after))) return false;
+	const candidates = nearbyWallConnections(wall, state)
+		.filter((candidate) => isScreenCrossCandidate(candidate, state));
+	if (!candidates.length) return true;
+	const chosen = candidates.sort((a, b) => a.x - b.x || a.y - b.y)[0]!;
+	return chosen.x === wall.x && chosen.y === wall.y;
+}
+
+function nearbyWallConnections(wall: Building, state: GameState) {
+	return Object.values(state.snapshot?.buildings || {}).filter((building) => (
+		(building.type === "wall" || building.type === "gate") &&
+		building.ownerId === wall.ownerId &&
+		Math.abs(building.x - wall.x) <= 1 &&
+		Math.abs(building.y - wall.y) <= 1
+	));
+}
+
+function isScreenCrossCandidate(building: Building, state: GameState) {
+	const connections = wallConnections(building, state);
+	return SCREEN_STRAIGHT_AXES.some((axisName) => {
+		const straight = connections.find((connection) => connection.axis.name === axisName && connection.before && connection.after);
+		if (!straight) return false;
+		const otherAxis = axisName === "hori" ? "verti" : "hori";
+		return connections.some((connection) => connection.axis.name === otherAxis && (connection.before || connection.after));
+	});
+}
+
+function hasWallConnectionAt(state: GameState, wall: Building, x: number, y: number) {
 	return Object.values(state.snapshot?.buildings || {}).some((building) => (
-		building.type === "wall" &&
+		(building.type === "wall" || building.type === "gate") &&
 			building.ownerId === wall.ownerId &&
 			building.x === x &&
 			building.y === y
 	));
+}
+
+type WallAxisName = "x" | "y" | "hori" | "verti";
+type WallAxis = { name: WallAxisName; dx: number; dy: number };
+type WallConnection = {
+	axis: WallAxis;
+	before: boolean;
+	after: boolean;
+};
+type WallOrientation = {
+	axis: WallAxisName;
+	kind: "pillar" | "segment";
+	before: boolean;
+	after: boolean;
+};
+
+const WALL_AXES: readonly WallAxis[] = [
+	{ name: "x", dx: 1, dy: 0 },
+	{ name: "y", dx: 0, dy: 1 },
+	{ name: "hori", dx: 1, dy: -1 },
+	{ name: "verti", dx: 1, dy: 1 },
+];
+const SCREEN_STRAIGHT_AXES: readonly WallAxisName[] = ["hori", "verti"];
+
+function wallConnections(wall: Building, state: GameState): WallConnection[] {
+	return WALL_AXES.map((axis) => ({
+		axis,
+		before: hasWallConnectionAt(state, wall, wall.x - axis.dx, wall.y - axis.dy),
+		after: hasWallConnectionAt(state, wall, wall.x + axis.dx, wall.y + axis.dy),
+	}));
+}
+
+function wallSegmentSpriteName(axis: WallAxisName): SpriteName {
+	if (axis === "x") return "wallBtoF";
+	if (axis === "y") return "wallFtoB";
+	if (axis === "hori") return "wallHori";
+	return "wallVerti";
+}
+
+function pillarSpriteName(orientation: WallOrientation): SpriteName {
+	if (orientation.axis !== "hori") return "pillarBase";
+	if (orientation.before && orientation.after) return "pillarConnected";
+	if (orientation.before) return "pillarLeftConnected";
+	return "pillarRightConnected";
+}
+
+function gateSpriteNameForAxis(axis: WallAxisName): SpriteName {
+	if (axis === "x") return "gateFtoB";
+	if (axis === "y") return "gateBtoF";
+	if (axis === "hori") return "gateHori";
+	return "gateVerti";
+}
+
+function isScreenStraightAxis(axis: WallAxisName) {
+	return SCREEN_STRAIGHT_AXES.includes(axis);
 }
 
 function targetFlashFor(state: GameState, id: string) {
@@ -1767,23 +1954,75 @@ function entityHeight(entity: { size?: number; height?: number }) {
 }
 
 function wallLineTiles(start: { x: number; y: number }, end: { x: number; y: number }) {
-	const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+	const axis = closestWallAxis(start, end);
+	const length = Math.max(0, Math.round(axis.length));
 	const tiles = [];
-	if (horizontal) {
-		const step = end.x >= start.x ? 1 : -1;
-		for (let x = start.x; step > 0 ? x <= end.x : x >= end.x; x += step) tiles.push({ x, y: start.y });
-	} else {
-		const step = end.y >= start.y ? 1 : -1;
-		for (let y = start.y; step > 0 ? y <= end.y : y >= end.y; y += step) tiles.push({ x: start.x, y });
-	}
+	for (let index = 0; index <= length; index += 1)
+		tiles.push({ x: start.x + axis.dx * index, y: start.y + axis.dy * index });
 	return tiles;
 }
 
 function wallPreviewSpriteName(tiles: { x: number; y: number }[], index: number): SpriteName {
-	if (tiles.length < 3 || index === 0 || index === tiles.length - 1) return "wallPillar";
 	const previous = tiles[index - 1]!;
 	const next = tiles[index + 1]!;
-	return previous.y === next.y ? "wallNorthEast" : "wallSouthEast";
+	const before = previous !== undefined;
+	const after = next !== undefined;
+	if (!before && !after) return "pillarBase";
+	if (!before || !after) {
+		const neighbor = after ? next! : previous!;
+		const dx = Math.sign(neighbor.x - tiles[index]!.x);
+		const dy = Math.sign(neighbor.y - tiles[index]!.y);
+		return pillarSpriteName({
+			axis: axisNameForDelta(dx, dy),
+			kind: "pillar",
+			before: before,
+			after: after,
+		});
+	}
+	const dx = Math.sign(next!.x - previous!.x);
+	const dy = Math.sign(next!.y - previous!.y);
+	return wallSegmentSpriteName(axisNameForDelta(dx, dy));
+}
+
+function placementSpriteName(state: GameState, buildingType: string, x: number, y: number): SpriteName {
+	if (buildingType === "wall") return "pillarBase";
+	if (buildingType === "gate") return gatePreviewSpriteName(state, x, y);
+	return buildingType as SpriteName;
+}
+
+function gatePreviewSpriteName(state: GameState, x: number, y: number): SpriteName {
+	const ownerId = state.playerId;
+	if (!ownerId) return "gateFtoB";
+	const proposedGate = {
+		kind: "building",
+		type: "gate",
+		ownerId,
+		x,
+		y,
+		size: 1,
+		width: 1,
+		height: 1,
+	} as Building;
+	return gateSpriteName(proposedGate, state);
+}
+
+function closestWallAxis(start: { x: number; y: number }, end: { x: number; y: number }) {
+	const dx = end.x - start.x;
+	const dy = end.y - start.y;
+	const axes = [
+		{ dx: dx >= 0 ? 1 : -1, dy: 0, length: Math.abs(dx), distance: Math.abs(dy) },
+		{ dx: 0, dy: dy >= 0 ? 1 : -1, length: Math.abs(dy), distance: Math.abs(dx) },
+		{ dx: dx - dy >= 0 ? 1 : -1, dy: dx - dy >= 0 ? -1 : 1, length: Math.abs(dx - dy) / 2, distance: Math.abs(dx + dy) },
+		{ dx: dx + dy >= 0 ? 1 : -1, dy: dx + dy >= 0 ? 1 : -1, length: Math.abs(dx + dy) / 2, distance: Math.abs(dx - dy) },
+	];
+	return axes.sort((a, b) => a.distance - b.distance || b.length - a.length)[0]!;
+}
+
+function axisNameForDelta(dx: number, dy: number): WallAxisName {
+	if (dy === 0) return "x";
+	if (dx === 0) return "y";
+	if (dx === -dy) return "hori";
+	return "verti";
 }
 
 function canAffordLine(state: GameState, buildingType: string, tiles: { x: number; y: number }[]) {

@@ -32,6 +32,7 @@ export type SoundEffectName =
 | "unit_death_human"
 | "unit_death_zombie"
 | "zombie_idle"
+| "under_attack_alert"
 | "player_join"
 | "player_leave"
 | "toast_notice"
@@ -54,6 +55,7 @@ const SOUND_PATH = "/sfx/wav";
 const UI_SFX_MASTER_VOLUME = 1.95;
 const WORLD_SFX_MASTER_VOLUME = 1.05;
 const SCREEN_HEARING_RADIUS = 920;
+const UNDER_ATTACK_QUIET_MS = 9000;
 const LARGE_BUILDINGS = new Set(["townCenter", "barracks", "watchTower"]);
 type SoundEffectDef = {
 	volume: number;
@@ -91,6 +93,7 @@ const SOUND_EFFECTS: Record<SoundEffectName, SoundEffectDef> = {
 	unit_death_human: { volume: 0.48, cooldownMs: 260, variance: 0.03, space: "world" },
 	unit_death_zombie: { volume: 0.42, cooldownMs: 220, variance: 0.04, space: "world" },
 	zombie_idle: { volume: 0.32, cooldownMs: 850, variance: 0.015, space: "world" },
+	under_attack_alert: { volume: 0.5, cooldownMs: 9000, space: "ui" },
 	player_join: { volume: 0.68, cooldownMs: 400, space: "ui" },
 	player_leave: { volume: 0.6, cooldownMs: 400, space: "ui" },
 	toast_notice: { volume: 0.5, cooldownMs: 220, space: "ui" },
@@ -105,6 +108,8 @@ export class SoundEffects {
 	private zombieIdleGain: GainNode | null = null;
 	private zombieIdleSource: AudioBufferSourceNode | null = null;
 	private zombieIdleDesiredVolume = 0;
+	private underAttackActive = false;
+	private lastOwnedDamageAt = -Infinity;
 	private ready = false;
 
 	constructor(private readonly camera: CameraState) {}
@@ -141,6 +146,7 @@ export class SoundEffects {
 			return;
 		}
 		this.playNoticeSounds(this.previousSnapshot, snapshot);
+		this.playUnderAttackAlert(this.previousSnapshot, snapshot);
 		this.playUnitSounds(this.previousSnapshot, snapshot);
 		this.playBuildingSounds(this.previousSnapshot, snapshot);
 		this.playZombieIdle(snapshot);
@@ -150,6 +156,8 @@ export class SoundEffects {
 	reset() {
 		this.previousSnapshot = null;
 		this.lastPlayed.clear();
+		this.underAttackActive = false;
+		this.lastOwnedDamageAt = -Infinity;
 		this.stopZombieIdle();
 	}
 
@@ -161,6 +169,40 @@ export class SoundEffects {
 			else if (text.includes("left the world")) this.play("player_leave");
 			else this.play("toast_notice");
 		}
+	}
+
+	private playUnderAttackAlert(previous: ClientSnapshot, snapshot: ClientSnapshot) {
+		const now = performance.now();
+		const tookDamage = this.ownedBuildingTookDamage(previous, snapshot) || this.ownedUnitTookDamage(previous, snapshot);
+		if (tookDamage) {
+			this.lastOwnedDamageAt = now;
+			if (!this.underAttackActive) {
+				this.underAttackActive = true;
+				this.play("under_attack_alert");
+			}
+			return;
+		}
+		if (this.underAttackActive && now - this.lastOwnedDamageAt >= UNDER_ATTACK_QUIET_MS) {
+			this.underAttackActive = false;
+		}
+	}
+
+	private ownedUnitTookDamage(previous: ClientSnapshot, snapshot: ClientSnapshot) {
+		const playerId = snapshot.playerId;
+		if (!playerId) return false;
+		return Object.values(snapshot.units).some((unit) => {
+			const old = previous.units[unit.id];
+			return !!old && unit.ownerId === playerId && unit.hp < old.hp;
+		});
+	}
+
+	private ownedBuildingTookDamage(previous: ClientSnapshot, snapshot: ClientSnapshot) {
+		const playerId = snapshot.playerId;
+		if (!playerId) return false;
+		return Object.values(snapshot.buildings).some((building) => {
+			const old = previous.buildings[building.id];
+			return !!old && building.ownerId === playerId && building.hp < old.hp;
+		});
 	}
 
 	private playUnitSounds(previous: ClientSnapshot, snapshot: ClientSnapshot) {

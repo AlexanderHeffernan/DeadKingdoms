@@ -193,7 +193,7 @@ function icon(spriteName: string) {
 	canvas.height = 56;
 	const ctx = canvas.getContext("2d")!;
 	ctx.imageSmoothingEnabled = false;
-	const rows = sprites[spriteName as SpriteName] || sprites.house;
+	const rows = sprites[spriteName as SpriteName] || sprites.house!;
 	const scale = Math.max(1, Math.floor(52 / Math.max(rows.length, rows[0]!.length)));
 	const ox = Math.floor((56 - rows[0]!.length * scale) / 2);
 	const oy = Math.floor((56 - rows.length * scale) / 2);

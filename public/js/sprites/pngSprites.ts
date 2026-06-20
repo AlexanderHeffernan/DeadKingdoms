@@ -15,6 +15,23 @@ import villagerFlag from "./villager_flag.png";
 import zombieDef from "./zombie_def.png";
 import zombieVil from "./zombie_vil.png";
 import zombieSol from "./zombie_sol.png";
+import pillarBase from "./pillar_base.png";
+import pillarFlag from "./pillar_flag.png";
+import pillarConnected from "./C_pillar_base.png";
+import pillarLeftConnected from "./LC_pillar_base.png";
+import pillarRightConnected from "./RC_pillar_base.png";
+import wallFtoB from "./wall_FtoB.png";
+import wallBtoF from "./wall_BtoF.png";
+import wallHori from "./wall_hori.png";
+import wallVerti from "./wall_verti.png";
+import gateFtoBBase from "./gate_FtoB_base.png";
+import gateFtoBFlag from "./gate_FtoB_flag.png";
+import gateBtoFBase from "./gate_BtoF_base.png";
+import gateBtoFFlag from "./gate_BtoF_flag.png";
+import gateHoriBase from "./gate_hori_base.png";
+import gateHoriFlag from "./gate_hori_flag.png";
+import gateVertiBase from "./gate_verti_base.png";
+import gateVertiFlag from "./gate_verti_flag.png";
 
 import type { SpriteName } from "../../../src/shared/types.js";
 
@@ -27,6 +44,7 @@ import type { SpriteName } from "../../../src/shared/types.js";
 export type PngSprite = {
   base: string;
   flag?: string;
+  flagLayer?: "under" | "over";
   width: number;
   height: number;
 };
@@ -42,5 +60,18 @@ export const pngSprites: Partial<Record<SpriteName, PngSprite>> = {
   zombie: { base: zombieDef, width: 16, height: 16 },
   zombie_def: { base: zombieDef, width: 16, height: 16 },
   zombie_vil: { base: zombieVil, width: 16, height: 16 },
-  zombie_sol: { base: zombieSol, width: 16, height: 16 }
+  zombie_sol: { base: zombieSol, width: 16, height: 16 },
+  pillarBase: { base: pillarBase, flag: pillarFlag, width: 16, height: 24 },
+  pillarConnected: { base: pillarConnected, flag: pillarFlag, width: 16, height: 24 },
+  pillarLeftConnected: { base: pillarLeftConnected, flag: pillarFlag, width: 16, height: 24 },
+  pillarRightConnected: { base: pillarRightConnected, flag: pillarFlag, width: 16, height: 24 },
+  wallFtoB: { base: wallFtoB, width: 16, height: 24 },
+  wallBtoF: { base: wallBtoF, width: 16, height: 24 },
+  wallHori: { base: wallHori, width: 16, height: 24 },
+  wallVerti: { base: wallVerti, width: 16, height: 24 },
+  gate: { base: gateFtoBBase, flag: gateFtoBFlag, flagLayer: "over", width: 16, height: 24 },
+  gateFtoB: { base: gateFtoBBase, flag: gateFtoBFlag, flagLayer: "over", width: 16, height: 24 },
+  gateBtoF: { base: gateBtoFBase, flag: gateBtoFFlag, flagLayer: "over", width: 16, height: 24 },
+  gateHori: { base: gateHoriBase, flag: gateHoriFlag, flagLayer: "over", width: 16, height: 24 },
+  gateVerti: { base: gateVertiBase, flag: gateVertiFlag, flagLayer: "over", width: 16, height: 24 }
 };

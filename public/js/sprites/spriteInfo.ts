@@ -9,5 +9,5 @@ import type { SpriteName } from "../../../src/shared/types.js";
 export function spriteMetrics(spriteName: SpriteName) {
   const png = pngSprites[spriteName];
   if (png) return { minX: 0, minY: 0, maxX: png.width - 1, maxY: png.height - 1, width: png.width, height: png.height };
-  return spriteBounds(sprites[spriteName] || sprites.house);
+  return spriteBounds(sprites[spriteName] || sprites.house!);
 }

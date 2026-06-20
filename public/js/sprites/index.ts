@@ -25,7 +25,7 @@ import zombie from "./zombie.js";
 
 import type { SpriteName } from "../../../src/shared/types.js";
 
-export const sprites: Record<SpriteName, readonly string[]> = {
+export const sprites: Partial<Record<SpriteName, readonly string[]>> = {
   barracks,
   berry,
   corpse,
