@@ -145,6 +145,9 @@ export type UnitSimulationContext = {
 
 	/** Finds the first enemy building obstructing a unit's route toward a target point. */
 	blockingBuildingToward(unit: Unit, targetPoint: { x: number; y: number }): Building | null;
+
+	/** Returns how many normal ticks this zombie should wait between AI updates. */
+	zombieUpdateCadence?(unit: Unit): number;
 };
 
 /**

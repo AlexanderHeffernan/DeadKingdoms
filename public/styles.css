@@ -627,6 +627,105 @@ button:disabled {
 	flex-wrap: wrap;
 }
 
+.admin-perf-breakdown {
+	display: grid;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.admin-perf-summary {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 8px;
+}
+
+.admin-perf-summary > div,
+.admin-perf-zombies {
+	border: 1px solid rgb(244 239 230 / 0.16);
+	background: rgb(16 20 16 / 0.82);
+	padding: 9px 10px;
+}
+
+.admin-perf-summary span,
+.admin-perf-phase span {
+	display: block;
+	color: #cfc7b7;
+	font-size: 12px;
+}
+
+.admin-perf-summary strong {
+	display: block;
+	color: #f4efe6;
+	font-size: 18px;
+	margin-top: 3px;
+}
+
+.admin-perf-zombies em {
+	display: block;
+	color: #9d9688;
+	font-size: 11px;
+	font-style: normal;
+	margin-top: 3px;
+}
+
+.admin-perf-phase-list {
+	display: grid;
+	gap: 5px;
+}
+
+.admin-perf-section-title {
+	color: #f4efe6;
+	font-size: 13px;
+	margin-top: 3px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.admin-perf-phase {
+	position: relative;
+	display: grid;
+	grid-template-columns: minmax(130px, 1fr) 90px 44px;
+	align-items: center;
+	gap: 8px;
+	overflow: hidden;
+	border: 1px solid rgb(244 239 230 / 0.12);
+	background: #101410;
+	padding: 7px 9px;
+}
+
+.admin-perf-phase > * {
+	position: relative;
+	z-index: 1;
+}
+
+.admin-perf-phase strong {
+	color: #e9bd59;
+	text-align: right;
+}
+
+.admin-perf-phase em {
+	color: #cfc7b7;
+	font-size: 12px;
+	font-style: normal;
+	text-align: right;
+}
+
+.admin-perf-phase i {
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: var(--phase-width);
+	background: rgb(233 189 89 / 0.18);
+}
+
+.admin-perf-unit {
+	grid-template-columns: minmax(130px, 1fr) 90px minmax(110px, auto);
+}
+
+.admin-perf-empty {
+	color: #cfc7b7;
+	font-size: 13px;
+}
+
 .admin-chart-controls button,
 .admin-chart-controls select {
 	min-height: 32px;

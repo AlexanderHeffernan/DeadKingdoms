@@ -88,6 +88,10 @@ export function makeSnapshot(
 			? {
 				tps: world.serverPerf.tps,
 				tickMs: world.serverPerf.tickMs,
+				...(world.serverPerf.phases ? { phases: world.serverPerf.phases } : {}),
+				...(world.serverPerf.zombies ? { zombies: world.serverPerf.zombies } : {}),
+				...(world.serverPerf.unitAi ? { unitAi: world.serverPerf.unitAi } : {}),
+				...(world.serverPerf.zombieWorker ? { zombieWorker: world.serverPerf.zombieWorker } : {}),
 			}
 			: null,
 		admin,
@@ -106,6 +110,10 @@ function buildAdminSnapshot(world: World, level: AdminLevel | undefined): AdminS
 		serverPerf: {
 			tps: world.serverPerf.tps,
 			tickMs: world.serverPerf.tickMs,
+			...(world.serverPerf.phases ? { phases: world.serverPerf.phases } : {}),
+			...(world.serverPerf.zombies ? { zombies: world.serverPerf.zombies } : {}),
+			...(world.serverPerf.unitAi ? { unitAi: world.serverPerf.unitAi } : {}),
+			...(world.serverPerf.zombieWorker ? { zombieWorker: world.serverPerf.zombieWorker } : {}),
 			samples: world.serverPerf.samples.slice(),
 		},
 		players: Object.values(world.players).map((player) => ({

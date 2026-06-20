@@ -28,6 +28,7 @@ export class UI {
 			devCommandsTab: mustGet("adminDevCommandsTab") as HTMLButtonElement,
 			overviewView: mustGet("adminOverviewView"),
 			performanceView: mustGet("adminPerformanceView"),
+			perfBreakdown: mustGet("adminPerfBreakdown"),
 			playersView: mustGet("adminPlayersView"),
 			logsView: mustGet("adminLogsView"),
 			devCommandsView: mustGet("adminDevCommandsView"),

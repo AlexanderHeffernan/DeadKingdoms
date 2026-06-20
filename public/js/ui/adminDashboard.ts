@@ -15,6 +15,7 @@ export class AdminDashboard {
 	private readonly devCommandsTab: HTMLButtonElement;
 	private readonly overviewView: HTMLElement;
 	private readonly performanceView: HTMLElement;
+	private readonly perfBreakdown: HTMLElement;
 	private readonly playersView: HTMLElement;
 	private readonly logsView: HTMLElement;
 	private readonly devCommandsView: HTMLElement;
@@ -63,6 +64,7 @@ export class AdminDashboard {
 		this.devCommandsTab = elements.devCommandsTab;
 		this.overviewView = elements.overviewView;
 		this.performanceView = elements.performanceView;
+		this.perfBreakdown = elements.perfBreakdown;
 		this.playersView = elements.playersView;
 		this.logsView = elements.logsView;
 		this.devCommandsView = elements.devCommandsView;
@@ -115,6 +117,7 @@ export class AdminDashboard {
 		this.panel.classList.remove("hidden");
 		this.level.textContent = admin.level;
 		this.renderOverview(admin, now);
+		this.renderPerfBreakdown(admin);
 		this.playerTableBody.innerHTML = admin.players.map((player) => `
 <tr>
 	<td><span class="admin-player-name" style="color:${player.color}">${escapeHtml(player.name)}</span></td>
@@ -241,6 +244,59 @@ export class AdminDashboard {
 		.reverse()
 		.map((entry) => `<div><strong>${formatClock(entry.at)} ${escapeHtml(entry.source)}</strong><span>${escapeHtml(entry.message)}</span></div>`)
 		.join("");
+	}
+
+	private renderPerfBreakdown(admin: AdminSnapshot) {
+		const phases = [...(admin.serverPerf.phases ?? [])].sort((a, b) => b.ms - a.ms);
+		const unitAi = [...(admin.serverPerf.unitAi ?? [])].sort((a, b) => b.ms - a.ms);
+		const zombies = admin.serverPerf.zombies;
+		const worker = admin.serverPerf.zombieWorker;
+		const totalPhaseMs = phases.reduce((sum, phase) => sum + phase.ms, 0);
+		const zombieSummary = zombies ? `
+<div class="admin-perf-zombies">
+	<span>Zombies</span>
+	<strong>${zombies.stepped}/${zombies.total} stepped</strong>
+	<em>${zombies.skipped} skipped · ${zombies.near} near · ${zombies.mid} mid · ${zombies.far} far</em>
+</div>
+` : "";
+		const workerSummary = worker ? `
+<div class="admin-perf-zombies">
+	<span>Zombie worker</span>
+	<strong>${worker.mode}${worker.pending ? " pending" : ""}</strong>
+	<em>${worker.lastDurationMs.toFixed(2)}ms · done ${worker.lastCompletedTick ?? "--"} · applied ${worker.lastAppliedTick ?? "--"} · failures ${worker.failures}${worker.lastError ? ` · ${escapeHtml(worker.lastError)}` : ""}</em>
+</div>
+` : "";
+		this.perfBreakdown.innerHTML = `
+<div class="admin-perf-summary">
+	<div><span>Measured phases</span><strong>${totalPhaseMs.toFixed(1)}ms</strong></div>
+	<div><span>Smoothed tick</span><strong>${admin.serverPerf.tickMs.toFixed(1)}ms</strong></div>
+	${zombieSummary}
+	${workerSummary}
+</div>
+<div class="admin-perf-phase-list">
+${phases.map((phase) => `
+	<div class="admin-perf-phase">
+		<span>${escapeHtml(phase.label)}</span>
+		<strong>${phase.ms.toFixed(2)}ms</strong>
+		<em>${phase.percent.toFixed(0)}%</em>
+		<i style="--phase-width:${Math.min(100, Math.max(1, phase.percent)).toFixed(1)}%"></i>
+	</div>
+`).join("") || `<div class="admin-perf-empty">No phase samples yet.</div>`}
+</div>
+${unitAi.length ? `
+<div class="admin-perf-section-title">Unit AI detail</div>
+<div class="admin-perf-phase-list">
+${unitAi.map((bucket) => `
+	<div class="admin-perf-phase admin-perf-unit">
+		<span>${escapeHtml(bucket.label)}</span>
+		<strong>${bucket.ms.toFixed(2)}ms</strong>
+		<em>${bucket.count} · ${bucket.averageMs.toFixed(3)}ms avg</em>
+		<i style="--phase-width:${Math.min(100, Math.max(1, totalPhaseMs > 0 ? (bucket.ms / totalPhaseMs) * 100 : 1)).toFixed(1)}%"></i>
+	</div>
+`).join("")}
+</div>
+` : ""}
+`;
 	}
 
 	private panChart(direction: -1 | 1) {
@@ -458,6 +514,7 @@ export type AdminDashboardElements = {
 	devCommandsTab: HTMLButtonElement;
 	overviewView: HTMLElement;
 	performanceView: HTMLElement;
+	perfBreakdown: HTMLElement;
 	playersView: HTMLElement;
 	logsView: HTMLElement;
 	devCommandsView: HTMLElement;

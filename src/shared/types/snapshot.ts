@@ -45,15 +45,58 @@ export interface SoundDebugSource {
 export interface ServerPerfStats {
 	tps: number;
 	tickMs: number;
+	phases?: ServerPerfPhase[];
+	zombies?: ServerPerfZombieStats;
+	unitAi?: ServerPerfUnitAiStats[];
+	zombieWorker?: ServerPerfZombieWorkerStats;
 }
 
 export type AdminLevel = "observer" | "moderator" | "operator";
+
+export interface ServerPerfPhase {
+	name: string;
+	label: string;
+	ms: number;
+	percent: number;
+}
+
+export interface ServerPerfZombieStats {
+	total: number;
+	stepped: number;
+	skipped: number;
+	near: number;
+	mid: number;
+	far: number;
+}
+
+export interface ServerPerfUnitAiStats {
+	name: string;
+	label: string;
+	count: number;
+	ms: number;
+	averageMs: number;
+}
+
+export interface ServerPerfZombieWorkerStats {
+	enabled: boolean;
+	pending: boolean;
+	lastDurationMs: number;
+	lastCompletedTick: number | null;
+	lastAppliedTick: number | null;
+	failures: number;
+	mode: "worker" | "fallback";
+	lastError?: string;
+}
 
 export interface ServerPerfSample {
 	tick: number;
 	tps: number;
 	tickMs: number;
 	at: number;
+	phases?: ServerPerfPhase[];
+	zombies?: ServerPerfZombieStats;
+	unitAi?: ServerPerfUnitAiStats[];
+	zombieWorker?: ServerPerfZombieWorkerStats;
 }
 
 export interface AdminLogEntry {

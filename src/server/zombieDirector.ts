@@ -9,6 +9,7 @@ import {
 	buildSoundField,
 	collectWorldSoundSources,
 	soundFieldCellAt,
+	type SoundFieldSource,
 	type SoundFieldCell,
 } from "../shared/soundField.js";
 import type { ActionNoise } from "../shared/types.js";
@@ -52,7 +53,11 @@ type HeardSound = {
 	loudAction: boolean;
 };
 
-export function stepZombieDirector(world: World, dt: number) {
+type ZombieDirectorOptions = {
+	soundSources?: SoundFieldSource[];
+};
+
+export function stepZombieDirector(world: World, dt: number, options: ZombieDirectorOptions = {}) {
 	const zombies = Object.values(world.units).filter((unit) => unit.ownerId === ZOMBIE_OWNER_ID && unit.hp > 0);
 	if (zombies.length === 0) {
 		world._zombieHordes = {};
@@ -64,7 +69,8 @@ export function stepZombieDirector(world: World, dt: number) {
 	else refreshHordes(world);
 
 	const hordes = Object.values(world._zombieHordes || {});
-	const soundField = buildSoundField(collectWorldSoundSources(world, ZOMBIE_OWNER_ID, { includeZombies: true }));
+	const soundSources = options.soundSources ?? collectWorldSoundSources(world, ZOMBIE_OWNER_ID);
+	const soundField = buildSoundField(soundSources);
 	const targetUnits = Object.values(world.units).filter((unit) => unit.ownerId !== ZOMBIE_OWNER_ID && unit.hp > 0);
 
 	for (const horde of hordes) {
@@ -440,8 +446,7 @@ function heardSoundAt(cells: SoundFieldCell[], horde: ZombieHorde, point: Vec2):
 }
 
 function cellSignificanceForHorde(cell: SoundFieldCell, horde: ZombieHorde): number {
-	const ownZombieNoise = cell.zombieStrengthByHorde[horde.id] || 0;
-	return Math.max(0, cell.strength - ownZombieNoise);
+	return Math.max(0, cell.strength);
 }
 
 function decaySoundMemory(horde: ZombieHorde, dt: number) {

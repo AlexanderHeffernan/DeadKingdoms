@@ -18,7 +18,7 @@ import { clamp, distance, footprintHeight, footprintWidth, rectsOverlap, type Fo
 import { hasPathToInteractionRange, hasReasonableZombiePathToTarget, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveUnit, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation } from "./pathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
-import { stepZombieDirector } from "./zombieDirector.js";
+import { ZombieDirectorWorkerClient } from "./zombieDirectorWorkerClient.js";
 import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
 import { Logs } from "../shared/logs.js";
 import { DAY_NIGHT_CYCLE_SECONDS } from "../shared/dayNight.js";
@@ -42,6 +42,7 @@ import type {
 	Vec2,
 	World,
 } from "../shared/types.js";
+import type { ServerPerfPhase, ServerPerfUnitAiStats, ServerPerfZombieStats } from "../shared/types.js";
 
 const PLAYER_SPAWN_MARGIN = 34;
 const MIN_PLAYER_SPAWN_DISTANCE = 54;
@@ -68,6 +69,12 @@ const RESOURCE_PILE_PLACEMENT_ATTEMPTS = 80;
 const RESOURCE_CLUSTER_GAP = 2;
 const RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER = 8;
 const INITIAL_TIME_OF_DAY_PROGRESS = 9 / 24;
+const ZOMBIE_NEAR_VISION_DISTANCE = 34;
+const ZOMBIE_MID_VISION_DISTANCE = 72;
+const ZOMBIE_NEAR_CADENCE_TICKS = 1;
+const ZOMBIE_MID_CADENCE_TICKS = 3;
+const ZOMBIE_FAR_CADENCE_TICKS = 8;
+const zombieDirector = new ZombieDirectorWorkerClient();
 
 export function createWorld(): World {
 	const startedAt = Date.now();
@@ -277,25 +284,129 @@ export function command(world: World, playerId: PlayerId, body: CommandPayload):
 
 export function stepWorld(world: World, dt: number) {
 	const tickStartedAt = performance.now();
-	if (hasAdminViewer(world)) updateServerTps(world, tickStartedAt);
+	const profiling = hasAdminViewer(world);
+	if (profiling) updateServerTps(world, tickStartedAt);
+	const profiler = new TickProfiler();
 	try {
 		world.tick += 1;
-		rebuildOccupancy(world);
-		const context = createSimulationContext(world);
-		stepSpawner(context, zombieSpawnPolicy, dt);
-		stepZombieDirector(world, dt);
-		stepActionNoises(world, dt);
-		stepResourceDecay(world, dt);
-		stepRuinDecay(world, dt);
-		stepCorpseDecay(world, dt);
-		for (const unit of Object.values(world.units)) unitBehavior(unit).step(context, unit, dt);
-		resolveUnitSeparation(world);
-		for (const building of Object.values(world.buildings)) stepBuilding(world, building, dt);
-		for (const playerId of Object.keys(world.players)) recalcPlayer(world, playerId);
-		updateLeaderboard(world);
+		profiler.measure("occupancy", "Occupancy", () => rebuildOccupancy(world));
+		const context = profiler.measure("context", "Context grids", () => createSimulationContext(world));
+		profiler.measure("spawner", "Spawning", () => stepSpawner(context, zombieSpawnPolicy, dt));
+		profiler.measure("zombieDirector", "Zombie director", () => zombieDirector.step(world, dt));
+		profiler.measure("decay", "Decay", () => {
+			stepActionNoises(world, dt);
+			stepResourceDecay(world, dt);
+			stepRuinDecay(world, dt);
+			stepCorpseDecay(world, dt);
+		});
+		profiler.measure("units", "Unit AI", () => stepUnits(world, context, dt, profiling));
+		profiler.measure("separation", "Unit separation", () => resolveUnitSeparation(world));
+		profiler.measure("buildings", "Buildings", () => {
+			for (const building of Object.values(world.buildings)) stepBuilding(world, building, dt);
+		});
+		profiler.measure("leaderboard", "Players/score", () => {
+			for (const playerId of Object.keys(world.players)) recalcPlayer(world, playerId);
+			updateLeaderboard(world);
+		});
 	} finally {
-		if (hasAdminViewer(world)) updateServerTickDuration(world, performance.now() - tickStartedAt);
+		if (profiling) updateServerTickDuration(world, performance.now() - tickStartedAt, profiler.phases());
 	}
+}
+
+class TickProfiler {
+	private readonly timings: Array<{ name: string; label: string; ms: number }> = [];
+
+	measure<T>(name: string, label: string, work: () => T): T {
+		const startedAt = performance.now();
+		try {
+			return work();
+		} finally {
+			this.timings.push({ name, label, ms: performance.now() - startedAt });
+		}
+	}
+
+	phases(): ServerPerfPhase[] {
+		const total = this.timings.reduce((sum, phase) => sum + phase.ms, 0);
+		return this.timings.map((phase) => ({
+			...phase,
+			percent: total > 0 ? (phase.ms / total) * 100 : 0,
+		}));
+	}
+}
+
+function stepUnits(world: World, context: UnitSimulationContext, dt: number, profiling: boolean) {
+	const zombiePerf: ServerPerfZombieStats = { total: 0, stepped: 0, skipped: 0, near: 0, mid: 0, far: 0 };
+	const unitProfiler = profiling ? new UnitAiProfiler() : null;
+	world._zombiePerf = zombiePerf;
+	for (const unit of Object.values(world.units)) {
+		const cadence = unit.type === "zombie" ? Math.max(1, context.zombieUpdateCadence?.(unit) ?? 1) : 1;
+		if (unit.type === "zombie") recordZombieCadence(zombiePerf, cadence);
+		if (cadence > 1 && world.tick % cadence !== unitUpdateSlot(unit, cadence)) {
+			if (unit.type === "zombie") zombiePerf.skipped += 1;
+			continue;
+		}
+		if (unit.type === "zombie") zombiePerf.stepped += 1;
+		const behavior = unitBehavior(unit);
+		if (unitProfiler) unitProfiler.measure(unit, () => behavior.step(context, unit, dt * cadence));
+			else behavior.step(context, unit, dt * cadence);
+	}
+	if (unitProfiler) world._unitAiPerf = unitProfiler.stats();
+}
+
+class UnitAiProfiler {
+	private readonly buckets = new Map<string, { label: string; count: number; ms: number }>();
+
+	measure(unit: Unit, work: () => void) {
+		const name = this.bucketName(unit);
+		const startedAt = performance.now();
+		try {
+			work();
+		} finally {
+			const bucket = this.buckets.get(name) ?? { label: this.bucketLabel(unit), count: 0, ms: 0 };
+			bucket.count += 1;
+			bucket.ms += performance.now() - startedAt;
+			this.buckets.set(name, bucket);
+		}
+	}
+
+	stats(): ServerPerfUnitAiStats[] {
+		return [...this.buckets.entries()]
+		.map(([name, bucket]) => ({
+			name,
+			label: bucket.label,
+			count: bucket.count,
+			ms: bucket.ms,
+			averageMs: bucket.count > 0 ? bucket.ms / bucket.count : 0,
+		}))
+		.sort((a, b) => b.ms - a.ms);
+	}
+
+	private bucketName(unit: Unit) {
+		if (unit.type === "zombie") return "zombie";
+		return `${unit.type}:${unit.command?.type ?? "idle"}`;
+	}
+
+	private bucketLabel(unit: Unit) {
+		if (unit.type === "zombie") return "Zombies";
+		return `${unitBehavior(unit).label} ${unit.command?.type ?? "idle"}`;
+	}
+}
+
+function recordZombieCadence(stats: ServerPerfZombieStats, cadence: number) {
+	stats.total += 1;
+	if (cadence <= ZOMBIE_NEAR_CADENCE_TICKS) stats.near += 1;
+	else if (cadence <= ZOMBIE_MID_CADENCE_TICKS) stats.mid += 1;
+	else stats.far += 1;
+}
+
+function unitUpdateSlot(unit: Unit, cadence: number) {
+	return unitHash(unit.id) % cadence;
+}
+
+function unitHash(idValue: string): number {
+	let hash = 0;
+	for (let i = 0; i < idValue.length; i += 1) hash = (hash * 31 + idValue.charCodeAt(i)) | 0;
+	return Math.abs(hash);
 }
 
 type CommandHandler<T extends CommandPayload["type"]> = (
@@ -325,14 +436,23 @@ function updateServerTps(world: World, tickStartedAt: number) {
 	world.serverPerf.tps = smoothMetric(world.serverPerf.tps, instantTps);
 }
 
-function updateServerTickDuration(world: World, tickMs: number) {
+function updateServerTickDuration(world: World, tickMs: number, phases: ServerPerfPhase[]) {
 	world.serverPerf.tickMs = smoothMetric(world.serverPerf.tickMs, tickMs);
-	world.serverPerf.samples.push({
+	world.serverPerf.phases = phases;
+	if (world._zombiePerf) world.serverPerf.zombies = world._zombiePerf;
+	if (world._unitAiPerf) world.serverPerf.unitAi = world._unitAiPerf;
+	if (world._zombieWorkerPerf) world.serverPerf.zombieWorker = world._zombieWorkerPerf;
+	const sample = {
 		tick: world.tick,
 		tps: world.serverPerf.tps,
 		tickMs: world.serverPerf.tickMs,
 		at: Date.now(),
-	});
+		phases,
+		...(world._zombiePerf ? { zombies: world._zombiePerf } : {}),
+		...(world._unitAiPerf ? { unitAi: world._unitAiPerf } : {}),
+		...(world._zombieWorkerPerf ? { zombieWorker: world._zombieWorkerPerf } : {}),
+	};
+	world.serverPerf.samples.push(sample);
 	if (world.serverPerf.samples.length > SERVER_PERF_SAMPLE_LIMIT) {
 		world.serverPerf.samples.splice(0, world.serverPerf.samples.length - SERVER_PERF_SAMPLE_LIMIT);
 	}
@@ -348,6 +468,7 @@ function smoothMetric(current: number, next: number) {
 }
 
 function createSimulationContext(world: World): UnitSimulationContext & import("./zombieSpawning.js").ZombieSpawnContext {
+	const zombieCadence = new ZombieUpdateCadence(world);
 	const unitGridsByOwner = unitTargetGridsByOwner(world);
 	const buildingGrid = new SpatialGrid(
 		Object.values(world.buildings).filter((building) => building.hp > 0),
@@ -402,12 +523,51 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 		hasPathToTarget: (unit, targetPoint, range) => hasPathToInteractionRange(world, unit, targetPoint, range),
 		hasReasonablePathToTarget: (unit, targetPoint, range) => hasReasonableZombiePathToTarget(world, unit, targetPoint, range),
 		blockingBuildingToward: (unit, targetPoint) => blockingBuildingToward(world, unit, targetPoint),
+		zombieUpdateCadence: (unit) => zombieCadence.cadenceFor(unit),
 		createZombie: (point) => createZombie(world, point.x, point.y),
 		isWalkable: (x, y) => isWalkable(world, x, y),
 		weightedWorldSound: () => weightedWorldSound(world),
 		unitVision: (unit) => unit.vision || unitBehavior(unit).vision || 5,
 		randomInt,
 	};
+}
+
+class ZombieUpdateCadence {
+	private readonly watchedPoints: Vec2[];
+
+	constructor(private readonly world: World) {
+		this.watchedPoints = this.collectWatchedPoints();
+	}
+
+	cadenceFor(unit: Unit) {
+		if (this.watchedPoints.length === 0) return ZOMBIE_FAR_CADENCE_TICKS;
+		const distanceToVision = this.distanceToNearestWatchedPoint(unit);
+		if (distanceToVision <= ZOMBIE_NEAR_VISION_DISTANCE) return ZOMBIE_NEAR_CADENCE_TICKS;
+		if (distanceToVision <= ZOMBIE_MID_VISION_DISTANCE) return ZOMBIE_MID_CADENCE_TICKS;
+		return ZOMBIE_FAR_CADENCE_TICKS;
+	}
+
+	private collectWatchedPoints() {
+		const points: Vec2[] = [];
+		for (const unit of Object.values(this.world.units)) {
+			if (unit.ownerId === ZOMBIE_OWNER_ID || unit.hp <= 0) continue;
+			points.push(unit);
+		}
+		for (const building of Object.values(this.world.buildings)) {
+			if (building.ownerId === ZOMBIE_OWNER_ID || building.hp <= 0) continue;
+			points.push(centerOf(building));
+		}
+		return points;
+	}
+
+	private distanceToNearestWatchedPoint(unit: Unit) {
+		let nearest = Infinity;
+		for (const point of this.watchedPoints) {
+			const d = distance(unit, point);
+			if (d < nearest) nearest = d;
+		}
+		return nearest;
+	}
 }
 
 function rebuildOccupancy(world: World) {
