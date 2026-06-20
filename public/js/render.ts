@@ -723,7 +723,7 @@ export class Renderer {
 		const image = new Image();
 		image.onload = () => this.textureCache.delete(key);
 		image.src = url;
-		if (!image.complete || image.naturalWidth <= 0) return Texture.EMPTY;
+		if (!this.imageIsDrawable(image)) return Texture.EMPTY;
 
 		const canvas = document.createElement("canvas");
 		canvas.width = image.naturalWidth;
@@ -731,7 +731,8 @@ export class Renderer {
 		const ctx = canvas.getContext("2d")!;
 		ctx.imageSmoothingEnabled = false;
 		ctx.drawImage(image, 0, 0);
-		const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+		const data = this.safeGetImageData(ctx, canvas.width, canvas.height);
+		if (!data) return Texture.EMPTY;
 		for (let index = 0; index < data.data.length; index += 4) {
 			const r = data.data[index]!;
 			const g = data.data[index + 1]!;
@@ -762,7 +763,7 @@ export class Renderer {
 		const image = new Image();
 		image.onload = () => this.textureCache.delete(key);
 		image.src = url;
-		if (!image.complete || image.naturalWidth <= 0) return Texture.EMPTY;
+		if (!this.imageIsDrawable(image)) return Texture.EMPTY;
 
 		const canvas = document.createElement("canvas");
 		canvas.width = image.naturalWidth;
@@ -776,7 +777,8 @@ export class Renderer {
 		const sourceCtx = source.getContext("2d")!;
 		sourceCtx.imageSmoothingEnabled = false;
 		sourceCtx.drawImage(image, 0, 0);
-		const data = sourceCtx.getImageData(0, 0, source.width, source.height);
+		const data = this.safeGetImageData(sourceCtx, source.width, source.height);
+		if (!data) return Texture.EMPTY;
 		const mask = ctx.createImageData(canvas.width, canvas.height);
 		const edgeColor = rgbForHex(playerColor);
 		const innerColor = darkenRgb(edgeColor, 0.55);
@@ -816,7 +818,7 @@ export class Renderer {
 		const image = new Image();
 		image.onload = () => this.alphaMaskCache.delete(url);
 		image.src = url;
-		if (!image.complete || image.naturalWidth <= 0) {
+		if (!this.imageIsDrawable(image)) {
 			this.alphaMaskCache.set(url, null);
 			return null;
 		}
@@ -827,13 +829,33 @@ export class Renderer {
 		const ctx = canvas.getContext("2d")!;
 		ctx.imageSmoothingEnabled = false;
 		ctx.drawImage(image, 0, 0);
-		const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+		const imageData = this.safeGetImageData(ctx, canvas.width, canvas.height);
+		if (!imageData) {
+			this.alphaMaskCache.set(url, null);
+			return null;
+		}
 		const alpha = new Uint8ClampedArray(canvas.width * canvas.height);
 		for (let index = 0; index < alpha.length; index += 1)
 			alpha[index] = imageData.data[index * 4 + 3] || 0;
 		const mask = { width: canvas.width, height: canvas.height, alpha };
 		this.alphaMaskCache.set(url, mask);
 		return mask;
+	}
+
+	private imageIsDrawable(image: HTMLImageElement) {
+		return image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
+	}
+
+	private safeGetImageData(
+		ctx: CanvasRenderingContext2D,
+		width: number,
+		height: number,
+	) {
+		try {
+			return ctx.getImageData(0, 0, width, height);
+		} catch {
+			return null;
+		}
 	}
 
 	private spriteTexture(
