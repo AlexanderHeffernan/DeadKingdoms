@@ -2,7 +2,7 @@ import { BaseUnit } from "./BaseUnit.js";
 import type { UnitCombatTarget, UnitSimulationContext } from "./BaseUnit.js";
 import type { Unit, Vec2 } from "../types.js";
 
-const ZOMBIE_TARGET_SIGHT_RANGE = 10.5;
+const ZOMBIE_TARGET_SIGHT_RANGE = 21;
 const ZOMBIE_PATH_STUCK_TICKS = 10;
 const ZOMBIE_PROGRESS_EPSILON = 0.03;
 const ZOMBIE_SIDEWAYS_PROGRESS_TOLERANCE = 0.015;

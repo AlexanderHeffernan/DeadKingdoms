@@ -13,7 +13,7 @@ export class Farm extends Building {
 	static readonly sound = 0;
 	static readonly walkBlocking = false;
 	static readonly gatherResource = "food";
-	static readonly gatherAmount = 8;
+	static readonly gatherAmount = 16;
 	static readonly gatherSeconds = 20;
 	static readonly gatherRange = 2;
 	static readonly shouldGatherAfterBuild = true;

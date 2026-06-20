@@ -15,13 +15,13 @@ export class VillagerUnit extends BaseUnit {
 	public static readonly range = 0.9;
 	public static readonly cooldown = 1.1;
 	public static readonly score = 10;
-	public static readonly trainTime = 7;
+	public static readonly trainTime = 3.5;
 	public static readonly cost = { food: 50 };
-	public static readonly vision = 6;
+	public static readonly vision = 12;
 	public static readonly sound = 6;
 	public static readonly canGather = true;
 	public static readonly canBuild = true;
-	public static readonly carryCapacity = 10;
+	public static readonly carryCapacity = 20;
 
 	public step(context: UnitSimulationContext, unit: Unit, dt: number) {
 		const command = unit.command || { type: "idle" };
@@ -131,7 +131,7 @@ export class VillagerUnit extends BaseUnit {
 		}
 		unit.workFlash = 0.2;
 		context.emitActionSound("build", targetPoint);
-		building.hp = Math.min(building.maxHp, building.hp + 38 * dt);
+		building.hp = Math.min(building.maxHp, building.hp + 76 * dt);
 		if (building.hp >= building.maxHp) {
 			building.markComplete();
 			context.assignPostBuildGather(unit, command.resourceKind, command.gatherBuiltFarm ? building : null);

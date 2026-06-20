@@ -69,6 +69,7 @@ export class Renderer {
 	private textureCache = new Map<string, Texture>();
 	private tileTextureCache = new Map<string, Texture>();
 	private alphaMaskCache = new Map<string, SpriteAlphaMask | null>();
+	private imageCache = new Map<string, HTMLImageElement>();
 	private dayNightVisuals: DayNightVisuals;
 	private lastMinimapDraw = 0;
 	private grassLightImage = new Image();
@@ -720,9 +721,7 @@ export class Renderer {
 		const cached = this.textureCache.get(key);
 		if (cached) return cached;
 
-		const image = new Image();
-		image.onload = () => this.textureCache.delete(key);
-		image.src = url;
+		const image = this.loadImage(url);
 		if (!this.imageIsDrawable(image)) return Texture.EMPTY;
 
 		const canvas = document.createElement("canvas");
@@ -760,9 +759,7 @@ export class Renderer {
 		const cached = this.textureCache.get(key);
 		if (cached) return cached;
 
-		const image = new Image();
-		image.onload = () => this.textureCache.delete(key);
-		image.src = url;
+		const image = this.loadImage(url);
 		if (!this.imageIsDrawable(image)) return Texture.EMPTY;
 
 		const canvas = document.createElement("canvas");
@@ -815,13 +812,8 @@ export class Renderer {
 		const cached = this.alphaMaskCache.get(url);
 		if (cached !== undefined) return cached;
 
-		const image = new Image();
-		image.onload = () => this.alphaMaskCache.delete(url);
-		image.src = url;
-		if (!this.imageIsDrawable(image)) {
-			this.alphaMaskCache.set(url, null);
-			return null;
-		}
+		const image = this.loadImage(url);
+		if (!this.imageIsDrawable(image)) return null;
 
 		const canvas = document.createElement("canvas");
 		canvas.width = image.naturalWidth;
@@ -830,16 +822,22 @@ export class Renderer {
 		ctx.imageSmoothingEnabled = false;
 		ctx.drawImage(image, 0, 0);
 		const imageData = this.safeGetImageData(ctx, canvas.width, canvas.height);
-		if (!imageData) {
-			this.alphaMaskCache.set(url, null);
-			return null;
-		}
+		if (!imageData) return null;
 		const alpha = new Uint8ClampedArray(canvas.width * canvas.height);
 		for (let index = 0; index < alpha.length; index += 1)
 			alpha[index] = imageData.data[index * 4 + 3] || 0;
 		const mask = { width: canvas.width, height: canvas.height, alpha };
 		this.alphaMaskCache.set(url, mask);
 		return mask;
+	}
+
+	private loadImage(url: string) {
+		const cached = this.imageCache.get(url);
+		if (cached) return cached;
+		const image = new Image();
+		image.src = url;
+		this.imageCache.set(url, image);
+		return image;
 	}
 
 	private imageIsDrawable(image: HTMLImageElement) {
