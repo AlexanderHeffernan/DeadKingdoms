@@ -1,4 +1,5 @@
 import { buildSoundField, collectWorldSoundSources, SOUND_FIELD_CELL_SIZE } from "./soundField.js";
+import { dayNightStateAt } from "./dayNight.js";
 import type { AdminLevel, AdminSnapshot, PlayerId, Snapshot, SoundDebugSource, Unit, VisibilityCache, World } from "./types.js";
 import { isVisible } from "./visibility.js";
 
@@ -11,6 +12,7 @@ export function makeSnapshot(
 ): Snapshot {
 	const player = playerId ? world.players[playerId] : null;
 	const admin = buildAdminSnapshot(world, player?.adminLevel);
+	const dayNight = dayNightStateFor(world);
 	const visible = playerId && !player?.godMode ? cachedVisibility(world, playerId) : null;
 	const visibleSet = visible ? visible.visible : null;
 	const filterVisible = <T extends { x: number; y: number; size?: number }>(entities: Record<string, T>, set = visibleSet): Record<string, T> => {
@@ -77,6 +79,7 @@ export function makeSnapshot(
 				exploredDelta,
 			}
 			: null,
+		dayNight,
 		leaderboard: world.leaderboard,
 		notices: world.notices.slice(-8),
 		soundDebug: player?.soundDebug ? buildSoundDebugSources(world) : null,
@@ -89,6 +92,10 @@ export function makeSnapshot(
 			: null,
 		admin,
 	};
+}
+
+function dayNightStateFor(world: World) {
+	return dayNightStateAt((Date.now() - (world.startedAt ?? 0)) / 1000 + (world.timeOffsetSeconds || 0));
 }
 
 function buildAdminSnapshot(world: World, level: AdminLevel | undefined): AdminSnapshot | null {
@@ -212,6 +219,7 @@ function visibleTiles(world: World, playerId: PlayerId): VisibilityCache {
 	const visible = new Set<number>();
 	if (!player) return { visible, explored };
 	const size = world.map.size;
+	const visionMultiplier = dayNightStateFor(world).visionMultiplier;
 	const addCircle = (cx: number, cy: number, radius: number) => {
 		const r2 = radius * radius;
 		const minX = Math.max(0, cx - radius);
@@ -231,16 +239,20 @@ function visibleTiles(world: World, playerId: PlayerId): VisibilityCache {
 	};
 	for (const unit of Object.values(world.units)) {
 		if (unit.ownerId !== playerId) continue;
-		const radius = unit.vision || 5;
+		const radius = visionRadius(unit.vision || 5, visionMultiplier);
 		addCircle(Math.round(unit.x), Math.round(unit.y), radius);
 	}
 	for (const building of Object.values(world.buildings)) {
 		if (building.ownerId !== playerId) continue;
-		const radius = building.vision || 5;
+		const radius = visionRadius(building.vision || 5, visionMultiplier);
 		const cx = Math.round(building.x + ((building.width || building.size || 1) - 1) / 2);
 		const cy = Math.round(building.y + ((building.height || building.size || 1) - 1) / 2);
 		addCircle(cx, cy, radius);
 	}
 	player.explored = explored;
 	return { visible, explored };
+}
+
+function visionRadius(baseVision: number, multiplier: number) {
+	return Math.max(1, Math.round(baseVision * multiplier));
 }

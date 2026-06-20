@@ -61,6 +61,8 @@ export interface World {
 	leaderboard: LeaderboardEntry[];
 	firstPlacePlayerId?: PlayerId;
 	firstPlaceSince?: number;
+	startedAt?: number;
+	timeOffsetSeconds?: number;
 	tick: number;
 	spawnTimers: Record<string, number>;
 	serverPerf: ServerPerfStats & { lastTickAt?: number; samples: ServerPerfSample[] };

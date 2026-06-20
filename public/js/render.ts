@@ -7,6 +7,7 @@ import {
 	Sprite,
 	Texture,
 } from "pixi.js";
+import { DayNightVisuals } from "./dayNightVisuals.js";
 import { SCALE, TILE_H, TILE_W } from "./constants.js";
 import { BUILDING_TYPES } from "../../src/shared/buildings/index.js";
 import { isoToScreen } from "./iso.js";
@@ -68,6 +69,7 @@ export class Renderer {
 	private textureCache = new Map<string, Texture>();
 	private tileTextureCache = new Map<string, Texture>();
 	private alphaMaskCache = new Map<string, SpriteAlphaMask | null>();
+	private dayNightVisuals: DayNightVisuals;
 	private lastMinimapDraw = 0;
 	private grassLightImage = new Image();
 	private grassLightReady = false;
@@ -94,6 +96,7 @@ export class Renderer {
 		this.selectionSpriteLayer = new Container();
 		this.entityLayer = new Container();
 		this.entityLayer.sortableChildren = true;
+		this.dayNightVisuals = new DayNightVisuals();
 		this.overlayLayer = new Graphics();
 		this.app.stage.addChild(
 			this.background,
@@ -129,11 +132,13 @@ export class Renderer {
 		this.activeSelectionSprites = 0;
 		if (!state.snapshot) {
 			this.hideAllEntitySprites(new Set());
+			this.dayNightVisuals.hide();
 			this.hideUnusedTiles(0);
 			this.app.render();
 			return;
 		}
 
+		this.dayNightVisuals.draw(state.snapshot, view);
 		this.drawTiles(
 			state.snapshot.map.size,
 			view.camera,
@@ -191,6 +196,7 @@ export class Renderer {
 				const color = visible ? null : "#1e3025";
 				const tile = this.tileAt(index++);
 				tile.texture = this.tileTexture(visible, (y % 2) + (x % 2) == 1);
+				tile.tint = this.dayNightVisuals.tileTint(x, y, visible);
 				const overdraw = 0.75;
 				tile.scale.set(
 					this.currentZoom + overdraw / tile.texture.width,
@@ -343,6 +349,7 @@ export class Renderer {
 			flash.amount > 0 && flash.color === "red"
 				? redTint(flash.amount)
 				: 0xffffff;
+		const entityTint = this.dayNightVisuals.entityTint(entity);
 
 		let texture: Texture;
 		if (png) {
@@ -361,7 +368,7 @@ export class Renderer {
 					alpha,
 					baseZ - 0.5,
 				);
-				flag.tint = ownerColor ? hexToNumber(ownerColor) : 0xffffff;
+				flag.tint = ownerColor ? multiplyTint(hexToNumber(ownerColor), entityTint) : entityTint;
 				active.add(flagKey);
 			} else {
 				const existingFlag = this.entitySprites.get(flagKey);
@@ -378,7 +385,7 @@ export class Renderer {
 				alpha,
 				baseZ,
 			);
-			sprite.tint = flashTint;
+			sprite.tint = flashTint === 0xffffff ? entityTint : flashTint;
 		} else {
 			texture = this.spriteTexture(
 				spriteName,
@@ -395,7 +402,7 @@ export class Renderer {
 				alpha,
 				baseZ,
 			);
-			sprite.tint = flashTint;
+			sprite.tint = flashTint === 0xffffff ? entityTint : flashTint;
 		}
 		active.add(key);
 			this.updateFlashOverlay(
@@ -549,6 +556,7 @@ export class Renderer {
 			flash.amount > 0 && flash.color === "red"
 				? redTint(flash.amount)
 				: 0xffffff;
+		const unitTint = this.dayNightVisuals.entityTint(unit);
 
 		if (png) {
 			const flagKey = `frontSelectedFlag:${unit.id}`;
@@ -563,7 +571,7 @@ export class Renderer {
 					1,
 					baseZ - 0.5,
 				);
-				flag.tint = ownerColor ? hexToNumber(ownerColor) : 0xffffff;
+				flag.tint = ownerColor ? multiplyTint(hexToNumber(ownerColor), unitTint) : unitTint;
 				active.add(flagKey);
 			}
 			const key = `frontSelectedUnit:${unit.id}`;
@@ -577,7 +585,7 @@ export class Renderer {
 				1,
 				baseZ,
 			);
-			sprite.tint = flashTint;
+			sprite.tint = flashTint === 0xffffff ? unitTint : flashTint;
 			active.add(key);
 			return;
 		}
@@ -593,7 +601,7 @@ export class Renderer {
 			1,
 			baseZ,
 		);
-		sprite.tint = flashTint;
+		sprite.tint = flashTint === 0xffffff ? unitTint : flashTint;
 		active.add(key);
 	}
 
@@ -1435,6 +1443,18 @@ function redTint(amount: number) {
 	const g = Math.round(255 + (66 - 255) * t);
 	const b = Math.round(255 + (50 - 255) * t);
 	return (255 << 16) | (g << 8) | b;
+}
+
+function multiplyTint(a: number, b: number) {
+	const ar = (a >> 16) & 0xff;
+	const ag = (a >> 8) & 0xff;
+	const ab = a & 0xff;
+	const br = (b >> 16) & 0xff;
+	const bg = (b >> 8) & 0xff;
+	const bb = b & 0xff;
+	return (Math.round((ar * br) / 255) << 16) |
+		(Math.round((ag * bg) / 255) << 8) |
+		Math.round((ab * bb) / 255);
 }
 
 function buildingSize(type: string) {

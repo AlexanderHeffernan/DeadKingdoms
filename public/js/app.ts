@@ -1,4 +1,4 @@
-import { emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
+import { emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
@@ -8,6 +8,7 @@ import { BUILDING_TYPES, deserializeBuilding } from "../../src/shared/buildings/
 import { allUnitClasses, unitBehaviorFor } from "../../src/shared/unitRegistry.js";
 import { spriteMetrics } from "./sprites/spriteInfo.js";
 import { Logs } from "../../src/shared/logs.js";
+import { DAY_NIGHT_CYCLE_SECONDS, dayNightStateAt } from "../../src/shared/dayNight.js";
 import type { Building, BuildingType, CommandPayload, Corpse, EntityId, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
 import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
@@ -21,6 +22,7 @@ const state: GameState = {
 	// Persistent fog-of-war memory. Server sends only newly-discovered tile keys
 	// each tick as `visibility.exploredDelta`; the client accumulates them.
 	exploredSet: new Set(),
+	timeOffsetSeconds: 0,
 };
 
 Logs.setSource("client");
@@ -123,6 +125,23 @@ const ui = new UI(state, {
 		connectEvents();
 		ui.showToast("Sound field overlay enabled.");
 		return "Sound field overlay enabled.";
+	},
+	async setTimeOfDay(progress, label) {
+		if (!state.playerId) return "No active player.";
+		const currentProgress = state.snapshot?.dayNight.cycleProgress ?? 0;
+		state.timeOffsetSeconds += (progress - currentProgress) * DAY_NIGHT_CYCLE_SECONDS;
+		if (state.snapshot) state.snapshot.dayNight = offsetDayNight(state.snapshot.dayNight, state.timeOffsetSeconds);
+		let message = `Set time to ${label}.`;
+		try {
+			const result = await requestSetTimeOfDay(state.playerId, progress);
+			if (result.ok) state.timeOffsetSeconds = 0;
+			else message = `${message} (client preview only: ${result.error || "server rejected it"})`;
+		} catch {
+			message = `${message} (client preview only: server unavailable)`;
+		}
+		ui.showToast(message);
+		ui.render();
+		return message;
 	},
 	async enableZombieDebug() {
 		if (!state.playerId) return "No active player.";
@@ -480,7 +499,17 @@ function hydrateSnapshot(snap: Snapshot): ClientSnapshot {
 	const buildings = Object.fromEntries(
 		Object.entries(snap.buildings).map(([id, building]) => [id, deserializeBuilding(building)]),
 	) as ClientSnapshot["buildings"];
-	return { ...snap, buildings, corpses: snap.corpses || {} };
+	return {
+		...snap,
+		buildings,
+		corpses: snap.corpses || {},
+		dayNight: offsetDayNight(snap.dayNight, state.timeOffsetSeconds),
+	};
+}
+
+function offsetDayNight(dayNight: ClientSnapshot["dayNight"], offsetSeconds: number) {
+	if (!offsetSeconds) return dayNight;
+	return dayNightStateAt(dayNight.cycleProgress * DAY_NIGHT_CYCLE_SECONDS + offsetSeconds);
 }
 
 let centered = false;

@@ -76,6 +76,14 @@ export async function restartServer(playerId: PlayerId) {
 	return post("/api/dev/restart-server", { playerId });
 }
 
+export async function shiftTimeOfDay(playerId: PlayerId, hours: number) {
+	return post("/api/dev/time-shift", { playerId, hours });
+}
+
+export async function setTimeOfDay(playerId: PlayerId, progress: number) {
+	return post("/api/dev/time-set", { playerId, progress });
+}
+
 async function post(url: string, payload: Record<string, unknown>) {
 	const res = await fetch(url, {
 		method: "POST",

@@ -49,6 +49,10 @@ export class UI {
 			grantSoldiersButton: mustGet("adminGrantSoldiersButton") as HTMLButtonElement,
 			invincibleButton: mustGet("adminInvincibleButton") as HTMLButtonElement,
 			noiseToolButton: mustGet("adminNoiseToolButton") as HTMLButtonElement,
+			midnightButton: mustGet("adminMidnightButton") as HTMLButtonElement,
+			dawnButton: mustGet("adminDawnButton") as HTMLButtonElement,
+			middayButton: mustGet("adminMiddayButton") as HTMLButtonElement,
+			eveningButton: mustGet("adminEveningButton") as HTMLButtonElement,
 			restartServerButton: mustGet("adminRestartServerButton") as HTMLButtonElement,
 			commandStatus: mustGet("adminCommandStatus"),
 		}, {
@@ -59,11 +63,20 @@ export class UI {
 			grantSoldiers: actions.grantSoldiers,
 			toggleTownCenterInvincible: actions.toggleTownCenterInvincible,
 			toggleNoiseTool: actions.toggleNoiseTool,
+			setTimeOfDay: actions.setTimeOfDay,
 			restartServer: actions.restartServer,
 		});
 		this.components = [
 			new ResourcePanel(state, mustGet("resources"), hoverCard),
-			new TopPanel(state, mustGet("status"), mustGet("ping"), mustGet("fps"), mustGet("serverPerf"), mustGet("leaderboard")),
+			new TopPanel(
+				state,
+				mustGet("status"),
+				mustGet("timeOfDay"),
+				mustGet("ping"),
+				mustGet("fps"),
+				mustGet("serverPerf"),
+				mustGet("leaderboard"),
+			),
 			new AdminPopup({
 				panel: mustGet("adminPanel"),
 				heading: mustGet("adminHeading"),

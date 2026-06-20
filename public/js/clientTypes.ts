@@ -22,6 +22,7 @@ export type GameState = {
 	effects: Effect[];
 	idleWorkerCycleIndex: number;
 	exploredSet: Set<number>;
+	timeOffsetSeconds: number;
 };
 
 export type CameraState = { x: number; y: number; zoom?: number };
@@ -57,6 +58,7 @@ export type UIActions = {
 	grantSoldiers: () => Promise<string>;
 	toggleTownCenterInvincible: () => Promise<string>;
 	toggleNoiseTool: () => Promise<string>;
+	setTimeOfDay: (progress: number, label: string) => Promise<string>;
 	restartServer: () => Promise<string>;
 };
 

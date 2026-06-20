@@ -1,6 +1,7 @@
 import type { Corpse, Player, ResourceNode, Ruin, SerializedBuilding, Unit } from "./entities.js";
 import type { BuildingId, CorpseId, MapDef, PlayerId, ResourceId, ResourceType, RuinId, UnitId } from "./core.js";
 import type { VisibilityPayload } from "./visibility.js";
+import type { DayNightState } from "../dayNight.js";
 
 /** Short-lived player-facing notice sent with snapshots. */
 export interface Notice {
@@ -108,6 +109,7 @@ export interface Snapshot {
 	ruins: Record<RuinId, Ruin>;
 	corpses: Record<CorpseId, Corpse>;
 	visibility: VisibilityPayload | null;
+	dayNight: DayNightState;
 	leaderboard: LeaderboardEntry[];
 	notices: Notice[];
 	soundDebug: SoundDebugSource[] | null;

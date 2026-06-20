@@ -36,6 +36,10 @@ export class AdminDashboard {
 	private readonly grantSoldiersButton: HTMLButtonElement;
 	private readonly invincibleButton: HTMLButtonElement;
 	private readonly noiseToolButton: HTMLButtonElement;
+	private readonly midnightButton: HTMLButtonElement;
+	private readonly dawnButton: HTMLButtonElement;
+	private readonly middayButton: HTMLButtonElement;
+	private readonly eveningButton: HTMLButtonElement;
 	private readonly restartServerButton: HTMLButtonElement;
 	private readonly commandStatus: HTMLElement;
 	private readonly actions: AdminDashboardActions;
@@ -80,6 +84,10 @@ export class AdminDashboard {
 		this.grantSoldiersButton = elements.grantSoldiersButton;
 		this.invincibleButton = elements.invincibleButton;
 		this.noiseToolButton = elements.noiseToolButton;
+		this.midnightButton = elements.midnightButton;
+		this.dawnButton = elements.dawnButton;
+		this.middayButton = elements.middayButton;
+		this.eveningButton = elements.eveningButton;
 		this.restartServerButton = elements.restartServerButton;
 		this.commandStatus = elements.commandStatus;
 		this.rangeSeconds = Number(this.range.value) || 30;
@@ -165,6 +173,10 @@ export class AdminDashboard {
 			await this.runCommand(this.noiseToolButton, this.actions.toggleNoiseTool);
 			this.hide();
 		});
+		this.midnightButton.addEventListener("click", () => this.runCommand(this.midnightButton, () => this.actions.setTimeOfDay(0, "Midnight")));
+		this.dawnButton.addEventListener("click", () => this.runCommand(this.dawnButton, () => this.actions.setTimeOfDay(0.25, "Dawn")));
+		this.middayButton.addEventListener("click", () => this.runCommand(this.middayButton, () => this.actions.setTimeOfDay(0.5, "Midday")));
+		this.eveningButton.addEventListener("click", () => this.runCommand(this.eveningButton, () => this.actions.setTimeOfDay(0.75, "Evening")));
 		this.restartServerButton.addEventListener("click", () => this.runCommand(this.restartServerButton, this.actions.restartServer));
 	}
 
@@ -467,6 +479,10 @@ export type AdminDashboardElements = {
 	grantSoldiersButton: HTMLButtonElement;
 	invincibleButton: HTMLButtonElement;
 	noiseToolButton: HTMLButtonElement;
+	midnightButton: HTMLButtonElement;
+	dawnButton: HTMLButtonElement;
+	middayButton: HTMLButtonElement;
+	eveningButton: HTMLButtonElement;
 	restartServerButton: HTMLButtonElement;
 	commandStatus: HTMLElement;
 };
@@ -479,6 +495,7 @@ export type AdminDashboardActions = {
 	grantSoldiers: () => Promise<string>;
 	toggleTownCenterInvincible: () => Promise<string>;
 	toggleNoiseTool: () => Promise<string>;
+	setTimeOfDay: (progress: number, label: string) => Promise<string>;
 	restartServer: () => Promise<string>;
 };
 

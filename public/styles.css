@@ -184,6 +184,13 @@ button:disabled {
 	padding-right: 34px;
 }
 
+.time-of-day {
+	margin: 4px 0 8px;
+	color: #e9bd59;
+	font-size: 13px;
+	text-shadow: 0 0 8px rgb(233 189 89 / 0.34);
+}
+
 #minimap {
 	display: block;
 	width: 180px;

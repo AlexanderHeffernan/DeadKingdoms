@@ -5,3 +5,4 @@ export type * from "./types/snapshot.js";
 export type * from "./types/world.js";
 export type * from "./types/visibility.js";
 export type * from "./types/commands.js";
+export type * from "./dayNight.js";

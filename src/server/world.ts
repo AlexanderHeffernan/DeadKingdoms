@@ -21,6 +21,7 @@ import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { stepZombieDirector } from "./zombieDirector.js";
 import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
 import { Logs } from "../shared/logs.js";
+import { DAY_NIGHT_CYCLE_SECONDS } from "../shared/dayNight.js";
 import type {
 	BuildQueueItem,
 	Building,
@@ -66,8 +67,10 @@ const BERRY_PATCH_COUNT = 62;
 const RESOURCE_PILE_PLACEMENT_ATTEMPTS = 80;
 const RESOURCE_CLUSTER_GAP = 2;
 const RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER = 8;
+const INITIAL_TIME_OF_DAY_PROGRESS = 9 / 24;
 
 export function createWorld(): World {
+	const startedAt = Date.now();
 	const world: World = {
 		map: { size: MAP_SIZE },
 		players: {},
@@ -80,6 +83,8 @@ export function createWorld(): World {
 		adminLogs: [],
 		actionNoises: [],
 		leaderboard: [],
+		startedAt,
+		timeOffsetSeconds: INITIAL_TIME_OF_DAY_PROGRESS * DAY_NIGHT_CYCLE_SECONDS,
 		tick: 0,
 		spawnTimers: {},
 		serverPerf: { tps: TICK_RATE, tickMs: 0, samples: [] },
@@ -87,6 +92,19 @@ export function createWorld(): World {
 	seedResources(world);
 	rebuildOccupancy(world);
 	return world;
+}
+
+export function shiftWorldTime(world: World, hours: number) {
+	world.timeOffsetSeconds = (world.timeOffsetSeconds || 0) + hours * 60 * 60;
+	for (const player of Object.values(world.players)) delete player._visCache;
+}
+
+export function setWorldTimeOfDay(world: World, progress: number) {
+	const targetProgress = ((progress % 1) + 1) % 1;
+	const elapsedSeconds = (Date.now() - (world.startedAt ?? 0)) / 1000 + (world.timeOffsetSeconds || 0);
+	const currentProgress = ((elapsedSeconds / DAY_NIGHT_CYCLE_SECONDS) % 1 + 1) % 1;
+	world.timeOffsetSeconds = (world.timeOffsetSeconds || 0) + (targetProgress - currentProgress) * DAY_NIGHT_CYCLE_SECONDS;
+	for (const player of Object.values(world.players)) delete player._visCache;
 }
 
 export function addPlayer(world: World, name: string, requestedColor: string | null = null): PlayerId {

@@ -2,7 +2,7 @@ import { createReadStream, promises as fs } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { makeSnapshot } from "../shared/messages.js";
 import { MAX_PLAYERS } from "../shared/config.js";
-import { addAdminLog, addPlayer, command, emitDevBang, grantPlayerSoldiers, removePlayer, spawnZombieHorde, toggleTownCenterInvincibility } from "./world.js";
+import { addAdminLog, addPlayer, command, emitDevBang, grantPlayerSoldiers, removePlayer, setWorldTimeOfDay, shiftWorldTime, spawnZombieHorde, toggleTownCenterInvincibility } from "./world.js";
 import { Logs } from "../shared/logs.js";
 import type { ServerState } from "./serverState.js";
 import type { AdminLevel, CommandPayload, Player, PlayerId, World } from "../shared/types.js";
@@ -48,6 +48,8 @@ export function createHandler(state: ServerState, clients: Set<Client>) {
 			if (url.pathname === "/api/dev/grant-soldiers") return grantDevSoldiers(req, res, world);
 			if (url.pathname === "/api/dev/town-center-invincible") return toggleTownCenterInvincible(req, res, world);
 			if (url.pathname === "/api/dev/emit-noise") return emitDevNoise(req, res, world);
+			if (url.pathname === "/api/dev/time-shift") return shiftDevTime(req, res, world);
+			if (url.pathname === "/api/dev/time-set") return setDevTime(req, res, world);
 			if (url.pathname === "/api/dev/restart-server") return restartServer(req, res, state, clients, world);
 			if (url.pathname === "/api/ping") return receiveClientPing(req, res, world);
 			if (url.pathname === "/api/command") return receiveCommand(req, res, world);
@@ -57,6 +59,25 @@ export function createHandler(state: ServerState, clients: Set<Client>) {
 		if (req.method === "GET" && url.pathname.startsWith("/assets/soundtrack/")) return serveSoundtrack(req, res, url);
 		return serveStatic(req, res, url);
 	};
+}
+
+async function setDevTime(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown; progress?: unknown };
+	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!world.players[body.playerId]) return json(res, { ok: false, error: "Player not found." }, 404);
+	const progress = typeof body.progress === "number" && Number.isFinite(body.progress) ? body.progress : 0;
+	setWorldTimeOfDay(world, progress);
+	json(res, { ok: true });
+}
+
+async function shiftDevTime(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown; hours?: unknown };
+	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+	const player = world.players[body.playerId];
+	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	const hours = typeof body.hours === "number" && Number.isFinite(body.hours) ? body.hours : 0;
+	shiftWorldTime(world, hours);
+	json(res, { ok: true });
 }
 
 async function serverStatus(res: import("node:http").ServerResponse, state: ServerState) {
