@@ -657,7 +657,7 @@ export class Renderer {
 		const blockers = [
 			...Object.values(snap.resources),
 			...Object.values(snap.buildings),
-		].filter((entity) => isEntityNearViewport(entity, view.camera));
+		].filter((entity) => !isGroundLevelEntity(entity) && isEntityNearViewport(entity, view.camera));
 		for (const unit of Object.values(snap.units)) {
 			if (!isEntityNearViewport(unit, view.camera)) continue;
 			if (!this.isUnitOccluded(unit, blockers, view)) continue;
@@ -681,7 +681,7 @@ export class Renderer {
 		const blockers = [
 			...Object.values(snap.resources),
 			...Object.values(snap.buildings),
-		].filter((entity) => isEntityNearViewport(entity, view.camera));
+		].filter((entity) => !isGroundLevelEntity(entity) && isEntityNearViewport(entity, view.camera));
 		for (const id of view.selectedIds) {
 			const unit = snap.units[id];
 			if (!unit || !isEntityNearViewport(unit, view.camera)) continue;
@@ -2137,6 +2137,7 @@ function spriteTopY(
 
 function renderDepth(entity: RenderEntity) {
 	if (entity.kind === "unit") return entity.x + entity.y + (entity.size || 0);
+	if (isGroundLevelEntity(entity)) return entity.x + entity.y - 1;
 	return footprintRenderDepth(entity);
 }
 
@@ -2150,6 +2151,10 @@ function renderLayerOffset(entity: RenderEntity) {
 	if (entity.kind === "unit") return 2;
 	if (entity.kind === "building") return 1;
 	return 0;
+}
+
+function isGroundLevelEntity(entity: RenderEntity) {
+	return entity.kind === "building" && entity.type === "farm";
 }
 
 function entityWidth(entity: { size?: number; width?: number }) {
