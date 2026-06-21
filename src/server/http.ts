@@ -216,11 +216,23 @@ async function joinGame(req: import("node:http").IncomingMessage, res: import("n
 	const active = Object.values(world.players).filter((player) => !player.defeated).length;
 	if (active >= MAX_PLAYERS) return json(res, { ok: false, error: "Server is full." }, 403);
 	const body = (await readJson(req)) as { name?: unknown; color?: unknown };
-	const name = typeof body.name === "string" ? body.name : "Player";
+	const name = playerDisplayName(typeof body.name === "string" ? body.name : "Player");
+	if (isPlayerNameInUse(world, name)) {
+		return json(res, { ok: false, error: "Username already in use" }, 409);
+	}
 	const color = typeof body.color === "string" ? body.color : null;
 	const playerId = addPlayer(world, name, color);
 	recordPlayerConnection(world.players[playerId], clientIp(req), false);
 	json(res, { ok: true, playerId });
+}
+
+function playerDisplayName(name: string) {
+	return name.trim().slice(0, 18) || "Player";
+}
+
+function isPlayerNameInUse(world: World, name: string) {
+	const normalized = name.toLocaleLowerCase();
+	return Object.values(world.players).some((player) => !player.defeated && player.name.toLocaleLowerCase() === normalized);
 }
 
 async function enableAdminAccess(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {

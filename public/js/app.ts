@@ -9,6 +9,7 @@ import { allUnitClasses, unitBehaviorFor } from "../../src/shared/unitRegistry.j
 import { spriteMetrics } from "./sprites/spriteInfo.js";
 import { Logs } from "../../src/shared/logs.js";
 import { DAY_NIGHT_CYCLE_SECONDS, dayNightStateAt } from "../../src/shared/dayNight.js";
+import { escapeHtml } from "./ui/dom.js";
 import type { Building, BuildingType, CommandPayload, Corpse, EntityId, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
 import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
@@ -64,6 +65,44 @@ const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const DEV_COMMAND_BUFFER_LENGTH = 40;
 const PLAYER_NAME_STORAGE_KEY = "rtsPlayerName";
 const PLAYER_COLOR_STORAGE_KEY = "rtsPlayerColor";
+const GITHUB_REPOSITORY_URL = "https://github.com/AlexanderHeffernan/DeadKingdoms";
+const DEFAULT_PLAYER_COLORS = [
+	"#ff2b1a",
+	"#ff9f1c",
+	"#ffe66d",
+	"#2ec4b6",
+	"#3a86ff",
+	"#8338ec",
+	"#ff4d8d",
+	"#6cff5f",
+];
+const CONTRIBUTORS: ContributorCredit[] = [
+	{
+		name: "Alexander Heffernan",
+		avatarUrl: "https://avatars.githubusercontent.com/u/78777604?v=4",
+		url: "https://github.com/AlexanderHeffernan",
+		contribution: "Creator, Full-Stack Engineer, Gameplay Designer.",
+	},
+	{
+		name: "Oliver Heffernan",
+		avatarUrl: "https://avatars.githubusercontent.com/u/90035248?s=130&v=4",
+		url: "https://github.com/oliverheffernan",
+		contribution: "Gameplay Programmer, Interface Artist, UI Designer.",
+	},
+	{
+		name: "Cara Lill",
+		avatarUrl: "https://avatars.githubusercontent.com/u/157843393?s=130&v=4",
+		url: "https://github.com/Cara-Lill",
+		contribution: "In-Game Sprite Artist.",
+	},
+];
+
+interface ContributorCredit {
+	name: string;
+	avatarUrl: string;
+	url: string;
+	contribution: string;
+}
 
 const canvas = document.getElementById("world") as HTMLCanvasElement | null;
 const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
@@ -84,20 +123,26 @@ let adminDiagnosticsVisible = false;
 const joinForm = document.getElementById("joinForm") as HTMLFormElement | null;
 const nameInput = document.getElementById("nameInput") as HTMLInputElement | null;
 const colorInput = document.getElementById("colorInput") as HTMLInputElement | null;
+const joinButton = joinForm?.querySelector("button[type='submit']") as HTMLButtonElement | null;
+const joinNotice = document.getElementById("joinNotice");
+let homeStatusFull = false;
 
 if (nameInput) {
 	nameInput.value = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) || "";
+	nameInput.addEventListener("input", () => showJoinNotice(""));
 	nameInput.focus();
 	nameInput.select();
 }
 if (colorInput) {
-	colorInput.value = localStorage.getItem(PLAYER_COLOR_STORAGE_KEY) || colorInput.value;
+	colorInput.value = localStorage.getItem(PLAYER_COLOR_STORAGE_KEY) || randomDefaultPlayerColor();
+	colorInput.addEventListener("input", () => showJoinNotice(""));
 	colorInput.addEventListener("keydown", (event) => {
 		if (event.key !== "Enter") return;
 		event.preventDefault();
 		joinForm?.requestSubmit();
 	});
 }
+renderHomeCredits();
 const ui = new UI(state, {
 	setBuildMode(type) {
 		view.buildMode = type;
@@ -238,16 +283,20 @@ const ui = new UI(state, {
 
 joinForm?.addEventListener("submit", async (event) => {
 	event.preventDefault();
+	if (homeStatusFull) {
+		showJoinNotice("The world is full. Try again soon.");
+		return;
+	}
 	sfx.unlock();
+	showJoinNotice("");
 	const name = nameInput?.value.trim() || "Player";
 	const color = colorInput?.value || "";
 	const result = await join(name, color);
 	if (!result.ok) {
-		ui.showToast(result.error || "Could not join.");
+		showJoinNotice(result.error || "Could not join.");
 		return;
 	}
-	const notice = document.getElementById("joinNotice");
-	if (notice) notice.textContent = "";
+	showJoinNotice("");
 	state.playerId = result.playerId;
 	localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
 	localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, color);
@@ -303,10 +352,63 @@ function enterGame() {
 	startMusic();
 	connectEvents();
 }
+
+function randomDefaultPlayerColor() {
+	return DEFAULT_PLAYER_COLORS[Math.floor(Math.random() * DEFAULT_PLAYER_COLORS.length)]!;
+}
+
+function showJoinNotice(message: string) {
+	if (!joinNotice) {
+		if (message) ui.showToast(message);
+		return;
+	}
+	const onlinePlayers = document.getElementById("onlinePlayers");
+	const separator = document.getElementById("statusSeparator");
+	const resetStatus = document.getElementById("resetStatus");
+	joinNotice.textContent = message;
+	joinNotice.classList.toggle("hidden", !message);
+	onlinePlayers?.classList.toggle("hidden", !!message);
+	separator?.classList.toggle("hidden", !!message);
+	resetStatus?.classList.toggle("hidden", !!message);
+}
+
+function renderHomeCredits() {
+	const credits = document.getElementById("homeCredits");
+	if (!credits) return;
+	credits.innerHTML = `
+		<a class="github-link" href="${GITHUB_REPOSITORY_URL}" target="_blank" rel="noreferrer" aria-label="Open Dead Kingdoms on GitHub">
+			<svg class="github-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+			<span>Open Source</span>
+		</a>
+		<div class="contributors" aria-label="Contributors">
+			${CONTRIBUTORS.map((contributor) => `
+				<a class="contributor" href="${contributor.url}" target="_blank" rel="noreferrer" aria-label="${escapeHtml(contributor.name)}: ${escapeHtml(contributor.contribution)}">
+					<img src="${contributor.avatarUrl}" alt="${escapeHtml(contributor.name)}" loading="lazy" />
+					<span class="contributor-popup">
+						<strong>${escapeHtml(contributor.name)}</strong>
+						<span>${escapeHtml(contributor.contribution)}</span>
+					</span>
+				</a>
+			`).join("")}
+		</div>
+	`;
+}
+
 function onlinePlayersText(status: ServerStatus): string {
 	if (status.activePlayers == 0) return "";
-	if (status.activePlayers >= status.maxPlayers) return "Full";
+	if (isServerFull(status)) return "World full";
 	return `${status.activePlayers} players`;
+}
+
+function isServerFull(status: ServerStatus): boolean {
+	return status.activePlayers >= status.maxPlayers;
+}
+
+function setJoinButtonFull(full: boolean) {
+	homeStatusFull = full;
+	if (!joinButton) return;
+	joinButton.disabled = full;
+	joinButton.textContent = full ? "World Full" : "Play Game";
 }
 
 async function updateHomeStatus() {
@@ -315,10 +417,12 @@ async function updateHomeStatus() {
 	const resetStatus = document.getElementById("resetStatus");
 	const lastUpdateDate = document.getElementById("lastUpdateDate");
 	const lastUpdateTime = document.getElementById("lastUpdateTime");
+	if (joinNotice?.textContent) return;
 	if (!onlinePlayers && !resetStatus && !lastUpdateDate && !lastUpdateTime) return;
 	try {
 		const status = await getStatus();
 		//if (onlinePlayers) onlinePlayers.textContent = `Players online: ${status.activePlayers}/${status.maxPlayers}`;
+		setJoinButtonFull(isServerFull(status));
 		let count = 0;
 		if (onlinePlayers) {
 			onlinePlayers.textContent = onlinePlayersText(status);
@@ -335,6 +439,7 @@ async function updateHomeStatus() {
 		if (lastUpdateDate) lastUpdateDate.textContent = updatedAt ? updatedAt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "--";
 		if (lastUpdateTime) lastUpdateTime.textContent = updatedAt ? updatedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "--";
 	} catch {
+		setJoinButtonFull(false);
 		if (onlinePlayers) onlinePlayers.textContent = "Players online: --";
 		if (resetStatus) resetStatus.textContent = "--";
 		if (lastUpdateDate) lastUpdateDate.textContent = "--";

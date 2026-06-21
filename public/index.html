@@ -37,15 +37,13 @@
 						/>
 					</span>
 				</label>
-				<!--
-				<div
-					id="joinNotice"
-					class="join-notice"
-					aria-live="polite"
-				></div>
-				-->
 				<button type="submit">Play Game</button>
 				<div class="status flex">
+					<div
+						id="joinNotice"
+						class="join-notice hidden"
+						aria-live="polite"
+					></div>
 					<div id="onlinePlayers"></div>
 					<div id="statusSeparator">•</div>
 					<div id="resetStatus"></div>
@@ -57,6 +55,7 @@
 					<div id="lastUpdateTime"></div>
 				</div>
 			</form>
+			<nav id="homeCredits" class="home-credits" aria-label="Project links and credits"></nav>
 			<aside class="update-boxes" aria-label="Server update status">
 				<div class="update-box">
 					<span>Map reset</span>
