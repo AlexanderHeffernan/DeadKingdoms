@@ -1,6 +1,6 @@
 import type { Building, Corpse, Player, ResourceNode, Ruin, Unit } from "./entities.js";
 import type { BuildingId, CorpseId, MapDef, PlayerId, ResourceId, RuinId, UnitId, Vec2 } from "./core.js";
-import type { AdminLogEntry, GlobalLeaderboardEntry, LeaderboardEntry, Notice, ServerPerfSample, ServerPerfStats, ServerPerfUnitAiStats, ServerPerfWorkerStats, ServerPerfZombieStats, ServerPerfZombieWorkerStats, Snapshot } from "./snapshot.js";
+import type { AdminLogEntry, LeaderboardEntry, Notice, ServerPerfSample, ServerPerfStats, ServerPerfUnitAiStats, ServerPerfWorkerStats, ServerPerfZombieStats, ServerPerfZombieWorkerStats } from "./snapshot.js";
 
 export interface ActionNoise extends Vec2 {
 	id: string;
@@ -59,11 +59,6 @@ export interface ZombieCadenceFieldState {
 	watchedPoints: number;
 }
 
-export interface PendingGlobalLeaderboard {
-	entries: GlobalLeaderboardEntry[];
-	snapshots: Record<string, Snapshot>;
-}
-
 /** Authoritative server-side simulation state for one running arena. */
 export interface World {
 	map: MapDef;
@@ -93,6 +88,5 @@ export interface World {
 	_pathing?: PathingWorldState;
 	_zombieHordes?: Record<string, ZombieHorde>;
 	_zombieCadenceField?: ZombieCadenceFieldState;
-	_pendingGlobalLeaderboard?: PendingGlobalLeaderboard;
 	_countedDeadKingdomPlayerIds?: Partial<Record<PlayerId, true>>;
 }

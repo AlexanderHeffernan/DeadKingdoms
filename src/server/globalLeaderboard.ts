@@ -12,11 +12,19 @@ const STORE_FILE = join(STORE_DIR, "leaderboard.json");
 interface StoredLeaderboard {
 	entries: GlobalLeaderboardEntry[];
 	snapshots: Record<string, Snapshot>;
+	pendingEntries: GlobalLeaderboardEntry[];
+	pendingSnapshots: Record<string, Snapshot>;
 	deadKingdoms: number;
 }
 
 export class GlobalLeaderboardStore {
-	private data: StoredLeaderboard = { entries: [], snapshots: {}, deadKingdoms: 0 };
+	private data: StoredLeaderboard = {
+		entries: [],
+		snapshots: {},
+		pendingEntries: [],
+		pendingSnapshots: {},
+		deadKingdoms: 0,
+	};
 	private loaded = false;
 
 	async entries() {
@@ -51,26 +59,28 @@ export class GlobalLeaderboardStore {
 			}
 		}
 		if (!changed) return;
-		this.trimPending(world);
+		this.trimPending();
+		await this.save();
 	}
 
 	async publishWorldPeaks(world: World | null) {
-		if (!world?._pendingGlobalLeaderboard?.entries.length) return;
 		await this.load();
+		if (!this.data.pendingEntries.length) return;
 		const entries = this.finalizePendingEntries(world);
-		const playerNames = new Set(entries.map((entry) => entry.playerName));
-		this.data.entries = this.data.entries.filter((entry) => !playerNames.has(entry.playerName));
+		// const playerNames = new Set(entries.map((entry) => entry.playerName));
+		// this.data.entries = this.data.entries.filter((entry) => !playerNames.has(entry.playerName));
 		this.data.entries.push(...entries);
-		Object.assign(this.data.snapshots, world._pendingGlobalLeaderboard.snapshots);
+		Object.assign(this.data.snapshots, this.data.pendingSnapshots);
+		this.data.pendingEntries = [];
+		this.data.pendingSnapshots = {};
 		this.trimStored();
 		await this.save();
-		world._pendingGlobalLeaderboard = { entries: [], snapshots: {} };
 	}
 
 	private shouldTrack(world: World, player: Player) {
 		if (player.defeated || player.score <= 0) return false;
-		const existingBest = this.allCandidateEntries(world).find((entry) => entry.playerName === player.name);
-		if (existingBest && existingBest.score >= player.score) return false;
+		// const existingBest = this.allCandidateEntries(world).find((entry) => entry.playerName === player.name);
+		// if (existingBest && existingBest.score >= player.score) return false;
 		const candidates = this.allCandidateEntries(world);
 		if (candidates.length < LEADERBOARD_LIMIT) return true;
 		candidates.sort(compareEntries);
@@ -91,9 +101,10 @@ export class GlobalLeaderboardStore {
 
 	private trackPeak(world: World, player: Player) {
 		const snapshotId = `${Date.now()}-${player.id}`;
-		world._pendingGlobalLeaderboard ??= { entries: [], snapshots: {} };
-		world._pendingGlobalLeaderboard.entries = world._pendingGlobalLeaderboard.entries.filter((entry) => entry.playerName !== player.name);
-		world._pendingGlobalLeaderboard.entries.push({
+		const oldEntries = this.data.pendingEntries.filter((entry) => entry.playerName === player.name);
+		this.data.pendingEntries = this.data.pendingEntries.filter((entry) => entry.playerName !== player.name);
+		for (const entry of oldEntries) delete this.data.pendingSnapshots[entry.snapshotId];
+		this.data.pendingEntries.push({
 			id: snapshotId,
 			playerName: player.name,
 			playerColor: player.color,
@@ -102,7 +113,7 @@ export class GlobalLeaderboardStore {
 			snapshotId,
 			firstPlaceDurationMs: firstPlaceDurationMs(world, player.id),
 		});
-		world._pendingGlobalLeaderboard.snapshots[snapshotId] = {
+		this.data.pendingSnapshots[snapshotId] = {
 			...makeSnapshot(world),
 			playerId: player.id,
 			visibility: null,
@@ -122,25 +133,23 @@ export class GlobalLeaderboardStore {
 		}
 	}
 
-	private trimPending(world: World) {
-		const pending = world._pendingGlobalLeaderboard;
-		if (!pending) return;
+	private trimPending() {
 		const globalIds = new Set(this.data.entries.map((entry) => entry.snapshotId));
-		const livePending = this.allCandidateEntries(world)
+		const livePending = this.allCandidateEntries()
 			.sort(compareEntries)
 			.slice(0, LEADERBOARD_LIMIT)
 			.filter((entry) => !globalIds.has(entry.snapshotId));
-		pending.entries = livePending;
+		this.data.pendingEntries = livePending;
 		const liveIds = new Set(livePending.map((entry) => entry.snapshotId));
-		for (const id of Object.keys(pending.snapshots)) {
-			if (!liveIds.has(id)) delete pending.snapshots[id];
+		for (const id of Object.keys(this.data.pendingSnapshots)) {
+			if (!liveIds.has(id)) delete this.data.pendingSnapshots[id];
 		}
 	}
 
-	private allCandidateEntries(world: World) {
+	private allCandidateEntries(_world?: World) {
 		return [
 			...this.data.entries,
-			...(world._pendingGlobalLeaderboard?.entries ?? []),
+			...this.data.pendingEntries,
 		];
 	}
 
@@ -155,9 +164,15 @@ export class GlobalLeaderboardStore {
 					firstPlaceDurationMs: entry.firstPlaceDurationMs ?? 0,
 				})) : [],
 				snapshots: parsed.snapshots && typeof parsed.snapshots === "object" ? parsed.snapshots : {},
+				pendingEntries: Array.isArray(parsed.pendingEntries) ? parsed.pendingEntries.map((entry) => ({
+					...entry,
+					firstPlaceDurationMs: entry.firstPlaceDurationMs ?? 0,
+				})) : [],
+				pendingSnapshots: parsed.pendingSnapshots && typeof parsed.pendingSnapshots === "object" ? parsed.pendingSnapshots : {},
 				deadKingdoms: Number.isFinite(parsed.deadKingdoms) ? Number(parsed.deadKingdoms) : 0,
 			};
 			this.trimStored();
+			this.trimPending();
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
 				console.warn(`Could not read global leaderboard: ${(error as Error).message}`);
@@ -175,14 +190,12 @@ export class GlobalLeaderboardStore {
 		}
 	}
 
-	private finalizePendingEntries(world: World) {
-		const pending = world._pendingGlobalLeaderboard;
-		if (!pending) return [];
-		return pending.entries.map((entry) => {
-			const playerId = pending.snapshots[entry.snapshotId]?.playerId;
+	private finalizePendingEntries(world: World | null) {
+		return this.data.pendingEntries.map((entry) => {
+			const playerId = this.data.pendingSnapshots[entry.snapshotId]?.playerId;
 			return {
 				...entry,
-				firstPlaceDurationMs: playerId ? firstPlaceDurationMs(world, playerId) : entry.firstPlaceDurationMs,
+				firstPlaceDurationMs: world && playerId ? firstPlaceDurationMs(world, playerId) : entry.firstPlaceDurationMs,
 			};
 		});
 	}

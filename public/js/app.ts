@@ -895,6 +895,7 @@ function formatResetStatus(status: ServerStatus): string {
 	if (status.reset.state === "active") return "";
 	if (status.reset.state === "cold") return "";
 	const remainingMs = Math.max(0, status.reset.resetAt! - Date.now());
+	if (remainingMs == 0) return "Map reset"
 	return `Map resetting in ${formatDuration(remainingMs)}`;
 }
 
