@@ -19,6 +19,7 @@ export type CommandType =
 	| "train"
 	| "attack"
 	| "gather"
+	| "blowHorn"
 	| "toggleAutoFarm"
 	| "replenishFarm";
 
@@ -79,6 +80,11 @@ export interface GatherPayload extends CommandBase {
 	targetId: EntityId;
 }
 
+export interface BlowHornPayload extends CommandBase {
+	type: "blowHorn";
+	unitIds: UnitId[];
+}
+
 export interface ToggleAutoFarmPayload extends CommandBase {
 	type: "toggleAutoFarm";
 }
@@ -99,6 +105,7 @@ export type CommandPayload =
 | TrainPayload
 | AttackPayload
 | GatherPayload
+| BlowHornPayload
 | ToggleAutoFarmPayload
 | ReplenishFarmPayload;
 

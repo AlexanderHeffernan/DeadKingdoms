@@ -47,6 +47,7 @@ export type ViewState = {
 export type UIActions = {
 	setBuildMode: (type: string) => void;
 	train: (buildingId: string, unitType: UnitType) => void;
+	blowHorn: (unitIds: string[]) => void;
 	toggleAutoFarm: () => void;
 	replenishFarm: (farmId: string) => void;
 	deleteBuilding: (buildingId: string) => void;

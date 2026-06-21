@@ -604,6 +604,7 @@ test("zombie attacks a blocking building when sound has no path around it", () =
 		hasPathToTarget: (_unit: Unit, target: { x: number; y: number }) => target.x < 12,
 		hasReasonablePathToTarget: (_unit: Unit, target: { x: number; y: number }) => target.x < 12,
 		blockingBuildingToward: (_unit: Unit, target: { x: number; y: number }) => target.x > 12 ? wall : null,
+		wallLikeBlockingBuildingToward: (_unit: Unit, target: { x: number; y: number }) => target.x > 12 ? wall : null,
 		damage: (target: Building | Unit) => {
 			damagedTarget = target;
 		},
@@ -618,6 +619,44 @@ test("zombie attacks a blocking building when sound has no path around it", () =
 	behavior.step(context, zombie, 0.1);
 
 	assert.equal(damagedTarget, wall);
+});
+
+test("zombie ignores non-wall buildings blocking a sound goal", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-sound-building-ignored");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.hordeTarget = { x: 18.3, y: 10 };
+	zombie.zombieHordeSourceTarget = { x: 18.3, y: 10 };
+	zombie.zombieGoalKind = "sound";
+	const building = makeBuilding(10, 10, "b-sound-building");
+	let damagedTarget: Building | Unit | null = null;
+	let movementTarget: { x: number; y: number } | null = null;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		nearestEnemy: () => building,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: (_unit: Unit, target: { x: number; y: number }) => {
+			movementTarget = target;
+			return false;
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasReasonablePathToTarget: () => false,
+		blockingBuildingToward: () => building,
+		wallLikeBlockingBuildingToward: () => null,
+		damage: (target: Building | Unit) => {
+			damagedTarget = target;
+		},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.deepEqual(movementTarget, { x: 18.3, y: 10 });
+	assert.equal(damagedTarget, null);
 });
 
 test("zombie attacks a blocking building when limited pathing cannot progress toward reachable sound", () => {

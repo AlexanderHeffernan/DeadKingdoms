@@ -71,10 +71,20 @@ export class BottomPanel implements GameUiComponent {
 		const ownedAnyBuildings = selected.filter((entity): entity is Building => entity.kind === "building" && entity.ownerId === this.state.playerId);
 		const ownedBuildings = selected.filter((entity): entity is Building => entity.kind === "building" && entity.ownerId === this.state.playerId && isComplete(entity));
 		const hasBuilder = ownedUnits.some((entity) => unitBehaviorFor(entity.type).canBuild);
+		const scouts = ownedUnits.filter((entity) => entity.type === "scout");
 		if (hasBuilder) {
 			for (const [buildingType, def] of Object.entries(BUILDINGS)) {
 				actions.push({ spriteName: buildingType, label: def.label, cost: def.cost, shortcut: BUILD_SHORTCUTS[buildingType as keyof typeof BUILD_SHORTCUTS], action: () => this.actions.setBuildMode(buildingType) });
 			}
+		}
+		if (scouts.length > 0) {
+			actions.push({
+				spriteName: "scout",
+				label: scouts.some((unit) => unit.hornActive) ? "Stop horn" : "Blow horn",
+				cost: {},
+				shortcut: "O",
+				action: () => this.actions.blowHorn(scouts.map((unit) => unit.id)),
+			});
 		}
 		for (const building of ownedBuildings) {
 			if (building.gatherResource) {

@@ -33,6 +33,7 @@ export type SoundEffectName =
 | "unit_death_zombie"
 | "zombie_idle"
 | "under_attack_alert"
+| "scout_horn"
 | "player_join"
 | "player_leave"
 | "toast_notice"
@@ -43,15 +44,21 @@ type PlayOptions = {
 	volume?: number;
 	cooldownKey?: string;
 	cooldownMs?: number;
+	hearingRadius?: number;
 	rate?: number;
 };
 
 type Entity = Unit | Building | ResourceNode;
+type LoopingSound = {
+	source: AudioBufferSourceNode;
+	gain: GainNode;
+};
 type AudioContextWindow = Window & typeof globalThis & {
 	webkitAudioContext?: typeof AudioContext;
 };
 
 const SOUND_PATH = "/sfx/wav";
+const SOUND_ASSET_VERSION = "2026-06-21-5";
 const UI_SFX_MASTER_VOLUME = 1.95;
 const WORLD_SFX_MASTER_VOLUME = 1.05;
 const SCREEN_HEARING_RADIUS = 920;
@@ -94,6 +101,7 @@ const SOUND_EFFECTS: Record<SoundEffectName, SoundEffectDef> = {
 	unit_death_zombie: { volume: 0.42, cooldownMs: 220, variance: 0.04, space: "world" },
 	zombie_idle: { volume: 0.32, cooldownMs: 850, variance: 0.015, space: "world" },
 	under_attack_alert: { volume: 0.5, cooldownMs: 9000, space: "ui" },
+	scout_horn: { volume: 3.78, cooldownMs: 0, space: "world" },
 	player_join: { volume: 0.68, cooldownMs: 400, space: "ui" },
 	player_leave: { volume: 0.6, cooldownMs: 400, space: "ui" },
 	toast_notice: { volume: 0.5, cooldownMs: 220, space: "ui" },
@@ -103,6 +111,8 @@ const SOUND_EFFECTS: Record<SoundEffectName, SoundEffectDef> = {
 export class SoundEffects {
 	private readonly cache = new Map<SoundEffectName, Promise<AudioBuffer>>();
 	private readonly lastPlayed = new Map<string, number>();
+	private readonly hornLoops = new Map<string, LoopingSound>();
+	private activeHornIds = new Set<string>();
 	private context: AudioContext | null = null;
 	private previousSnapshot: ClientSnapshot | null = null;
 	private zombieIdleGain: GainNode | null = null;
@@ -143,12 +153,14 @@ export class SoundEffects {
 	observe(snapshot: ClientSnapshot) {
 		if (!this.previousSnapshot) {
 			this.previousSnapshot = snapshot;
+			this.playHornSounds(snapshot);
 			return;
 		}
 		this.playNoticeSounds(this.previousSnapshot, snapshot);
 		this.playUnderAttackAlert(this.previousSnapshot, snapshot);
 		this.playUnitSounds(this.previousSnapshot, snapshot);
 		this.playBuildingSounds(this.previousSnapshot, snapshot);
+		this.playHornSounds(snapshot);
 		this.playZombieIdle(snapshot);
 		this.previousSnapshot = snapshot;
 	}
@@ -159,6 +171,8 @@ export class SoundEffects {
 		this.underAttackActive = false;
 		this.lastOwnedDamageAt = -Infinity;
 		this.stopZombieIdle();
+		this.stopAllHornLoops();
+		this.activeHornIds.clear();
 	}
 
 	private playNoticeSounds(previous: ClientSnapshot, snapshot: ClientSnapshot) {
@@ -255,6 +269,22 @@ export class SoundEffects {
 		}));
 	}
 
+	private playHornSounds(snapshot: ClientSnapshot) {
+		const activeIds = new Set(snapshot.hornSounds.map((sound) => sound.id));
+		this.activeHornIds = activeIds;
+		for (const id of this.hornLoops.keys()) {
+			if (!activeIds.has(id)) this.stopHornLoop(id);
+		}
+		for (const sound of snapshot.hornSounds) {
+			const volume = this.effectiveVolume("scout_horn", {
+				point: sound,
+				hearingRadius: this.actionHearingRadius(sound.sound),
+			});
+			if (volume <= 0) this.stopHornLoop(sound.id);
+			else this.updateHornLoop(sound.id, volume);
+		}
+	}
+
 	private playUnitReady(unit: Unit, snapshot: ClientSnapshot) {
 		if (unit.ownerId !== snapshot.playerId) return;
 		if (unit.type === "villager") this.play("unit_ready_villager", { point: unit });
@@ -288,11 +318,12 @@ export class SoundEffects {
 		const def = SOUND_EFFECTS[name];
 		const master = def.space === "ui" ? UI_SFX_MASTER_VOLUME : WORLD_SFX_MASTER_VOLUME;
 		const base = def.volume * (options.volume ?? 1) * master;
-		const position = def.space === "world" && options.point ? this.positionVolume(options.point) : 1;
-		return clamp(base * position, 0, 1);
+		const position = def.space === "world" && options.point ? this.positionVolume(options.point, options.hearingRadius, name) : 1;
+		const maxVolume = name === "scout_horn" ? 2 : 1;
+		return clamp(base * position, 0, maxVolume);
 	}
 
-	private positionVolume(point: Vec2) {
+	private positionVolume(point: Vec2, hearingRadius = SCREEN_HEARING_RADIUS, name?: SoundEffectName) {
 		const screen = isoToScreen(point.x, point.y, this.camera);
 		const cx = window.innerWidth / 2;
 		const cy = window.innerHeight / 2;
@@ -300,9 +331,14 @@ export class SoundEffects {
 		const zoom = clamp(this.camera.zoom ?? 1, 0.2, 2);
 		const zoomRange = (zoom - 0.2) / 1.8;
 		const zoomVolume = 0.025 + 1.28 * Math.pow(zoomRange, 1.25);
-		const falloff = clamp(1 - distance / SCREEN_HEARING_RADIUS, 0, 1);
+		const falloff = clamp(1 - distance / hearingRadius, 0, 1);
 		if (falloff <= 0) return 0;
+		if (name === "scout_horn") return (0.18 + 0.82 * Math.pow(falloff, 0.6)) * zoomVolume;
 		return falloff * falloff * zoomVolume;
+	}
+
+	private actionHearingRadius(sound: number) {
+		return SCREEN_HEARING_RADIUS + Math.sqrt(Math.max(0, sound)) * 55;
 	}
 
 	private audioContext() {
@@ -317,7 +353,7 @@ export class SoundEffects {
 	private bufferFor(name: SoundEffectName) {
 		const cached = this.cache.get(name);
 		if (cached) return cached;
-		const promise = fetch(`${SOUND_PATH}/${name}.wav`)
+		const promise = fetch(`${SOUND_PATH}/${name}.wav?v=${SOUND_ASSET_VERSION}`)
 			.then((response) => {
 				if (!response.ok) throw new Error(`HTTP ${response.status}`);
 				return response.arrayBuffer();
@@ -384,6 +420,44 @@ export class SoundEffects {
 			this.zombieIdleSource = null;
 			this.zombieIdleGain = null;
 		}, 650);
+	}
+
+	private updateHornLoop(id: string, volume: number) {
+		const context = this.audioContext();
+		const loop = this.hornLoops.get(id);
+		if (loop) {
+			loop.gain.gain.value = volume;
+			return;
+		}
+		void this.bufferFor("scout_horn")
+			.then((buffer) => {
+				if (!this.activeHornIds.has(id) || this.hornLoops.has(id)) return;
+				const source = context.createBufferSource();
+				const gain = context.createGain();
+				source.buffer = buffer;
+				source.loop = true;
+				source.loopStart = Math.min(0.08, buffer.duration * 0.25);
+				source.loopEnd = Math.max(source.loopStart + 0.1, buffer.duration - 0.85);
+				gain.gain.value = volume;
+				source.connect(gain);
+				gain.connect(context.destination);
+				this.hornLoops.set(id, { source, gain });
+				source.start();
+			})
+			.catch((error) => console.warn("Could not start scout horn loop.", error));
+	}
+
+	private stopHornLoop(id: string) {
+		const loop = this.hornLoops.get(id);
+		if (!loop) return;
+		loop.source.stop();
+		loop.source.disconnect();
+		loop.gain.disconnect();
+		this.hornLoops.delete(id);
+	}
+
+	private stopAllHornLoops() {
+		for (const id of [...this.hornLoops.keys()]) this.stopHornLoop(id);
 	}
 
 	private canPlay(key: string, cooldownMs: number) {

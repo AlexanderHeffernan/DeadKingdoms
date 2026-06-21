@@ -93,7 +93,7 @@ export type UnitSimulationContext = {
 	damage(target: UnitCombatTarget, amount: number, attackerId: Unit["ownerId"], attacker?: Unit): void;
 
 	/** Emits a temporary action sound for zombie attraction. */
-	emitActionSound(action: "unitAttack" | "build" | "chopWood" | "mineOre" | "gatherFood", point: { x: number; y: number }): void;
+	emitActionSound(action: "unitAttack" | "build" | "chopWood" | "mineOre" | "gatherFood" | "horn", point: { x: number; y: number }): void;
 
 	/** Resolves a gather command target id to a resource node or gatherable building. */
 	gatherTarget(targetId: string, playerId: Unit["ownerId"]): ResourceNode | Building | null;

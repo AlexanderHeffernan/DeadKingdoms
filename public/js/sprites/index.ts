@@ -10,6 +10,7 @@ import lumberCamp from "./lumberCamp.js";
 import miningCamp from "./miningCamp.js";
 import ore from "./ore.js";
 import ruin from "./ruin.js";
+import scout from "./scout.js";
 import soldier from "./soldier.js";
 import stump from "./stump.js";
 import townCenter from "./townCenter.js";
@@ -39,6 +40,7 @@ export const sprites: Partial<Record<SpriteName, readonly string[]>> = {
   miningCamp,
   ore,
   ruin,
+  scout,
   soldier,
   stump,
   townCenter,

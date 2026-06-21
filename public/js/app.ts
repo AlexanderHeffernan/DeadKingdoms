@@ -88,6 +88,11 @@ const ui = new UI(state, {
 				else sfx.play(errorMessage(result).includes("Population") ? "population_blocked" : "ui_error");
 			});
 		},
+	blowHorn(unitIds) {
+		issue({ type: "blowHorn", unitIds }).then((result) => {
+			if (!result.ok) sfx.play("ui_error");
+		});
+	},
 	toggleAutoFarm() {
 		issue({ type: "toggleAutoFarm" }).then((result) => sfx.play(result.ok ? "toast_notice" : "ui_error"));
 	},
@@ -845,6 +850,7 @@ function onKeyDown(event: KeyboardEvent) {
 	if (shortcutUnit) return trainShortcut(shortcutUnit);
 	if (key === "r") return selectedFarmAction((farm) => issue({ type: "replenishFarm", farmId: farm.id }));
 	if (key === "a") return selectedFarmAction(() => issue({ type: "toggleAutoFarm" }));
+	if (key === "o") return blowHornForSelectedScouts();
 	if (key === "y") return setRallyForSelectedProduction();
 }
 
@@ -897,6 +903,21 @@ function trainShortcut(unitType: UnitType) {
 function selectedFarmAction(action: (farm: Building) => void) {
 	const farm = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId && entity.gatherResource);
 	if (farm) action(farm);
+}
+
+function blowHornForSelectedScouts() {
+	const unitIds = [...state.selectedIds].map((id) => state.snapshot?.units[id]).filter((unit): unit is Unit => (
+		!!unit &&
+		unit.ownerId === state.playerId &&
+		unit.type === "scout"
+	)).map((unit) => unit.id);
+	if (unitIds.length === 0) {
+		sfx.play("ui_error");
+		return ui.showToast("Select a scout.");
+	}
+	issue({ type: "blowHorn", unitIds }).then((result) => {
+		if (!result.ok) sfx.play("ui_error");
+	});
 }
 
 function deleteSelectedBuilding() {

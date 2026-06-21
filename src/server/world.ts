@@ -500,6 +500,7 @@ const COMMAND_HANDLERS: { [K in CommandPayload["type"]]: CommandHandler<K> } = {
 	train: commandTrain,
 	attack: commandAttack,
 	gather: commandGather,
+	blowHorn: commandBlowHorn,
 	toggleAutoFarm: commandToggleAutoFarm,
 	replenishFarm: commandReplenishFarm,
 };
@@ -1030,6 +1031,7 @@ function commandMove(world: World, playerId: PlayerId, body: Extract<CommandPayl
 		}
 		const moveGroupId = moveGroupIdFor(playerId, world.tick, cluster, landingTarget);
 		const formationTarget = formationTargetForCluster(world, landingTarget, cluster, index, reservedFormationTargets);
+		unit.hornActive = false;
 		unit.command = formationTarget ? moveFormationCommand(target, cluster.length, formationTarget, moveGroupId, landingTarget) : {
 			type: "move",
 			...target,
@@ -1094,6 +1096,21 @@ function commandGather(world: World, playerId: PlayerId, body: Extract<CommandPa
 		}
 	});
 	return assigned ? { ok: true } : { ok: false, error: "Select gather-capable units." };
+}
+
+function commandBlowHorn(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "blowHorn" }>): CommandResult {
+	let toggled = false;
+	forOwnUnits(world, playerId, body.unitIds, (unit) => {
+		if (unit.type !== "scout") return;
+		unit.hornActive = !unit.hornActive;
+		if (unit.hornActive) {
+			unit.command = { type: "idle" };
+			emitActionSound(world, "horn", unit);
+		}
+		unit.workFlash = 0.4;
+		toggled = true;
+	});
+	return toggled ? { ok: true } : { ok: false, error: "Select a scout." };
 }
 
 function commandToggleAutoFarm(world: World, playerId: PlayerId): CommandResult {

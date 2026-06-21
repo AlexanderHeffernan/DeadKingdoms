@@ -158,8 +158,7 @@ export class ZombieUnit extends BaseUnit {
 		const sourceTarget = zombie.zombieHordeSourceTarget || target;
 		const wallLikeBlocker = context.wallLikeBlockingBuildingToward?.(zombie, sourceTarget);
 		if (context.hasReasonablePathToTarget(zombie, sourceTarget, 0.45)) return null;
-		if (wallLikeBlocker) return wallLikeBlocker;
-		return context.blockingBuildingToward(zombie, sourceTarget);
+		return wallLikeBlocker || null;
 	}
 
 	private findNearestUnitTarget(context: UnitSimulationContext, zombie: Unit, range: number): Unit | null {

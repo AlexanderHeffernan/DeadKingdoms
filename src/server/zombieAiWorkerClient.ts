@@ -116,15 +116,11 @@ export class ZombieAiWorkerClient {
 		unit.facing = state.facing;
 		if (state.vision === null) delete unit.vision;
 			else unit.vision = state.vision;
-		unit.hordeTarget = state.hordeTarget;
-		unit.zombieGoalKind = state.zombieGoalKind;
 		unit.zombiePath = state.zombiePath;
 		unit.zombiePathTarget = state.zombiePathTarget;
 		unit.zombieStuckTicks = state.zombieStuckTicks;
 		unit.retargetIn = state.retargetIn;
-		unit.hordeId = state.hordeId;
 		unit.zombieDriftDirection = state.zombieDriftDirection;
-		unit.zombieHordeSourceTarget = state.zombieHordeSourceTarget;
 	}
 
 	private startNext(world: World, dt: number, zombies: ZombieAiStep[], profiler: ZombieAiWorkerStepProfiler | null) {

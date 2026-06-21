@@ -1,5 +1,6 @@
 import { buildSoundField, collectWorldSoundSources, SOUND_FIELD_CELL_SIZE } from "./soundField.js";
 import { dayNightStateAt } from "./dayNight.js";
+import { ACTION_SOUND_DEFS } from "./config.js";
 import type { AdminLevel, AdminSnapshot, PlayerId, Snapshot, SoundDebugSource, Unit, VisibilityCache, World } from "./types.js";
 import { isVisible } from "./visibility.js";
 
@@ -82,6 +83,7 @@ export function makeSnapshot(
 		dayNight,
 		leaderboard: world.leaderboard,
 		notices: world.notices.slice(-8),
+		hornSounds: hornSoundSources(world),
 		soundDebug: player?.soundDebug ? buildSoundDebugSources(world) : null,
 		pathDebug: player?.pathDebug === true,
 		serverPerf: admin
@@ -154,6 +156,7 @@ function serializeUnit(unit: Unit, includeZombieDebug: boolean): Unit {
 		facing: unit.facing,
 		carried: unit.carried,
 		selected: unit.selected,
+		...(unit.hornActive ? { hornActive: true } : {}),
 		...(unit.sprite ? { sprite: unit.sprite } : {}),
 		...(unit.vision !== undefined ? { vision: unit.vision } : {}),
 		...(includeZombieDebug && unit.type === "zombie" ? { zombieDebugState: zombieDebugState(unit), zombieHordeColor: zombieHordeColor(unit) } : {}),
@@ -190,6 +193,17 @@ function zombieHordeColor(unit: Unit) {
 	let hash = 0;
 	for (let i = 0; i < unit.hordeId.length; i += 1) hash = (hash * 31 + unit.hordeId.charCodeAt(i)) >>> 0;
 	return colors[hash % colors.length]!;
+}
+
+function hornSoundSources(world: World) {
+	return Object.values(world.units)
+		.filter((unit) => unit.type === "scout" && unit.hornActive && unit.hp > 0)
+		.map((unit) => ({
+			id: unit.id,
+			x: unit.x,
+			y: unit.y,
+			sound: ACTION_SOUND_DEFS.horn.sound,
+		}));
 }
 
 function buildSoundDebugSources(world: World): SoundDebugSource[] {

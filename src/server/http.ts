@@ -471,7 +471,7 @@ async function serveStatic(req: import("node:http").IncomingMessage, res: import
 
 function cacheControl(filePath: string) {
 	const ext = extname(filePath);
-	if (ext === ".html" || ext === ".css" || ext === ".js") return "no-cache";
+	if (ext === ".html" || ext === ".css" || ext === ".js" || ext === ".wav") return "no-cache";
 	return "public, max-age=86400";
 }
 

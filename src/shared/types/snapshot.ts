@@ -41,6 +41,14 @@ export interface SoundDebugSource {
 	zombieStrength?: number;
 }
 
+/** Active world sound source sent to clients even when the source unit is not visible. */
+export interface HornSoundSource {
+	id: string;
+	x: number;
+	y: number;
+	sound: number;
+}
+
 /** Backend simulation performance sent with snapshots. */
 export interface ServerPerfStats {
 	tps: number;
@@ -177,6 +185,7 @@ export interface Snapshot {
 	dayNight: DayNightState;
 	leaderboard: LeaderboardEntry[];
 	notices: Notice[];
+	hornSounds: HornSoundSource[];
 	soundDebug: SoundDebugSource[] | null;
 	pathDebug: boolean;
 	serverPerf: ServerPerfStats | null;

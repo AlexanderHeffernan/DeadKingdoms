@@ -1,5 +1,5 @@
 import { ProductionBuilding } from "../base/index.js";
-import { ArcherUnit, SoldierUnit } from "../../units/index.js";
+import { ArcherUnit, ScoutUnit, SoldierUnit } from "../../units/index.js";
 
 export class Barracks extends ProductionBuilding {
 	static readonly type = "barracks";
@@ -11,5 +11,5 @@ export class Barracks extends ProductionBuilding {
 	static readonly cost = { wood: 175 };
 	static readonly vision = 6;
 	static readonly sound = 0;
-	static readonly trains = [SoldierUnit, ArcherUnit] as const;
+	static readonly trains = [SoldierUnit, ArcherUnit, ScoutUnit] as const;
 }

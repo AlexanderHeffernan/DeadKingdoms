@@ -30,7 +30,6 @@ export const STARTING_UNITS = [
 	{ unitType: "soldier", x: 5.0, y: 5.0 },
 	{ unitType: "villager", x: 3.0, y: 5.0 },
 	{ unitType: "villager", x: 1.0, y: 5.0 },
-
 	{ unitType: "villager", x: 5.0, y: 3.0 },
 ] as const;
 
@@ -65,6 +64,7 @@ export const ACTION_SOUND_DEFS = {
 	build: { sound: 60, duration: 0.1 },
 	unitAttack: { sound: 60, duration: 0.1 },
 	towerAttack: { sound: 30, duration: 0.1 },
+	horn: { sound: 900, duration: 0.35 },
 	trainUnit: { sound: 0, duration: 0.1 },
 	buildingDestroyed: { sound: 420, duration: 5 },
 } as const;

@@ -84,6 +84,7 @@ export interface Unit extends BaseEntity {
 	facing: Facing;
 	carried: null | { resource: ResourceType; amount: number };
 	selected: boolean;
+	hornActive?: boolean;
 	vision?: number;
 	hordeTarget?: Vec2 | null;
 	zombieGoalKind?: "sound" | "target" | "drift" | "wander" | null;

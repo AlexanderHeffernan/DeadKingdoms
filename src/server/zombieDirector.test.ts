@@ -701,6 +701,26 @@ test("hordes flow through reached action sounds instead of stacking on them", ()
 	assert.notDeepEqual(first.zombieHordeSourceTarget, { x: 50, y: 80 });
 });
 
+test("hordes keep targeting reached loud action sounds while they remain active", () => {
+	const world = makeWorld();
+	for (let i = 0; i < 4; i += 1) {
+		const zombie = makeZombie(50 + i * 2, 80, `loud-zombie-${i}`);
+		world.units[zombie.id] = zombie;
+	}
+	addNoise(world, 50, 80, 900, "reached-loud-noise");
+
+	step(world);
+
+	const first = world.units["loud-zombie-0" as Unit["id"]];
+	const second = world.units["loud-zombie-1" as Unit["id"]];
+	assert.ok(first);
+	assert.ok(second);
+	assert.equal(first.hordeId, second.hordeId);
+	assert.equal(first.zombieGoalKind, "sound");
+	assert.ok(first.zombieHordeSourceTarget);
+	assert.deepEqual(first.zombieHordeSourceTarget, { x: 50, y: 80 });
+});
+
 test("zombie hordes replace stronger memory when a weaker world sound is heard", () => {
 	const world = makeWorld();
 	world.units["z-test" as Unit["id"]] = makeZombie();

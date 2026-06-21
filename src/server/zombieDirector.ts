@@ -244,7 +244,7 @@ function assignDirectActionSoundGoals(world: World, hordes: ZombieHorde[]) {
 	for (const horde of hordes) {
 		const heardSound = heardActionSoundForHordeMembers(world, horde);
 		if (!heardSound) continue;
-		const reachedExistingSound = isSameTarget(horde.soundMemory?.target || null, heardSound.target) && hasHordeMemberReached(world, horde, heardSound.target);
+		const reachedExistingSound = !heardSound.loudAction && isSameTarget(horde.soundMemory?.target || null, heardSound.target) && hasHordeMemberReached(world, horde, heardSound.target);
 		if (reachedExistingSound) {
 			horde.driftDirection = nonZeroDirection(heardSound.direction) || directionBetween(horde.center, heardSound.target) || horde.driftDirection;
 			horde.soundMemory = null;
