@@ -12,21 +12,27 @@
 			<p>Dead Kingdoms is not currently supported on mobile devices. Please visit on a desktop computer to play.</p>
 		</div>
 		<div id="join" class="join">
-			<form id="joinForm" class="join-panel">
+			<form id="joinForm" class="join-panel" autocomplete="off">
 				<label>
 					Username
 					<span class="flex">
 						<input
 							id="nameInput"
+							type="text"
 							maxlength="18"
-							name="town-founder-input"
+							name="dk-callsign"
 							autocomplete="off"
+							autocorrect="off"
+							autocapitalize="off"
+							spellcheck="false"
+							data-1p-ignore="true"
+							data-lpignore="true"
 							placeholder="Town founder"
 						/>
 						<input
 							id="colorInput"
 							type="color"
-							value="#4f8fd8"
+							value="#7f3f4a"
 							aria-label="Player colour"
 						/>
 					</span>

@@ -62,6 +62,8 @@ const sfx = new SoundEffects(view.camera);
 
 const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const DEV_COMMAND_BUFFER_LENGTH = 40;
+const PLAYER_NAME_STORAGE_KEY = "rtsPlayerName";
+const PLAYER_COLOR_STORAGE_KEY = "rtsPlayerColor";
 
 const canvas = document.getElementById("world") as HTMLCanvasElement | null;
 const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
@@ -78,6 +80,24 @@ let lastFrameAt = performance.now();
 let smoothedFps = 60;
 let lastPingReportAt = 0;
 let adminDiagnosticsVisible = false;
+
+const joinForm = document.getElementById("joinForm") as HTMLFormElement | null;
+const nameInput = document.getElementById("nameInput") as HTMLInputElement | null;
+const colorInput = document.getElementById("colorInput") as HTMLInputElement | null;
+
+if (nameInput) {
+	nameInput.value = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) || "";
+	nameInput.focus();
+	nameInput.select();
+}
+if (colorInput) {
+	colorInput.value = localStorage.getItem(PLAYER_COLOR_STORAGE_KEY) || colorInput.value;
+	colorInput.addEventListener("keydown", (event) => {
+		if (event.key !== "Enter") return;
+		event.preventDefault();
+		joinForm?.requestSubmit();
+	});
+}
 const ui = new UI(state, {
 	setBuildMode(type) {
 		view.buildMode = type;
@@ -216,11 +236,9 @@ const ui = new UI(state, {
 	},
 });
 
-document.getElementById("joinForm")?.addEventListener("submit", async (event) => {
+joinForm?.addEventListener("submit", async (event) => {
 	event.preventDefault();
 	sfx.unlock();
-	const nameInput = document.getElementById("nameInput") as HTMLInputElement | null;
-	const colorInput = document.getElementById("colorInput") as HTMLInputElement | null;
 	const name = nameInput?.value.trim() || "Player";
 	const color = colorInput?.value || "";
 	const result = await join(name, color);
@@ -231,6 +249,8 @@ document.getElementById("joinForm")?.addEventListener("submit", async (event) =>
 	const notice = document.getElementById("joinNotice");
 	if (notice) notice.textContent = "";
 	state.playerId = result.playerId;
+	localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
+	localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, color);
 	localStorage.setItem("rtsPlayerId", result.playerId);
 	enterGame();
 });
