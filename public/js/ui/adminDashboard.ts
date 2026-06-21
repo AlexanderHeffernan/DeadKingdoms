@@ -37,6 +37,7 @@ export class AdminDashboard {
 	private readonly grantSoldiersButton: HTMLButtonElement;
 	private readonly invincibleButton: HTMLButtonElement;
 	private readonly noiseToolButton: HTMLButtonElement;
+	private readonly instantBuildButton: HTMLButtonElement;
 	private readonly midnightButton: HTMLButtonElement;
 	private readonly dawnButton: HTMLButtonElement;
 	private readonly middayButton: HTMLButtonElement;
@@ -87,6 +88,7 @@ export class AdminDashboard {
 		this.grantSoldiersButton = elements.grantSoldiersButton;
 		this.invincibleButton = elements.invincibleButton;
 		this.noiseToolButton = elements.noiseToolButton;
+		this.instantBuildButton = elements.instantBuildButton;
 		this.midnightButton = elements.midnightButton;
 		this.dawnButton = elements.dawnButton;
 		this.middayButton = elements.middayButton;
@@ -176,6 +178,10 @@ export class AdminDashboard {
 		this.invincibleButton.addEventListener("click", () => this.runCommand(this.invincibleButton, this.actions.toggleTownCenterInvincible));
 		this.noiseToolButton.addEventListener("click", async () => {
 			await this.runCommand(this.noiseToolButton, this.actions.toggleNoiseTool);
+			this.hide();
+		});
+		this.instantBuildButton.addEventListener("click", async () => {
+			await this.runCommand(this.instantBuildButton, this.actions.toggleInstantBuild);
 			this.hide();
 		});
 		this.midnightButton.addEventListener("click", () => this.runCommand(this.midnightButton, () => this.actions.setTimeOfDay(0, "Midnight")));
@@ -569,6 +575,7 @@ export type AdminDashboardElements = {
 	grantSoldiersButton: HTMLButtonElement;
 	invincibleButton: HTMLButtonElement;
 	noiseToolButton: HTMLButtonElement;
+	instantBuildButton: HTMLButtonElement;
 	midnightButton: HTMLButtonElement;
 	dawnButton: HTMLButtonElement;
 	middayButton: HTMLButtonElement;
@@ -587,6 +594,7 @@ export type AdminDashboardActions = {
 	grantSoldiers: () => Promise<string>;
 	toggleTownCenterInvincible: () => Promise<string>;
 	toggleNoiseTool: () => Promise<string>;
+	toggleInstantBuild: () => Promise<string>;
 	setTimeOfDay: (progress: number, label: string) => Promise<string>;
 	restartServer: () => Promise<string>;
 };

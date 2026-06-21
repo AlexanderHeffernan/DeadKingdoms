@@ -50,6 +50,7 @@ export class UI {
 			grantSoldiersButton: mustGet("adminGrantSoldiersButton") as HTMLButtonElement,
 			invincibleButton: mustGet("adminInvincibleButton") as HTMLButtonElement,
 			noiseToolButton: mustGet("adminNoiseToolButton") as HTMLButtonElement,
+			instantBuildButton: mustGet("adminInstantBuildButton") as HTMLButtonElement,
 			midnightButton: mustGet("adminMidnightButton") as HTMLButtonElement,
 			dawnButton: mustGet("adminDawnButton") as HTMLButtonElement,
 			middayButton: mustGet("adminMiddayButton") as HTMLButtonElement,
@@ -66,6 +67,7 @@ export class UI {
 			grantSoldiers: actions.grantSoldiers,
 			toggleTownCenterInvincible: actions.toggleTownCenterInvincible,
 			toggleNoiseTool: actions.toggleNoiseTool,
+			toggleInstantBuild: actions.toggleInstantBuild,
 			setTimeOfDay: actions.setTimeOfDay,
 			restartServer: actions.restartServer,
 		});

@@ -12,6 +12,7 @@ import type {
 export type CommandType =
 	| "move"
 	| "build"
+	| "instantBuild"
 	| "finishBuild"
 	| "deleteBuilding"
 	| "setRallyPoint"
@@ -35,6 +36,11 @@ export interface MovePayload extends CommandBase, Vec2 {
 export interface BuildPayload extends CommandBase, Vec2 {
 	type: "build";
 	unitIds: UnitId[];
+	buildingType: BuildingType;
+}
+
+export interface InstantBuildPayload extends CommandBase, Vec2 {
+	type: "instantBuild";
 	buildingType: BuildingType;
 }
 
@@ -86,6 +92,7 @@ export interface ReplenishFarmPayload extends CommandBase {
 export type CommandPayload =
 | MovePayload
 | BuildPayload
+| InstantBuildPayload
 | FinishBuildPayload
 | DeleteBuildingPayload
 | SetRallyPointPayload

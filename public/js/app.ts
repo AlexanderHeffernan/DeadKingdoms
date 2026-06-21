@@ -53,6 +53,7 @@ const view: ViewState = {
 	buildMode: null,
 	rallyModeBuildingId: null,
 	noiseMode: false,
+	instantBuildMode: false,
 	hoverTile: null,
 	mouse: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
 	wallDragStartTile: null,
@@ -190,6 +191,14 @@ const ui = new UI(state, {
 		const message = view.noiseMode
 			? "Noise tool ON — left-click the map to make a bang. Esc or right-click to stop."
 			: "Noise tool off.";
+		ui.showToast(message);
+		return message;
+	},
+	async toggleInstantBuild() {
+		view.instantBuildMode = !view.instantBuildMode;
+		const message = view.instantBuildMode
+			? "Instant build ON. Use building hotkeys, then click the map to place completed buildings."
+			: "Instant build off.";
 		ui.showToast(message);
 		return message;
 	},
@@ -700,14 +709,17 @@ function placeBuilding() {
 	const mode = view.buildMode;
 	if (!mode) return;
 	const unitIds = [...state.selectedIds].filter((id) => state.snapshot?.units[id]?.ownerId === state.playerId);
-	if (!view.hoverTile || unitIds.length === 0) return;
-	if (!canAffordBuildAt(mode as BuildingType, view.hoverTile.x, view.hoverTile.y) || !canPlacePreview(mode as BuildingType, view.hoverTile.x, view.hoverTile.y)) {
+	if (!view.hoverTile || (!view.instantBuildMode && unitIds.length === 0)) return;
+	if ((!view.instantBuildMode && !canAffordBuildAt(mode as BuildingType, view.hoverTile.x, view.hoverTile.y)) || !canPlacePreview(mode as BuildingType, view.hoverTile.x, view.hoverTile.y)) {
 		ui.showToast("Cannot place that building there.");
 		sfx.play("ui_error");
 		return;
 	}
 	const buildPoint = { x: view.hoverTile.x, y: view.hoverTile.y };
-	issue({ type: "build", unitIds, buildingType: mode as BuildingType, x: buildPoint.x, y: buildPoint.y }).then((result) => {
+	const command = view.instantBuildMode
+		? { type: "instantBuild" as const, buildingType: mode as BuildingType, x: buildPoint.x, y: buildPoint.y }
+		: { type: "build" as const, unitIds, buildingType: mode as BuildingType, x: buildPoint.x, y: buildPoint.y };
+	issue(command).then((result) => {
 		sfx.play(result.ok ? buildingCommandSound(mode) : "ui_error", { point: buildPoint });
 	});
 	view.buildMode = null;
@@ -722,8 +734,8 @@ function placeBuildMode() {
 async function placeWallLine() {
 	const unitIds = [...state.selectedIds].filter((id) => state.snapshot?.units[id]?.ownerId === state.playerId);
 	const tiles = wallLineTiles();
-	if (!tiles.length || unitIds.length === 0) return;
-	if (!canAffordLine("wall", tiles) || tiles.some((tile) => !canPlacePreview("wall", tile.x, tile.y))) {
+	if (!tiles.length || (!view.instantBuildMode && unitIds.length === 0)) return;
+	if ((!view.instantBuildMode && !canAffordLine("wall", tiles)) || tiles.some((tile) => !canPlacePreview("wall", tile.x, tile.y))) {
 		ui.showToast("Cannot place that wall there.");
 		sfx.play("ui_error");
 		return;
@@ -731,7 +743,10 @@ async function placeWallLine() {
 	view.buildMode = null;
 	view.wallDragStartTile = null;
 	for (const tile of tiles) {
-		const result = await issue({ type: "build", unitIds, buildingType: "wall", x: tile.x, y: tile.y });
+		const command = view.instantBuildMode
+			? { type: "instantBuild" as const, buildingType: "wall" as const, x: tile.x, y: tile.y }
+			: { type: "build" as const, unitIds, buildingType: "wall" as const, x: tile.x, y: tile.y };
+		const result = await issue(command);
 		sfx.play(result.ok ? "ui_command_build" : "ui_error", { point: tile, cooldownKey: "wall_line_build" });
 		if (!result.ok) break;
 	}
@@ -833,13 +848,13 @@ function startBuildShortcut(buildingType: BuildingType) {
 		const unit = state.snapshot?.units[id];
 		return unit?.ownerId === state.playerId && unitBehavior(unit).canBuild;
 	});
-	if (!hasBuilder) {
+	if (!view.instantBuildMode && !hasBuilder) {
 		sfx.play("ui_error");
 		return ui.showToast("Select build-capable units.");
 	}
 	const def = BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES];
 	if (!def) return;
-	if (buildingType !== "gate" && !canAfford(def.cost || {})) {
+	if (!view.instantBuildMode && buildingType !== "gate" && !canAfford(def.cost || {})) {
 		sfx.play("ui_error");
 		return ui.showToast("Not enough resources.");
 	}

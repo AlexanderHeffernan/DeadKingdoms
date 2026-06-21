@@ -38,6 +38,7 @@ export type ViewState = {
 	buildMode: string | null;
 	rallyModeBuildingId: string | null;
 	noiseMode: boolean;
+	instantBuildMode: boolean;
 	hoverTile: { x: number; y: number } | null;
 	wallDragStartTile: { x: number; y: number } | null;
 	mouse: { x: number; y: number };
@@ -59,6 +60,7 @@ export type UIActions = {
 	grantSoldiers: () => Promise<string>;
 	toggleTownCenterInvincible: () => Promise<string>;
 	toggleNoiseTool: () => Promise<string>;
+	toggleInstantBuild: () => Promise<string>;
 	setTimeOfDay: (progress: number, label: string) => Promise<string>;
 	restartServer: () => Promise<string>;
 };

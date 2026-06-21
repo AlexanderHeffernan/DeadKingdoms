@@ -309,7 +309,7 @@ export function stepWorld(world: World, dt: number) {
 		profiler.measure("units", "Unit AI", () => stepUnits(world, context, dt, profiling));
 		profiler.measure("separation", "Unit separation", () => resolveUnitSeparation(world));
 		profiler.measure("buildings", "Buildings", () => {
-			for (const building of Object.values(world.buildings)) stepBuilding(world, building, dt);
+			for (const building of Object.values(world.buildings)) stepBuilding(world, context, building, dt);
 		});
 		profiler.measure("leaderboard", "Players/score", () => {
 			for (const playerId of Object.keys(world.players)) recalcPlayer(world, playerId);
@@ -481,6 +481,7 @@ type CommandHandler<T extends CommandPayload["type"]> = (
 const COMMAND_HANDLERS: { [K in CommandPayload["type"]]: CommandHandler<K> } = {
 	move: commandMove,
 	build: commandBuild,
+	instantBuild: commandInstantBuild,
 	finishBuild: commandFinishBuild,
 	deleteBuilding: commandDeleteBuilding,
 	setRallyPoint: commandSetRallyPoint,
@@ -1088,12 +1089,7 @@ function commandReplenishFarm(world: World, playerId: PlayerId, body: Extract<Co
 function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "build" }>): CommandResult {
 	const def = BUILDING_TYPES[body.buildingType];
 	if (!def) return { ok: false, error: "Unknown building." };
-	const footprint = {
-		width: ("width" in def ? def.width : def.size) as number,
-		height: ("height" in def ? def.height : def.size) as number,
-	};
-	const x = clamp(Math.round(Number(body.x)), 0, MAP_SIZE - footprint.width);
-	const y = clamp(Math.round(Number(body.y)), 0, MAP_SIZE - footprint.height);
+	const { x, y, footprint } = buildPlacement(body.buildingType, body.x, body.y);
 	const replacementWall = ownWallAt(world, playerId, x, y);
 	if (body.buildingType === "wall" && replacementWall) return { ok: true };
 	if (!canPlace(world, x, y, footprint.width, footprint.height, replacementWall)) return { ok: false, error: "Blocked tile." };
@@ -1109,6 +1105,37 @@ function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPay
 	const resourceKind = building.depotGatherKind();
 	for (const unit of builders) unit.command = { type: "build", targetId: building.id, path: null, resourceKind, gatherBuiltFarm: building.shouldGatherAfterBuild };
 	return { ok: true };
+}
+
+function commandInstantBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "instantBuild" }>): CommandResult {
+	const player = world.players[playerId];
+	if (!player?.adminLevel) return { ok: false, error: "Admin access is required." };
+	const def = BUILDING_TYPES[body.buildingType];
+	if (!def) return { ok: false, error: "Unknown building." };
+	const { x, y, footprint } = buildPlacement(body.buildingType, body.x, body.y);
+	const replacementWall = ownWallAt(world, playerId, x, y);
+	if (body.buildingType === "wall" && replacementWall) return { ok: true };
+	if (!canPlace(world, x, y, footprint.width, footprint.height, replacementWall)) return { ok: false, error: "Blocked tile." };
+	if (body.buildingType === "gate" && replacementWall) delete world.buildings[replacementWall.id];
+	const building = createBuilding(world, playerId, body.buildingType, x, y, true);
+	if (!building) return { ok: false, error: "Could not place building." };
+	building.markComplete();
+	building.hp = building.maxHp;
+	building.builderIds = [];
+	return { ok: true };
+}
+
+function buildPlacement(buildingType: BuildingType, rawX: number, rawY: number) {
+	const def = BUILDING_TYPES[buildingType];
+	const footprint = {
+		width: ("width" in def ? def.width : def.size) as number,
+		height: ("height" in def ? def.height : def.size) as number,
+	};
+	return {
+		x: clamp(Math.round(Number(rawX)), 0, MAP_SIZE - footprint.width),
+		y: clamp(Math.round(Number(rawY)), 0, MAP_SIZE - footprint.height),
+		footprint,
+	};
 }
 
 function replaceWallWithGate(world: World, playerId: PlayerId, wall: Building, builders: Unit[]): CommandResult {
@@ -1310,7 +1337,7 @@ function spatialUnitClusters(units: Unit[]): Unit[][] {
 	return clusters;
 }
 
-function stepBuilding(world: World, building: Building, dt: number) {
+function stepBuilding(world: World, context: UnitSimulationContext, building: Building, dt: number) {
 	if (building.cooldown !== undefined) building.cooldown = Math.max(0, building.cooldown - dt);
 	if (building.attackFlash !== undefined) building.attackFlash = Math.max(0, (building.attackFlash || 0) - dt);
 	if (!isComplete(building)) return;
@@ -1328,8 +1355,7 @@ function stepBuilding(world: World, building: Building, dt: number) {
 		}
 	}
 	if (building.canAttack) {
-		const buildingGrid = new SpatialGrid(Object.values(world.buildings).filter((candidate) => candidate.hp > 0), TARGET_UNIT_GRID_CELL_SIZE);
-		const target = nearestEnemy(world, unitTargetGridsByOwner(world), buildingGrid, building, building.attackRange);
+		const target = context.nearestEnemy(building, building.attackRange);
 		if (target && (building.cooldown ?? 0) <= 0) {
 			damage(world, target, building.attack, building.ownerId);
 			emitActionSound(world, "towerAttack", centerOf(building));
