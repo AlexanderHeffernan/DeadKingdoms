@@ -50,6 +50,8 @@ import type { ServerPerfPhase, ServerPerfUnitAiStats, ServerPerfZombieStats } fr
 const PLAYER_SPAWN_MARGIN = 34;
 const MIN_PLAYER_SPAWN_DISTANCE = 54;
 const PLAYER_SPAWN_ATTEMPTS = 220;
+const PLAYER_SPAWN_RESOURCE_CLEAR_RADIUS = 14;
+const PLAYER_SPAWN_ZOMBIE_CLEAR_RADIUS = PLAYER_SPAWN_RESOURCE_CLEAR_RADIUS * 2;
 const STUMP_DECAY_SECONDS = 60;
 const RUIN_DECAY_SECONDS = 60;
 const ZOMBIE_INITIAL_RETARGET_SECONDS = 1.2;
@@ -140,7 +142,8 @@ export function addPlayer(world: World, name: string, requestedColor: string | n
 		joinedAt: Date.now(),
 	};
 
-	clearSpawnResources(world, spawn.x, spawn.y, 14);
+	clearSpawnResources(world, spawn.x, spawn.y, PLAYER_SPAWN_RESOURCE_CLEAR_RADIUS);
+	clearSpawnZombies(world, spawn.x, spawn.y, PLAYER_SPAWN_ZOMBIE_CLEAR_RADIUS);
 	createBuilding(world, playerId, "townCenter", spawn.x, spawn.y, true);
 	for (const unit of STARTING_UNITS) createUnit(world, playerId, unit.unitType, spawn.x + unit.x, spawn.y + unit.y);
 	addLocalResources(world, spawn.x, spawn.y);
@@ -167,6 +170,15 @@ function clearSpawnResources(world: World, x: number, y: number, radius: number)
 	for (const resource of Object.values(world.resources)) {
 		if (distance(resource, { x, y }) <= radius) {
 			delete world.resources[resource.id];
+		}
+	}
+}
+
+function clearSpawnZombies(world: World, x: number, y: number, radius: number) {
+	for (const unit of Object.values(world.units)) {
+		if (unit.ownerId !== ZOMBIE_OWNER_ID) continue;
+		if (distance(unit, { x, y }) <= radius) {
+			delete world.units[unit.id];
 		}
 	}
 }
