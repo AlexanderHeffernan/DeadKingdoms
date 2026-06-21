@@ -575,7 +575,7 @@ function updateFpsStat() {
 
 function onMouseDown(event: MouseEvent) {
 	sfx.unlock();
-	if (event.button === 1 || event.shiftKey) {
+	if (event.button === 1 || (event.shiftKey && event.button !== 0)) {
 		view.panning = true;
 		view.panLast = { x: event.clientX, y: event.clientY };
 		return;
@@ -621,8 +621,8 @@ function onMouseUp(event: MouseEvent) {
 		setRallyPointFromScreen(event.clientX, event.clientY);
 		return;
 	}
-	if (dx < 5 && dy < 5) selectAt(event.clientX, event.clientY);
-		else selectBox();
+	if (dx < 5 && dy < 5) selectAt(event.clientX, event.clientY, event.shiftKey);
+		else selectBox(event.shiftKey);
 	ui.render();
 }
 
@@ -779,17 +779,18 @@ function pruneEffects() {
 	state.effects = state.effects.filter((effect) => now - effect.createdAt < effect.duration);
 }
 
-function selectAt(x: number, y: number) {
-	state.selectedIds.clear();
+function selectAt(x: number, y: number, additive = false) {
 	const hit = hitTestForSelection(x, y);
+	if (!additive) state.selectedIds.clear();
+	if (additive && hit?.kind !== "unit") return;
 	if (hit) state.selectedIds.add(hit.id);
 	if (hit?.kind === "unit") sfx.play("ui_select_unit", { point: hit });
 	else if (hit?.kind === "building") sfx.play("ui_select_building", { point: hit });
 }
 
-function selectBox() {
+function selectBox(additive = false) {
 	if (!state.snapshot) return;
-	state.selectedIds.clear();
+	if (!additive) state.selectedIds.clear();
 	const left = Math.min(view.dragStart!.x, view.dragCurrent!.x);
 	const right = Math.max(view.dragStart!.x, view.dragCurrent!.x);
 	const top = Math.min(view.dragStart!.y, view.dragCurrent!.y);
