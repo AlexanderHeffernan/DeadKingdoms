@@ -21,6 +21,11 @@ const STUCK_MOVEMENT_EPSILON = 0.015;
 const GROUP_ARRIVAL_BASE_RADIUS = 0.8;
 const GROUP_ARRIVAL_MAX_RADIUS = 5.5;
 const FORMATION_SLOT_SETTLE_RADIUS = 0.65;
+const FORMATION_SLOT_PRACTICAL_SETTLE_RADIUS = 1.15;
+const MOVE_STUCK_FINISH_TICKS = 4;
+const LARGE_GROUP_MOVE_STUCK_FINISH_TICKS = 2;
+const CLEAR_LINE_SAMPLE_STEP = 0.5;
+const CLEAR_LINE_MAX_SAMPLES = 48;
 const MOVING_COHESION_CELL_SIZE = 1.4;
 const MOVING_COHESION_RADIUS = 0.75;
 const MOVING_COHESION_STRENGTH = 0.7;
@@ -87,6 +92,18 @@ export function moveZombieSteered(world: World, unit: Unit, target: Vec2, maxSte
 	if (!candidate) return moveAroundSmallObstacle(world, unit, target, maxStep);
 	const before = { x: unit.x, y: unit.y };
 	moveToward(unit, candidate.target, maxStep);
+	const tile = worldTile(unit);
+	if (isHardOccupied(world, unit, tile.x, tile.y)) {
+		unit.x = before.x;
+		unit.y = before.y;
+		const arrived = moveAroundSmallObstacle(world, unit, target, maxStep);
+		const fallbackTile = worldTile(unit);
+		if (isHardOccupied(world, unit, fallbackTile.x, fallbackTile.y)) {
+			unit.x = before.x;
+			unit.y = before.y;
+		}
+		return arrived;
+	}
 	const moved = directionBetween(before, unit);
 	if (moved) unit.zombieDriftDirection = moved;
 	return distance(unit, target) <= WAYPOINT_REACHED_DISTANCE;
@@ -339,6 +356,7 @@ function nudgeUnit(world: World, unit: Unit, dx: number, dy: number) {
 }
 
 export function moveWithPath(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number, maxPathNodes = FOLLOW_PATH_MAX_NODES): boolean {
+	const before = { x: unit.x, y: unit.y };
 	const baseTarget = moveCommandTarget(world, unit, command);
 	const target = formationTarget(world, command, baseTarget);
 	const forming = tryApproachFormationTarget(world, unit, command, baseTarget, maxStep);
@@ -355,6 +373,7 @@ export function moveWithPath(world: World, unit: Unit, command: Extract<UnitComm
 	followPathStep(world, unit, command, target, target, maxStep, movingUnitGrid(world));
 	const arrived = tryApproachFormationTarget(world, unit, command, baseTarget, maxStep);
 	if (arrived !== null) return arrived;
+	if (isPracticalMoveComplete(unit, command, baseTarget, target, distance(before, unit))) return true;
 	return isGroupArrived(world, unit, command, target);
 }
 
@@ -484,6 +503,22 @@ function moveFormationStep(world: World, unit: Unit, target: Vec2, baseTarget: V
 	}
 	if (distance(before, unit) < STUCK_MOVEMENT_EPSILON && distance(unit, baseTarget) <= arrivalRadius(unit.command)) return true;
 	return distance(unit, target) <= FORMATION_SLOT_SETTLE_RADIUS;
+}
+
+function isPracticalMoveComplete(unit: Unit, command: Extract<UnitCommand, { type: "move" }>, baseTarget: Vec2, target: Vec2, movedDistance: number): boolean {
+	if (distance(unit, baseTarget) > arrivalRadius(command)) {
+		command.moveStuckTicks = 0;
+		return false;
+	}
+	if (!command.formationTarget) return movedDistance < STUCK_MOVEMENT_EPSILON;
+	if (distance(unit, target) <= FORMATION_SLOT_PRACTICAL_SETTLE_RADIUS) return true;
+	if (movedDistance >= STUCK_MOVEMENT_EPSILON) {
+		command.moveStuckTicks = 0;
+		return false;
+	}
+	command.moveStuckTicks = (command.moveStuckTicks || 0) + 1;
+	const stuckLimit = commandCrowd(command) >= 20 ? LARGE_GROUP_MOVE_STUCK_FINISH_TICKS : MOVE_STUCK_FINISH_TICKS;
+	return command.moveStuckTicks >= stuckLimit;
 }
 
 function formationDeployRadius(command: UnitCommand): number {
@@ -622,16 +657,40 @@ function movingZombieGrid(world: World): SpatialGrid<Unit> {
 }
 
 function hasClearMovementLine(world: World, unit: Unit, point: Vec2): boolean {
+	const cache = unit.type === "zombie" ? null : clearMovementLineCache(world);
+	const cacheKey = cache ? clearMovementLineCacheKey(unit, point) : "";
+	const cached = cache?.get(cacheKey);
+	if (cached !== undefined) return cached;
 	const dx = point.x - unit.x;
 	const dy = point.y - unit.y;
-	const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 0.25));
+	const stepSize = unit.type === "zombie" ? 0.25 : CLEAR_LINE_SAMPLE_STEP;
+	const rawSteps = Math.ceil(Math.hypot(dx, dy) / stepSize);
+	const steps = unit.type === "zombie" ? Math.max(1, rawSteps) : Math.max(1, Math.min(CLEAR_LINE_MAX_SAMPLES, rawSteps));
 	for (let i = 1; i <= steps; i += 1) {
 		const x = unit.x + (dx * i) / steps;
 		const y = unit.y + (dy * i) / steps;
 		const tile = worldTile({ x, y });
-		if (!isWalkableForUnit(world, unit, tile.x, tile.y)) return false;
+		if (!isWalkableForUnit(world, unit, tile.x, tile.y)) {
+			cache?.set(cacheKey, false);
+			return false;
+		}
 	}
+	cache?.set(cacheKey, true);
 	return true;
+}
+
+function clearMovementLineCacheKey(unit: Unit, point: Vec2): string {
+	const unitTile = worldTile(unit);
+	const pointTile = worldTile(point);
+	return `${unit.ownerId}:${unitTile.x},${unitTile.y}:${pointTile.x},${pointTile.y}`;
+}
+
+function clearMovementLineCache(world: World): Map<string, boolean> {
+	const state = pathingState(world);
+	if (state.clearMovementLineCacheTick === world.tick && state.clearMovementLineCache) return state.clearMovementLineCache;
+	state.clearMovementLineCache = new Map();
+	state.clearMovementLineCacheTick = world.tick;
+	return state.clearMovementLineCache;
 }
 
 function unitLane(unit: Unit, crowd: number): number {

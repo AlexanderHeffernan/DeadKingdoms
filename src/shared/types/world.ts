@@ -42,6 +42,8 @@ export interface PathingWorldState {
 	movingUnitGridTick?: number;
 	movingZombieGrid?: unknown;
 	movingZombieGridTick?: number;
+	clearMovementLineCache?: Map<string, boolean>;
+	clearMovementLineCacheTick?: number;
 	pathRequestsThisTick: number;
 	lastRequestTick: number;
 }

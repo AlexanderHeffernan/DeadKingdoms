@@ -6,6 +6,7 @@ export interface UnitCommandBase {
 	path?: PathNode[] | null;
 	pathCrowd?: number;
 	formationTarget?: Vec2;
+	moveStuckTicks?: number;
 }
 
 /** Unit command discriminants understood by the world simulation. */
