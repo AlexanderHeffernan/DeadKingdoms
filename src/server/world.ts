@@ -1926,19 +1926,22 @@ function isComplete(building: Building): boolean {
 }
 
 function updateLeaderboard(world: World) {
+	const now = Date.now();
 	const leaders = Object.values(world.players)
 		.filter((player) => !player.defeated)
 		.sort((a, b) => b.score - a.score);
 	const leader = leaders[0] ?? null;
 	if (!leader) {
+		commitFirstPlaceDuration(world, now);
 		delete world.firstPlacePlayerId;
 		delete world.firstPlaceSince;
 		world.leaderboard = [];
 		return;
 	}
 	if (world.firstPlacePlayerId !== leader.id) {
+		commitFirstPlaceDuration(world, now);
 		world.firstPlacePlayerId = leader.id;
-		world.firstPlaceSince = Date.now();
+		world.firstPlaceSince = now;
 	}
 	world.leaderboard = leaders.map((player) => ({
 		id: player.id,
@@ -1949,6 +1952,21 @@ function updateLeaderboard(world: World) {
 		joinedAt: player.joinedAt,
 		firstPlaceSince: player.id === world.firstPlacePlayerId ? world.firstPlaceSince ?? null : null,
 	}));
+}
+
+export function firstPlaceDurationMs(world: World, playerId: PlayerId, now = Date.now()) {
+	let duration = world.firstPlaceDurations?.[playerId] ?? 0;
+	if (world.firstPlacePlayerId === playerId && world.firstPlaceSince) {
+		duration += Math.max(0, now - world.firstPlaceSince);
+	}
+	return duration;
+}
+
+function commitFirstPlaceDuration(world: World, now = Date.now()) {
+	if (!world.firstPlacePlayerId || !world.firstPlaceSince) return;
+	world.firstPlaceDurations ??= {};
+	const elapsed = Math.max(0, now - world.firstPlaceSince);
+	world.firstPlaceDurations[world.firstPlacePlayerId] = (world.firstPlaceDurations[world.firstPlacePlayerId] ?? 0) + elapsed;
 }
 
 function notice(world: World, text: string) {

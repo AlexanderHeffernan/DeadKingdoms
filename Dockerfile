@@ -10,6 +10,7 @@ COPY --chown=node:node public ./public
 COPY --chown=node:node assets ./assets
 
 RUN npm ci && npm run build && npm prune --omit=dev
+RUN mkdir -p /data && chown node:node /data
 
 ENV NODE_ENV=production
 

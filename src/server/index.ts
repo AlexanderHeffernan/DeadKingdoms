@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { TICK_MS } from "../shared/config.js";
 import { Logs } from "../shared/logs.js";
 import { broadcast, createHandler } from "./http.js";
+import { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { Client } from "./http.js";
 import { ServerState } from "./serverState.js";
 import { stepWorld } from "./world.js";
@@ -11,10 +12,11 @@ loadEnvFile();
 
 const port = Number(process.env.PORT || 3000);
 const state = new ServerState();
+const globalLeaderboard = new GlobalLeaderboardStore();
 Logs.setSource("server");
 Logs.setSink((entry) => state.recordLog(entry.source, entry.message, entry.at));
 const clients = new Set<Client>();
-const server = http.createServer(createHandler(state, clients));
+const server = http.createServer(createHandler(state, clients, globalLeaderboard));
 
 server.listen(port, "0.0.0.0", () => {
 	console.log(`RTS arena running at http://127.0.0.1:${port}`);
@@ -25,9 +27,11 @@ setInterval(() => {
 	const world = state.currentWorld();
 	if (world) {
 		stepWorld(world, TICK_MS / 1000);
+		void globalLeaderboard.trackWorldPeaks(world);
 		broadcast(world, clients);
 	}
-	state.stepIdleReset(hasActivePlayers(world));
+	const resetWorld = state.stepIdleReset(hasActivePlayers(world));
+	if (resetWorld) void globalLeaderboard.publishWorldPeaks(resetWorld);
 }, TICK_MS);
 
 function hasActivePlayers(world: ReturnType<ServerState["currentWorld"]>) {

@@ -38,6 +38,7 @@
 					</span>
 				</label>
 				<button type="submit">Play Game</button>
+				<button id="homeLeaderboardButton" class="home-leaderboard-button" type="button">Leaderboard</button>
 				<div class="status flex">
 					<div
 						id="joinNotice"
@@ -73,6 +74,25 @@
 			<img src="sprites/ui/mainMenu/logo.png" alt="Dead Kingdoms typographic logo" class="logo" />
 			<img src="sprites/ui/mainMenu/background.png" alt="Medieval helmet" class="background" />
 		</div>
+		<section id="globalLeaderboardModal" class="global-leaderboard-modal hidden" aria-modal="true" role="dialog" aria-labelledby="globalLeaderboardTitle">
+			<div class="global-leaderboard-panel">
+				<button id="globalLeaderboardClose" class="global-close-button" type="button" aria-label="Close leaderboard">X</button>
+				<h2 id="globalLeaderboardTitle">All-Time Leaderboard</h2>
+				<p>Top scores are finalized at map restart so live games stay hidden.</p>
+				<div id="globalLeaderboardRows" class="global-leaderboard-rows"></div>
+			</div>
+		</section>
+		<section id="snapshotPreviewModal" class="snapshot-preview-modal hidden" aria-modal="true" role="dialog" aria-label="Leaderboard snapshot preview">
+			<div class="snapshot-preview-panel">
+				<button id="snapshotPreviewClose" class="global-close-button" type="button" aria-label="Close preview">X</button>
+				<div id="snapshotPreviewLoading" class="snapshot-preview-loading hidden" aria-live="polite">
+					<div class="snapshot-spinner" aria-hidden="true"></div>
+					<span>Loading snapshot...</span>
+				</div>
+				<canvas id="snapshotPreviewCanvas" width="1280" height="720" draggable="false"></canvas>
+				<div id="snapshotPreviewInfo" class="snapshot-preview-info"></div>
+			</div>
+		</section>
 
 		<main id="game" class="game hidden">
 			<canvas

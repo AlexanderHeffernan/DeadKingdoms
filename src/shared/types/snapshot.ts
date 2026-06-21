@@ -21,6 +21,16 @@ export interface LeaderboardEntry {
 	firstPlaceSince: number | null;
 }
 
+export interface GlobalLeaderboardEntry {
+	id: string;
+	playerName: string;
+	playerColor: string;
+	score: number;
+	achievedAt: number;
+	snapshotId: string;
+	firstPlaceDurationMs: number;
+}
+
 /** Debug-only sound source sent to clients that enable the sound overlay. */
 export interface SoundDebugSource {
 	id: string;

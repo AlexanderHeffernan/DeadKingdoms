@@ -110,8 +110,8 @@ export class Renderer {
 		this.canvas = canvas;
 		this.app = new Application({
 			view: canvas,
-			width: window.innerWidth,
-			height: window.innerHeight,
+			width: this.viewportWidth(),
+			height: this.viewportHeight(),
 			resolution: desiredRenderResolution(1),
 			autoDensity: true,
 			autoStart: false,
@@ -148,10 +148,18 @@ export class Renderer {
 		this.grassDarkImage.src = grassDarkTileUrl;
 	}
 
+	private viewportWidth() {
+		return Math.max(1, Math.round(this.canvas.clientWidth || this.canvas.width || window.innerWidth));
+	}
+
+	private viewportHeight() {
+		return Math.max(1, Math.round(this.canvas.clientHeight || this.canvas.height || window.innerHeight));
+	}
+
 	resize() {
 		this.currentResolution = desiredRenderResolution(this.currentZoom);
 		this.app.renderer.resolution = this.currentResolution;
-		this.app.renderer.resize(window.innerWidth, window.innerHeight);
+		this.app.renderer.resize(this.viewportWidth(), this.viewportHeight());
 	}
 
 	draw(state: GameState, view: ViewState) {
@@ -199,7 +207,7 @@ export class Renderer {
 		if (Math.abs(resolution - this.currentResolution) < 0.01) return;
 		this.currentResolution = resolution;
 		this.app.renderer.resolution = resolution;
-		this.app.renderer.resize(window.innerWidth, window.innerHeight);
+		this.app.renderer.resize(this.viewportWidth(), this.viewportHeight());
 	}
 
 	private updateEntityLayerSorting(camera: CameraState) {
@@ -211,7 +219,7 @@ export class Renderer {
 		this.app.renderer.background.color = color;
 		this.background.clear();
 		this.background.beginFill(color);
-		this.background.drawRect(0, 0, window.innerWidth, window.innerHeight);
+		this.background.drawRect(0, 0, this.viewportWidth(), this.viewportHeight());
 		this.background.endFill();
 	}
 
@@ -220,7 +228,7 @@ export class Renderer {
 		camera: CameraState,
 		visibility: ClientSnapshot["visibility"],
 	) {
-		const bounds = visibleTileBounds(size, camera);
+		const bounds = visibleTileBounds(size, camera, this.viewportWidth(), this.viewportHeight());
 		const active = new Set<string>();
 		const minChunkX = Math.floor(bounds.minX / TERRAIN_CHUNK_SIZE);
 		const maxChunkX = Math.floor(bounds.maxX / TERRAIN_CHUNK_SIZE);
@@ -364,9 +372,9 @@ export class Renderer {
 		const width = chunk.worldWidth * zoom;
 		const height = chunk.worldHeight * zoom;
 		chunk.sprite.visible = (
-			x <= window.innerWidth + margin &&
+			x <= this.viewportWidth() + margin &&
 			x + width >= -margin &&
-			y <= window.innerHeight + margin &&
+			y <= this.viewportHeight() + margin &&
 			y + height >= -margin
 		);
 		chunk.sprite.x = x;
@@ -1132,9 +1140,9 @@ export class Renderer {
 			const ry = (source.range * TILE_H * zoom) / 2;
 			if (
 				center.x + rx < -80 ||
-					center.x - rx > window.innerWidth + 80 ||
+					center.x - rx > this.viewportWidth() + 80 ||
 					center.y + ry < -80 ||
-					center.y - ry > window.innerHeight + 80
+					center.y - ry > this.viewportHeight() + 80
 			)
 				continue;
 			const color = soundColor(source);
@@ -1167,7 +1175,7 @@ export class Renderer {
 		const maxX = Math.max(top.x, right.x, bottom.x, left.x);
 		const minY = Math.min(top.y, right.y, bottom.y, left.y);
 		const maxY = Math.max(top.y, right.y, bottom.y, left.y);
-		if (maxX < -80 || minX > window.innerWidth + 80 || maxY < -80 || minY > window.innerHeight + 80) return;
+		if (maxX < -80 || minX > this.viewportWidth() + 80 || maxY < -80 || minY > this.viewportHeight() + 80) return;
 		const color = soundColor(source);
 		const intensity = Math.min(1, source.strength / 12);
 		const alpha = 0.08 + intensity * 0.28;
@@ -1215,7 +1223,7 @@ export class Renderer {
 		this.overlayLayer.lineStyle(Math.max(1, Math.round(1.5 * zoom)), 0x101612, 0.85);
 		for (const zombie of zombies) {
 			const point = isoToScreen(zombie.x, zombie.y, view.camera);
-			if (point.x < -30 || point.x > window.innerWidth + 30 || point.y < -40 || point.y > window.innerHeight + 30) continue;
+			if (point.x < -30 || point.x > this.viewportWidth() + 30 || point.y < -40 || point.y > this.viewportHeight() + 30) continue;
 			this.overlayLayer.beginFill(zombieDebugColor(zombie.zombieDebugState!), 0.9);
 			this.overlayLayer.drawCircle(point.x, point.y - Math.max(10, 18 * zoom), radius);
 			this.overlayLayer.endFill();
@@ -1584,11 +1592,11 @@ export class Renderer {
 		const now = performance.now();
 		if (now - this.lastMinimapDraw < 180) return;
 		this.lastMinimapDraw = now;
-		drawMinimapCanvas(state, view);
+		drawMinimapCanvas(state, view, this.viewportWidth(), this.viewportHeight());
 	}
 }
 
-function drawMinimapCanvas(state: GameState, view: ViewState) {
+function drawMinimapCanvas(state: GameState, view: ViewState, viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
 	const minimap = document.getElementById(
 		"minimap",
 	) as HTMLCanvasElement | null;
@@ -1644,9 +1652,9 @@ function drawMinimapCanvas(state: GameState, view: ViewState) {
 	}
 	const corners = [
 		{ x: 0, y: 0 },
-		{ x: window.innerWidth, y: 0 },
-		{ x: window.innerWidth, y: window.innerHeight },
-		{ x: 0, y: window.innerHeight },
+		{ x: viewportWidth, y: 0 },
+		{ x: viewportWidth, y: viewportHeight },
+		{ x: 0, y: viewportHeight },
 	].map((point) => screenToIsoLocal(point.x, point.y, view.camera));
 	ctx.strokeStyle = "#f4efe6";
 	ctx.lineWidth = 1;
@@ -2307,17 +2315,17 @@ function terrainChunkWorldBounds(
 	};
 }
 
-function visibleTileBounds(size: number, camera: CameraState) {
+function visibleTileBounds(size: number, camera: CameraState, viewportWidth: number, viewportHeight: number) {
 	const margin = 140;
 	const corners = [
 		screenToIsoLocal(-margin, -margin, camera),
-		screenToIsoLocal(window.innerWidth + margin, -margin, camera),
+		screenToIsoLocal(viewportWidth + margin, -margin, camera),
 		screenToIsoLocal(
-			window.innerWidth + margin,
-			window.innerHeight + margin,
+			viewportWidth + margin,
+			viewportHeight + margin,
 			camera,
 		),
-		screenToIsoLocal(-margin, window.innerHeight + margin, camera),
+		screenToIsoLocal(-margin, viewportHeight + margin, camera),
 	];
 	return {
 		minX: clampInt(

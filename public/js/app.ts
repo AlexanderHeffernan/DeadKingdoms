@@ -1,4 +1,4 @@
-import { disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getStatus, ServerStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
+import { disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getGlobalLeaderboard, getGlobalLeaderboardSnapshot, getStatus, ServerStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
@@ -10,7 +10,7 @@ import { spriteMetrics } from "./sprites/spriteInfo.js";
 import { Logs } from "../../src/shared/logs.js";
 import { DAY_NIGHT_CYCLE_SECONDS, dayNightStateAt } from "../../src/shared/dayNight.js";
 import { escapeHtml } from "./ui/dom.js";
-import type { Building, BuildingType, CommandPayload, Corpse, EntityId, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
+import type { Building, BuildingType, CommandPayload, Corpse, EntityId, GlobalLeaderboardEntry, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
 import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
 const state: GameState = {
@@ -108,6 +108,8 @@ const canvas = document.getElementById("world") as HTMLCanvasElement | null;
 const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
 if (!canvas || !minimap) throw new Error("Missing canvas elements");
 const renderer = new Renderer(canvas);
+const snapshotPreviewCanvas = document.getElementById("snapshotPreviewCanvas") as HTMLCanvasElement | null;
+const snapshotPreviewRenderer = snapshotPreviewCanvas ? new Renderer(snapshotPreviewCanvas) : null;
 let eventStream: EventSource | null = null;
 let devCommandInput = "";
 let adminAccessEnabled = false;
@@ -143,6 +145,7 @@ if (colorInput) {
 	});
 }
 renderHomeCredits();
+wireGlobalLeaderboard();
 const ui = new UI(state, {
 	setBuildMode(type) {
 		view.buildMode = type;
@@ -392,6 +395,297 @@ function renderHomeCredits() {
 			`).join("")}
 		</div>
 	`;
+}
+
+const previewState: GameState = {
+	playerId: null,
+	snapshot: null,
+	selectedIds: new Set(),
+	lastSeen: { buildings: {}, resources: {}, ruins: {} },
+	effects: [],
+	idleWorkerCycleIndex: -1,
+	exploredSet: new Set(),
+	timeOffsetSeconds: 0,
+};
+const previewView: ViewState = {
+	camera: { x: 0, y: 0, zoom: 0.55 },
+	dragging: false,
+	panning: false,
+	dragStart: null,
+	dragCurrent: null,
+	panLast: null,
+	selectedIds: previewState.selectedIds,
+	buildMode: null,
+	rallyModeBuildingId: null,
+	noiseMode: false,
+	instantBuildMode: false,
+	hoverTile: null,
+	wallDragStartTile: null,
+	mouse: { x: 0, y: 0 },
+};
+let previewAnimation = 0;
+
+function wireGlobalLeaderboard() {
+	document.getElementById("homeLeaderboardButton")?.addEventListener("click", () => void openGlobalLeaderboard());
+	document.getElementById("globalLeaderboardClose")?.addEventListener("click", closeGlobalLeaderboard);
+	document.getElementById("globalLeaderboardModal")?.addEventListener("mousedown", (event) => {
+		if (event.target === event.currentTarget) closeGlobalLeaderboard();
+	});
+	document.getElementById("snapshotPreviewClose")?.addEventListener("click", closeSnapshotPreview);
+	document.getElementById("snapshotPreviewModal")?.addEventListener("mousedown", (event) => {
+		if (event.target === event.currentTarget) closeSnapshotPreview();
+	});
+	if (!snapshotPreviewCanvas) return;
+	snapshotPreviewCanvas.addEventListener("contextmenu", (event) => event.preventDefault());
+	snapshotPreviewCanvas.addEventListener("mousedown", beginPreviewClick);
+	snapshotPreviewCanvas.addEventListener("mousemove", movePreviewMouse);
+	snapshotPreviewCanvas.addEventListener("mouseup", endPreviewClick);
+	snapshotPreviewCanvas.addEventListener("mouseleave", () => {
+		previewView.dragging = false;
+		previewView.mouse = { x: -Infinity, y: -Infinity };
+	});
+	snapshotPreviewCanvas.addEventListener("wheel", zoomPreview, { passive: false });
+}
+
+async function openGlobalLeaderboard() {
+	const modal = document.getElementById("globalLeaderboardModal");
+	const rows = document.getElementById("globalLeaderboardRows");
+	if (!modal || !rows) return;
+	modal.classList.remove("hidden");
+	rows.innerHTML = `<div class="global-loading">Loading scores...</div>`;
+	try {
+		const result = await getGlobalLeaderboard();
+		renderGlobalLeaderboardRows(result.entries || []);
+	} catch {
+		rows.innerHTML = `<div class="global-loading">Could not load the leaderboard.</div>`;
+	}
+}
+
+function closeGlobalLeaderboard() {
+	document.getElementById("globalLeaderboardModal")?.classList.add("hidden");
+}
+
+function renderGlobalLeaderboardRows(entries: GlobalLeaderboardEntry[]) {
+	const rows = document.getElementById("globalLeaderboardRows");
+	if (!rows) return;
+	if (!entries.length) {
+		rows.innerHTML = `<div class="global-loading">No scores recorded yet.</div>`;
+		return;
+	}
+	rows.innerHTML = entries.map((entry, index) => `
+		<div class="global-leaderboard-row">
+			<span class="global-rank">#${index + 1}</span>
+			<strong style="color: ${escapeHtml(entry.playerColor)}">${escapeHtml(entry.playerName)}</strong>
+			<span>${entry.score}${globalFirstPlaceTime(entry)}</span>
+			<button type="button" data-snapshot-id="${escapeHtml(entry.snapshotId)}">Preview</button>
+		</div>
+	`).join("");
+	rows.querySelectorAll<HTMLButtonElement>("button[data-snapshot-id]").forEach((button) => {
+		button.addEventListener("click", () => void openSnapshotPreview(button.dataset.snapshotId || ""));
+	});
+}
+
+function globalFirstPlaceTime(entry: GlobalLeaderboardEntry) {
+	const duration = entry.firstPlaceDurationMs ?? 0;
+	if (duration <= 0) return "";
+	return ` <em class="leader-time" tabindex="0">[${durationClock(duration)}]<span class="leader-time-popup" role="tooltip">time #1</span></em>`;
+}
+
+function durationClock(durationMs: number) {
+	const totalMinutes = Math.max(0, Math.floor(durationMs / 60000));
+	const hours = Math.floor(totalMinutes / 60);
+	const minutes = totalMinutes % 60;
+	return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+async function openSnapshotPreview(snapshotId: string) {
+	if (!snapshotId || !snapshotPreviewRenderer || !snapshotPreviewCanvas) return;
+	const modal = document.getElementById("snapshotPreviewModal");
+	const info = document.getElementById("snapshotPreviewInfo");
+	modal?.classList.remove("hidden");
+	setSnapshotPreviewLoading(true);
+	if (info) info.textContent = "Loading snapshot...";
+	const result = await getGlobalLeaderboardSnapshot(snapshotId);
+	if (!result.ok || !result.snapshot) {
+		setSnapshotPreviewLoading(false);
+		if (info) info.textContent = result.error || "Could not load snapshot.";
+		return;
+	}
+	previewState.snapshot = hydrateSnapshot(result.snapshot);
+	previewState.playerId = result.snapshot.playerId;
+	previewState.selectedIds.clear();
+	previewView.camera.zoom = 1;
+	snapshotPreviewRenderer.resize();
+	const rect = snapshotPreviewCanvas.getBoundingClientRect();
+	previewView.mouse = { x: rect.width / 2, y: rect.height / 2 };
+	centerPreviewCamera();
+	if (info) info.textContent = "Move the mouse to the edge to pan, scroll to zoom, click units and buildings to inspect.";
+	setSnapshotPreviewLoading(false);
+	startPreviewLoop();
+}
+
+function closeSnapshotPreview() {
+	document.getElementById("snapshotPreviewModal")?.classList.add("hidden");
+	previewState.snapshot = null;
+	previewState.selectedIds.clear();
+	setSnapshotPreviewLoading(false);
+	if (previewAnimation) cancelAnimationFrame(previewAnimation);
+	previewAnimation = 0;
+}
+
+function setSnapshotPreviewLoading(loading: boolean) {
+	document.getElementById("snapshotPreviewLoading")?.classList.toggle("hidden", !loading);
+	snapshotPreviewCanvas?.classList.toggle("snapshot-preview-canvas-loading", loading);
+}
+
+function startPreviewLoop() {
+	if (previewAnimation) return;
+	const draw = () => {
+		if (!previewState.snapshot || document.getElementById("snapshotPreviewModal")?.classList.contains("hidden")) {
+			previewAnimation = 0;
+			return;
+		}
+		edgePanPreview();
+		snapshotPreviewRenderer?.draw(previewState, previewView);
+		previewAnimation = requestAnimationFrame(draw);
+	};
+	previewAnimation = requestAnimationFrame(draw);
+}
+
+function beginPreviewClick(event: MouseEvent) {
+	if (!snapshotPreviewCanvas) return;
+	previewView.dragging = true;
+	previewView.dragStart = { x: event.clientX, y: event.clientY };
+}
+
+function movePreviewMouse(event: MouseEvent) {
+	if (!snapshotPreviewCanvas) return;
+	const rect = snapshotPreviewCanvas.getBoundingClientRect();
+	previewView.mouse = {
+		x: event.clientX - rect.left,
+		y: event.clientY - rect.top,
+	};
+}
+
+function endPreviewClick(event: MouseEvent) {
+	if (!previewView.dragging) return;
+	previewView.dragging = false;
+	const start = previewView.dragStart;
+	previewView.dragStart = null;
+	if (!start || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5) return;
+	selectPreviewAt(event.clientX, event.clientY);
+}
+
+function zoomPreview(event: WheelEvent) {
+	event.preventDefault();
+	if (!snapshotPreviewCanvas) return;
+	const rect = snapshotPreviewCanvas.getBoundingClientRect();
+	const x = event.clientX - rect.left;
+	const y = event.clientY - rect.top;
+	const before = screenToIso(x, y, previewView.camera);
+	previewView.camera.zoom = nextZoom(previewView.camera.zoom!, event.deltaY < 0 ? 1 : -1);
+	const after = isoToScreen(before.x, before.y, previewView.camera);
+	previewView.camera.x += x - after.x;
+	previewView.camera.y += y - after.y;
+	clampPreviewCamera();
+}
+
+function selectPreviewAt(clientX: number, clientY: number) {
+	if (!previewState.snapshot || !snapshotPreviewCanvas) return;
+	const rect = snapshotPreviewCanvas.getBoundingClientRect();
+	const iso = screenToIso(clientX - rect.left, clientY - rect.top, previewView.camera);
+	const hit = closestPreviewEntity(iso.x, iso.y);
+	previewState.selectedIds.clear();
+	if (hit) previewState.selectedIds.add(hit.id);
+	const info = document.getElementById("snapshotPreviewInfo");
+	if (info) info.textContent = hit ? `${labelForPreviewEntity(hit)} selected.` : "Move the mouse to the edge to pan, scroll to zoom, click units and buildings to inspect.";
+}
+
+function closestPreviewEntity(x: number, y: number) {
+	const snapshot = previewState.snapshot;
+	if (!snapshot) return null;
+	const entities = [
+		...Object.values(snapshot.units),
+		...Object.values(snapshot.buildings),
+		...Object.values(snapshot.resources),
+		...Object.values(snapshot.corpses),
+	];
+	let best: Unit | Building | ResourceNode | Corpse | null = null;
+	let bestDistance = Infinity;
+	for (const entity of entities) {
+		const cx = entity.x + entityWidth(entity) / 2;
+		const cy = entity.y + entityHeight(entity) / 2;
+		const distance = Math.hypot(cx - x, cy - y);
+		if (distance < bestDistance && distance < Math.max(1.2, entityWidth(entity), entityHeight(entity))) {
+			best = entity;
+			bestDistance = distance;
+		}
+	}
+	return best;
+}
+
+function labelForPreviewEntity(entity: Unit | Building | ResourceNode | Corpse) {
+	if (entity.kind === "unit" || entity.kind === "building") {
+		const owner = entity.ownerId ? previewState.snapshot?.players[entity.ownerId]?.name : null;
+		return `${owner ? `${owner} ` : ""}${entity.type}`;
+	}
+	return entity.type;
+}
+
+function centerPreviewCamera() {
+	if (!previewState.snapshot || !snapshotPreviewCanvas) return;
+	const rect = snapshotPreviewCanvas.getBoundingClientRect();
+	const target = previewTownCenter() ?? { x: previewState.snapshot.map.size / 2, y: previewState.snapshot.map.size / 2 };
+	const center = isoToScreen(target.x, target.y, { x: 0, y: 0, zoom: previewView.camera.zoom });
+	previewView.camera.x = rect.width / 2 - center.x;
+	previewView.camera.y = rect.height / 2 - center.y;
+	clampPreviewCamera();
+}
+
+function previewTownCenter() {
+	const snapshot = previewState.snapshot;
+	if (!snapshot) return null;
+	const town = Object.values(snapshot.buildings).find((building) => (
+		building.type === "townCenter" &&
+			(!previewState.playerId || building.ownerId === previewState.playerId)
+	));
+	if (!town) return null;
+	return {
+		x: town.x + (entityWidth(town) - 1) / 2,
+		y: town.y + (entityHeight(town) - 1) / 2,
+	};
+}
+
+function edgePanPreview() {
+	if (!previewState.snapshot || !snapshotPreviewCanvas) return;
+	const rect = snapshotPreviewCanvas.getBoundingClientRect();
+	const mouse = previewView.mouse;
+	if (mouse.x < 0 || mouse.y < 0 || mouse.x > rect.width || mouse.y > rect.height) return;
+	const margin = 28;
+	const speed = 10;
+	if (mouse.x <= margin) previewView.camera.x += speed;
+	if (mouse.x >= rect.width - margin) previewView.camera.x -= speed;
+	if (mouse.y <= margin) previewView.camera.y += speed;
+	if (mouse.y >= rect.height - margin) previewView.camera.y -= speed;
+	clampPreviewCamera();
+}
+
+function clampPreviewCamera() {
+	if (!previewState.snapshot || !snapshotPreviewCanvas) return;
+	const size = previewState.snapshot.map.size;
+	const rect = snapshotPreviewCanvas.getBoundingClientRect();
+	const points = [
+		isoToScreen(0, 0, { x: 0, y: 0, zoom: previewView.camera.zoom }),
+		isoToScreen(size, 0, { x: 0, y: 0, zoom: previewView.camera.zoom }),
+		isoToScreen(0, size, { x: 0, y: 0, zoom: previewView.camera.zoom }),
+		isoToScreen(size, size, { x: 0, y: 0, zoom: previewView.camera.zoom }),
+	];
+	const minX = Math.min(...points.map((point) => point.x));
+	const maxX = Math.max(...points.map((point) => point.x));
+	const minY = Math.min(...points.map((point) => point.y));
+	const maxY = Math.max(...points.map((point) => point.y));
+	previewView.camera.x = clampAxis(previewView.camera.x, minX, maxX, maxX - minX, rect.width, 80);
+	previewView.camera.y = clampAxis(previewView.camera.y, minY, maxY, maxY - minY, rect.height, 80);
 }
 
 function onlinePlayersText(status: ServerStatus): string {

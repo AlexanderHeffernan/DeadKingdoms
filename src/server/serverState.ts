@@ -32,9 +32,11 @@ export class ServerState {
 	}
 
 	restartNow(source: string) {
+		const previousWorld = this.world;
 		this.world = null;
 		this.emptySince = null;
 		Logs.log(`${source} restarted the server world.`);
+		return previousWorld;
 	}
 
 	resetStatus(hasPlayers: boolean, now = Date.now()): ResetStatus {
@@ -44,15 +46,17 @@ export class ServerState {
 	}
 
 	stepIdleReset(hasPlayers: boolean, now = Date.now()) {
-		if (!this.world) return;
+		if (!this.world) return null;
 		if (hasPlayers) {
 			this.emptySince = null;
-			return;
+			return null;
 		}
 		this.emptySince ??= now;
-		if (now - this.emptySince < IDLE_RESET_MS) return;
+		if (now - this.emptySince < IDLE_RESET_MS) return null;
+		const previousWorld = this.world;
 		this.world = null;
 		this.emptySince = null;
 		Logs.log("Cleared idle world after 59 seconds with no players.");
+		return previousWorld;
 	}
 }

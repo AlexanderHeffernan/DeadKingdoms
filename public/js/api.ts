@@ -1,4 +1,4 @@
-import type { CommandPayload, CommandResult, PlayerId } from "../../src/shared/types.js";
+import type { CommandPayload, CommandResult, GlobalLeaderboardEntry, PlayerId, Snapshot } from "../../src/shared/types.js";
 
 export type ServerStatus = {
 	activePlayers: number;
@@ -13,6 +13,16 @@ export type ServerStatus = {
 
 export async function getStatus(): Promise<ServerStatus> {
 	const res = await fetch("/api/status");
+	return res.json();
+}
+
+export async function getGlobalLeaderboard(): Promise<{ entries: GlobalLeaderboardEntry[] }> {
+	const res = await fetch("/api/global-leaderboard");
+	return res.json();
+}
+
+export async function getGlobalLeaderboardSnapshot(snapshotId: string): Promise<{ ok: boolean; snapshot?: Snapshot; error?: string }> {
+	const res = await fetch(`/api/global-leaderboard/${encodeURIComponent(snapshotId)}`);
 	return res.json();
 }
 
