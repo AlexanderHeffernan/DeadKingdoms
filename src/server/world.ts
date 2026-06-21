@@ -1016,25 +1016,35 @@ function commandMove(world: World, playerId: PlayerId, body: Extract<CommandPayl
 			landingTarget = nearestWalkablePoint(world, target, reservedFormationTargets);
 			clusterLandingTargets.set(cluster, landingTarget);
 		}
+		const moveGroupId = moveGroupIdFor(playerId, world.tick, cluster, landingTarget);
 		const formationTarget = formationTargetForCluster(world, landingTarget, cluster, index, reservedFormationTargets);
-		unit.command = formationTarget ? moveFormationCommand(target, cluster.length, formationTarget) : {
+		unit.command = formationTarget ? moveFormationCommand(target, cluster.length, formationTarget, moveGroupId, landingTarget) : {
 			type: "move",
 			...target,
 			path: null,
 			pathCrowd: cluster.length,
+			moveGroupId,
+			moveGroupTarget: landingTarget,
 		};
 	});
 	return { ok: true };
 }
 
-function moveFormationCommand(target: { x: number; y: number }, crowd: number, formationTarget: { x: number; y: number }) {
+function moveFormationCommand(target: { x: number; y: number }, crowd: number, formationTarget: { x: number; y: number }, moveGroupId: string, moveGroupTarget: { x: number; y: number }) {
 	return {
 		type: "move" as const,
 		...target,
 		path: null,
 		pathCrowd: crowd,
 		formationTarget,
+		moveGroupId,
+		moveGroupTarget,
 	};
+}
+
+function moveGroupIdFor(playerId: PlayerId, tick: number, cluster: Unit[], target: { x: number; y: number }) {
+	const firstId = cluster[0]?.id ?? "empty";
+	return `${playerId}:${tick}:${firstId}:${Math.round(target.x)},${Math.round(target.y)}`;
 }
 
 function commandAttack(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "attack" }>): CommandResult {

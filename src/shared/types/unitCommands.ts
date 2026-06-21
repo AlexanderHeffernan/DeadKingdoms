@@ -6,6 +6,8 @@ export interface UnitCommandBase {
 	path?: PathNode[] | null;
 	pathCrowd?: number;
 	formationTarget?: Vec2;
+	moveGroupId?: string;
+	moveGroupTarget?: Vec2;
 	moveStuckTicks?: number;
 	/** World tick of the last executed path search; used to throttle replans when no usable path exists. */
 	pathRetryTick?: number;

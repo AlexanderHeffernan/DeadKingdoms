@@ -70,6 +70,10 @@ function addUnits(world: World, units: Unit[]) {
 	for (const unit of units) world.units[unit.id] = unit;
 }
 
+function distanceFrom(a: { x: number; y: number }, b: { x: number; y: number }) {
+	return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
 test("findPath returns a direct path on an open map", () => {
 	const world = makeWorld();
 	const path = findPath(world, makeUnit(4, 4), { x: 12, y: 4 });
@@ -117,6 +121,46 @@ test("findPath lets own units use gates but keeps gates blocked to enemies", () 
 
 	assert.ok(ownerPath.some((point) => Math.floor(point.x) === 8 && Math.floor(point.y) === 9));
 	assert.equal(enemyPath.some((point) => Math.floor(point.x) === 8 && Math.floor(point.y) === 9), false);
+});
+
+test("findPath notices a wall replaced by a gate even when occupancy shape is unchanged", () => {
+	const blocked = [];
+	for (let y = 2; y <= 16; y += 1) blocked.push({ x: 8, y });
+	const world = makeWorld(blocked);
+	world.buildings["b-wall"] = {
+		id: "b-wall",
+		kind: "building",
+		type: "wall",
+		ownerId: "p-test",
+		x: 8,
+		y: 9,
+		size: 1,
+		width: 1,
+		height: 1,
+		hp: 100,
+		maxHp: 100,
+		walkBlocking: true,
+	} as never;
+	findPath(world, makeUnit(4, 9), { x: 14, y: 9 });
+	delete world.buildings["b-wall"];
+	world.buildings["b-gate"] = {
+		id: "b-gate",
+		kind: "building",
+		type: "gate",
+		ownerId: "p-test",
+		x: 8,
+		y: 9,
+		size: 1,
+		width: 1,
+		height: 1,
+		hp: 100,
+		maxHp: 100,
+		walkBlocking: true,
+	} as never;
+
+	const ownerPath = findPath(world, makeUnit(4, 9), { x: 14, y: 9 });
+
+	assert.ok(ownerPath.some((point) => Math.floor(point.x) === 8 && Math.floor(point.y) === 9));
 });
 
 test("findSharedPath reuses a destination field for nearby units", () => {
@@ -1333,6 +1377,116 @@ test("moveWithPath walks toward formation slots instead of teleporting", () => {
 	assert.equal(unit.x, 20.5);
 	assert.ok(unit.y > 4.5);
 	assert.ok(unit.y <= 4.75);
+});
+
+test("large move groups follow shared flow without allocating per-unit paths", () => {
+	const world = makeWorld();
+	const unit = makeUnit(4, 10, "u-group-flow");
+	const command: Extract<UnitCommand, { type: "move" }> = {
+		type: "move",
+		x: 28,
+		y: 10,
+		path: null,
+		pathCrowd: 80,
+		moveGroupId: "group-flow",
+		moveGroupTarget: { x: 28, y: 10 },
+		formationTarget: { x: 28, y: 10 },
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	moveWithPath(world, unit, command, 0.5);
+
+	assert.equal(command.path, null);
+	assert.ok(unit.x > 4);
+});
+
+test("large move groups can flow through an own one-tile gate", () => {
+	const blocked = [];
+	for (let y = 2; y <= 18; y += 1) blocked.push({ x: 12, y });
+	const world = makeWorld(blocked);
+	world.buildings["b-own-gate"] = {
+		id: "b-own-gate",
+		kind: "building",
+		type: "gate",
+		ownerId: "p-test",
+		x: 12,
+		y: 10,
+		size: 1,
+		width: 1,
+		height: 1,
+		hp: 100,
+		maxHp: 100,
+		walkBlocking: true,
+	} as never;
+	const unit = makeUnit(10, 10, "u-group-gate");
+	const command: Extract<UnitCommand, { type: "move" }> = {
+		type: "move",
+		x: 30,
+		y: 10,
+		path: null,
+		pathCrowd: 80,
+		moveGroupId: "group-gate",
+		moveGroupTarget: { x: 30, y: 10 },
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	for (let tick = 0; tick < 8; tick += 1) {
+		world.tick = tick;
+		moveWithPath(world, unit, command, 0.5);
+	}
+
+	assert.equal(command.path, null);
+	assert.ok(unit.x > 12);
+	assert.ok(Math.abs(unit.y - 10) < 0.2);
+});
+
+test("large move groups apply soft resource clearance while flowing", () => {
+	const world = makeWorld();
+	const tree: ResourceNode = {
+		id: "r-clearance-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 5,
+		y: 10,
+		amount: 100,
+		maxAmount: 100,
+	};
+	world.resources[tree.id] = tree;
+	world._occupancy![10 * MAP_SIZE + 5] = 1;
+	const unit = makeUnit(4.2, 10.4, "u-group-resource-clearance");
+	const command: Extract<UnitCommand, { type: "move" }> = {
+		type: "move",
+		x: 18,
+		y: 10,
+		path: null,
+		pathCrowd: 80,
+		moveGroupId: "group-resource-clearance",
+		moveGroupTarget: { x: 18, y: 10 },
+	};
+	unit.command = command;
+	addUnits(world, [unit]);
+
+	moveWithPath(world, unit, command, 0.5);
+
+	assert.equal(command.path, null);
+	assert.ok(distanceFrom(unit, tree) > distanceFrom({ x: 4.2, y: 10.4 }, tree));
+});
+
+test("resolveUnitSeparation treats pathless group-flow units as moving", () => {
+	const world = makeWorld();
+	const a = makeUnit(10, 10, "u-group-flow-a");
+	const b = makeUnit(10.1, 10, "u-group-flow-b");
+	a.command = { type: "move", x: 30, y: 10, path: null, pathCrowd: 80, moveGroupId: "group-flow", moveGroupTarget: { x: 30, y: 10 } };
+	b.command = { type: "move", x: 30, y: 10, path: null, pathCrowd: 80, moveGroupId: "group-flow", moveGroupTarget: { x: 30, y: 10 } };
+	addUnits(world, [a, b]);
+
+	resolveUnitSeparation(world);
+
+	assert.equal(a.x, 10);
+	assert.equal(b.x, 10.1);
 });
 
 test("resolveUnitSeparation spreads units after they become idle at destination", () => {

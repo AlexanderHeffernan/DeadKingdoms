@@ -1,5 +1,5 @@
 import { MAP_SIZE } from "../shared/config.js";
-import type { PathNode, Unit, UnitCommand, Vec2, World } from "../shared/types.js";
+import type { PathNode, ResourceNode, Unit, UnitCommand, Vec2, World } from "../shared/types.js";
 import { clamp, distance, footprintHeight, footprintWidth, moveToward, type Footprint } from "./math.js";
 import { MinPriorityQueue } from "./utils/MinPriorityQueue.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
@@ -39,6 +39,11 @@ const ZOMBIE_CROWD_NEIGHBORS = 12;
 const ZOMBIE_CROWD_TARGET_DISTANCE = 1.2;
 const SEPARATION_MAX_PAIRS_PER_TICK = 4500;
 const SEPARATION_NEIGHBORS_PER_UNIT = 10;
+const GROUP_FLOW_MIN_CROWD = 20;
+const GROUP_FLOW_LOOKAHEAD_NODES = 5;
+const GROUP_FLOW_STUCK_RETRY_TICKS = 8;
+const RESOURCE_CLEARANCE_RADIUS = 1.8;
+const RESOURCE_CLEARANCE_STRENGTH = 1.1;
 export const ZOMBIE_PATH_LOOKAHEAD_DISTANCE = 10;
 const ZOMBIE_PATH_MAX_NODES = ZOMBIE_PATH_LOOKAHEAD_DISTANCE + 2;
 
@@ -326,7 +331,7 @@ function isMovingUnit(unit: Unit): boolean {
 }
 
 function isMovingCommand(command: UnitCommand): boolean {
-	if (command.type === "move") return command.path !== null;
+	if (command.type === "move") return command.path !== null || !!command.moveGroupId;
 	if ((command.type === "attack" || command.type === "gather" || command.type === "build") && command.path && command.path.length > 0) return true;
 	return false;
 }
@@ -359,6 +364,9 @@ export function moveWithPath(world: World, unit: Unit, command: Extract<UnitComm
 	const before = { x: unit.x, y: unit.y };
 	const baseTarget = moveCommandTarget(world, unit, command);
 	const target = formationTarget(world, command, baseTarget);
+	if (shouldUseGroupFlow(world, unit, command) && distance(unit, baseTarget) > formationDeployRadius(command)) {
+		return moveWithGroupFlow(world, unit, command, baseTarget, maxStep);
+	}
 	const forming = tryApproachFormationTarget(world, unit, command, baseTarget, maxStep);
 	if (forming !== null) return forming;
 	if (isGroupArrived(world, unit, command, target)) return true;
@@ -474,8 +482,73 @@ function exactArrivalRadius(command: UnitCommand): number {
 }
 
 function moveCommandTarget(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>): Vec2 {
+	if (command.moveGroupTarget) return command.moveGroupTarget;
 	const goal = nearestWalkableAround(world, command, unit);
 	return tileCenter(goal);
+}
+
+function shouldUseGroupFlow(_world: World, _unit: Unit, command: Extract<UnitCommand, { type: "move" }>) {
+	return !!command.moveGroupId && !!command.moveGroupTarget && commandCrowd(command) >= GROUP_FLOW_MIN_CROWD;
+}
+
+function moveWithGroupFlow(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, target: Vec2, maxStep: number): boolean {
+	if (distance(unit, target) <= arrivalRadius(command)) return true;
+	const unitTile = worldTile(unit);
+	if (isHardOccupied(world, unit, unitTile.x, unitTile.y) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
+	const targetTile = worldTile(target);
+	const goal = isWalkableForUnit(world, unit, targetTile.x, targetTile.y) ? targetTile : nearestWalkableAround(world, target, unit);
+	const clearanceRadius = hasPassableGateFor(unit, world) ? 0 : clearanceRadiusForCrowd(commandCrowd(command));
+	let field = flowFieldForUnit(world, goal, clearanceRadius, unit);
+	const current = tileId(unitTile.x, unitTile.y);
+	if (clearanceRadius > 0 && field.distance[current] === FLOW_UNREACHED) {
+		field = flowFieldForUnit(world, goal, 0, unit);
+	}
+	const waypoint = groupFlowWaypoint(world, unit, command, field, current, target, movingUnitGrid(world));
+	const before = { x: unit.x, y: unit.y };
+	moveAroundSmallObstacle(world, unit, waypoint, maxStep);
+	if (enteredOccupiedTile(world, before, unit)) {
+		unit.x = before.x;
+		unit.y = before.y;
+	}
+	const moved = distance(before, unit) >= STUCK_MOVEMENT_EPSILON;
+	command.moveStuckTicks = moved ? 0 : (command.moveStuckTicks || 0) + 1;
+	if (command.moveStuckTicks >= GROUP_FLOW_STUCK_RETRY_TICKS) {
+		command.moveStuckTicks = 0;
+		command.path = null;
+	}
+	return distance(unit, target) <= arrivalRadius(command);
+}
+
+function groupFlowWaypoint(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, field: FlowField, current: number, target: Vec2, movingGrid: SpatialGrid<Unit>): Vec2 {
+	if (!isInMap(current % MAP_SIZE, Math.floor(current / MAP_SIZE)) || field.distance[current] === FLOW_UNREACHED) {
+		return cheapMovingSpacingWaypoint(world, unit, target, movingGrid);
+	}
+	let next = current;
+	for (let i = 0; i < GROUP_FLOW_LOOKAHEAD_NODES && next !== field.goalId; i += 1) {
+		const candidate = bestFlowStep(world, field, next, (x, y) => isWalkableForUnit(world, unit, x, y));
+		if (candidate < 0 || candidate === next) break;
+		next = candidate;
+	}
+	const base = tileCenter({ x: next % MAP_SIZE, y: Math.floor(next / MAP_SIZE) });
+	if (distance(unit, target) < WIDE_MOVEMENT_MIN_DISTANCE) return base;
+	const laneTarget = groupFlowLaneTarget(world, unit, command, base);
+	return cheapMovingSpacingWaypoint(world, unit, laneTarget, movingGrid);
+}
+
+function groupFlowLaneTarget(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, base: Vec2): Vec2 {
+	const dx = base.x - unit.x;
+	const dy = base.y - unit.y;
+	const length = Math.hypot(dx, dy);
+	if (length <= 0.001) return base;
+	const lane = unitLane(unit, commandCrowd(command));
+	if (lane === 0) return base;
+	const offset = lane * laneWidthForCrowd(commandCrowd(command));
+	const target = {
+		x: base.x + (-dy / length) * offset,
+		y: base.y + (dx / length) * offset,
+	};
+	const tile = worldTile(target);
+	return isWalkableForUnit(world, unit, tile.x, tile.y) ? target : base;
 }
 
 function formationTarget(world: World, command: Extract<UnitCommand, { type: "move" }>, baseTarget: Vec2): Vec2 {
@@ -634,6 +707,63 @@ function movingSpacingWaypoint(world: World, unit: Unit, target: Vec2, movingGri
 		y: target.y + (pushY / length) * MOVING_COHESION_STRENGTH,
 	};
 	return canUseMovementWaypoint(world, unit, adjusted) ? adjusted : target;
+}
+
+function cheapMovingSpacingWaypoint(world: World, unit: Unit, target: Vec2, movingGrid: SpatialGrid<Unit>): Vec2 {
+	let pushX = 0;
+	let pushY = 0;
+	let neighbors = 0;
+	for (const entry of movingGrid.nearby(unit, MOVING_COHESION_RADIUS, MOVING_COHESION_NEIGHBORS_PER_UNIT)) {
+		const other = entry.item;
+		if (other === unit || other.ownerId !== unit.ownerId) continue;
+		const dx = unit.x - other.x;
+		const dy = unit.y - other.y;
+		const dist = Math.hypot(dx, dy);
+		if (dist <= 0.001 || dist >= MOVING_COHESION_RADIUS) continue;
+		const strength = (MOVING_COHESION_RADIUS - dist) / MOVING_COHESION_RADIUS;
+		pushX += (dx / dist) * strength;
+		pushY += (dy / dist) * strength;
+		neighbors += 1;
+		if (neighbors >= MOVING_COHESION_NEIGHBORS_PER_UNIT) break;
+	}
+	const resourcePush = resourceClearancePush(world, unit);
+	pushX += resourcePush.x * RESOURCE_CLEARANCE_STRENGTH;
+	pushY += resourcePush.y * RESOURCE_CLEARANCE_STRENGTH;
+	if (pushX === 0 && pushY === 0) return target;
+	const length = Math.hypot(pushX, pushY) || 1;
+	const adjusted = {
+		x: target.x + (pushX / length) * MOVING_COHESION_STRENGTH,
+		y: target.y + (pushY / length) * MOVING_COHESION_STRENGTH,
+	};
+	const tile = worldTile(adjusted);
+	return isWalkableForUnit(world, unit, tile.x, tile.y) ? adjusted : target;
+}
+
+function resourceClearancePush(world: World, unit: Unit): Vec2 {
+	let pushX = 0;
+	let pushY = 0;
+	resourceGrid(world).forNearby(unit, RESOURCE_CLEARANCE_RADIUS, (entry) => {
+		const resource = entry.item;
+		const dx = unit.x - resource.x;
+		const dy = unit.y - resource.y;
+		const dist = Math.hypot(dx, dy);
+		if (dist <= 0.001 || dist >= RESOURCE_CLEARANCE_RADIUS) return;
+		const strength = (RESOURCE_CLEARANCE_RADIUS - dist) / RESOURCE_CLEARANCE_RADIUS;
+		pushX += (dx / dist) * strength;
+		pushY += (dy / dist) * strength;
+	});
+	const length = Math.hypot(pushX, pushY);
+	if (length <= 0.001) return { x: 0, y: 0 };
+	return { x: pushX / length, y: pushY / length };
+}
+
+function resourceGrid(world: World): SpatialGrid<ResourceNode> {
+	const state = pathingState(world);
+	if (state.resourceGridVersion === state.occupancyVersion && state.resourceGrid) return state.resourceGrid as SpatialGrid<ResourceNode>;
+	const grid = new SpatialGrid(Object.values(world.resources), RESOURCE_CLEARANCE_RADIUS);
+	state.resourceGrid = grid;
+	state.resourceGridVersion = state.occupancyVersion;
+	return grid;
 }
 
 function movingUnitGrid(world: World): SpatialGrid<Unit> {
@@ -933,7 +1063,7 @@ function clearanceRadiusForCrowd(crowd: number): number {
 	return 0;
 }
 
-function bestFlowStep(world: World, field: FlowField, current: number): number {
+function bestFlowStep(world: World, field: FlowField, current: number, canWalk: (x: number, y: number) => boolean = (x, y) => isWalkable(world, x, y)): number {
 	if (field.clearanceRadius > 0) return field.next[current]!;
 	const x = current % MAP_SIZE;
 	const y = Math.floor(current / MAP_SIZE);
@@ -944,8 +1074,8 @@ function bestFlowStep(world: World, field: FlowField, current: number): number {
 			if (dx === 0 && dy === 0) continue;
 			const nx = x + dx;
 			const ny = y + dy;
-			if (!isInMap(nx, ny) || !isWalkable(world, nx, ny)) continue;
-			if (dx !== 0 && dy !== 0 && (!isWalkable(world, x + dx, y) || !isWalkable(world, x, y + dy))) continue;
+			if (!isInMap(nx, ny) || !canWalk(nx, ny)) continue;
+			if (dx !== 0 && dy !== 0 && (!canWalk(x + dx, y) || !canWalk(x, y + dy))) continue;
 			const id = tileId(nx, ny);
 			const d = field.distance[id]!;
 			if (d < bestDistance) {
@@ -969,6 +1099,19 @@ function flowFieldFor(world: World, goal: { x: number; y: number }, clearanceRad
 	return field;
 }
 
+function flowFieldForUnit(world: World, goal: { x: number; y: number }, clearanceRadius: number, unit: Unit): FlowField {
+	const state = pathingState(world);
+	const goalId = tileId(goal.x, goal.y);
+	const cacheKey = `${state.occupancyVersion}:${unit.ownerId}:${goalId}:${clearanceRadius}`;
+	const cached = state.flowFields.get(cacheKey) as FlowField | undefined;
+	if (cached && world.tick - cached.createdTick <= FLOW_FIELD_CACHE_TICKS) return cached;
+	const canWalk = (x: number, y: number) => isWalkableForUnit(world, unit, x, y);
+	const field = buildFlowField(world, goalId, clearanceRadius, canWalk);
+	state.flowFields.set(cacheKey, field);
+	if (state.flowFields.size > 48) pruneFlowFields(state.flowFields as Map<string, FlowField>, world.tick);
+	return field;
+}
+
 function interactionRangeFlowFieldFor(world: World, target: Vec2, range: number): FlowField {
 	const state = pathingState(world);
 	const targetTile = worldTile(target);
@@ -982,8 +1125,8 @@ function interactionRangeFlowFieldFor(world: World, target: Vec2, range: number)
 	return field;
 }
 
-function buildFlowField(world: World, goalId: number, clearanceRadius: number): FlowField {
-	if (clearanceRadius <= 0) return buildUnweightedFlowField(world, goalId);
+function buildFlowField(world: World, goalId: number, clearanceRadius: number, canWalk: (x: number, y: number) => boolean = (x, y) => isWalkable(world, x, y)): FlowField {
+	if (clearanceRadius <= 0) return buildUnweightedFlowField(world, goalId, canWalk);
 	const distanceGrid = new Uint32Array(MAP_SIZE * MAP_SIZE);
 	distanceGrid.fill(FLOW_UNREACHED);
 	const next = new Int32Array(MAP_SIZE * MAP_SIZE);
@@ -999,15 +1142,15 @@ function buildFlowField(world: World, goalId: number, clearanceRadius: number): 
 		if (currentNode.cost !== distanceGrid[current]) continue;
 		const x = current % MAP_SIZE;
 		const y = Math.floor(current / MAP_SIZE);
-		touchFlowNeighbor(world, distanceGrid, next, open, clearance, clearanceRadius, current, x + 1, y, FLOW_BASE_COST);
-		touchFlowNeighbor(world, distanceGrid, next, open, clearance, clearanceRadius, current, x - 1, y, FLOW_BASE_COST);
-		touchFlowNeighbor(world, distanceGrid, next, open, clearance, clearanceRadius, current, x, y + 1, FLOW_BASE_COST);
-		touchFlowNeighbor(world, distanceGrid, next, open, clearance, clearanceRadius, current, x, y - 1, FLOW_BASE_COST);
+		touchFlowNeighbor(world, distanceGrid, next, open, clearance, clearanceRadius, current, x + 1, y, FLOW_BASE_COST, canWalk);
+		touchFlowNeighbor(world, distanceGrid, next, open, clearance, clearanceRadius, current, x - 1, y, FLOW_BASE_COST, canWalk);
+		touchFlowNeighbor(world, distanceGrid, next, open, clearance, clearanceRadius, current, x, y + 1, FLOW_BASE_COST, canWalk);
+		touchFlowNeighbor(world, distanceGrid, next, open, clearance, clearanceRadius, current, x, y - 1, FLOW_BASE_COST, canWalk);
 	}
 	return { goalId, createdTick: world.tick, clearanceRadius, distance: distanceGrid, next };
 }
 
-function buildUnweightedFlowField(world: World, goalId: number): FlowField {
+function buildUnweightedFlowField(world: World, goalId: number, canWalk: (x: number, y: number) => boolean = (x, y) => isWalkable(world, x, y)): FlowField {
 	const distanceGrid = new Uint32Array(MAP_SIZE * MAP_SIZE);
 	distanceGrid.fill(FLOW_UNREACHED);
 	const next = new Int32Array(MAP_SIZE * MAP_SIZE);
@@ -1023,10 +1166,10 @@ function buildUnweightedFlowField(world: World, goalId: number): FlowField {
 		const x = current % MAP_SIZE;
 		const y = Math.floor(current / MAP_SIZE);
 		const nextDistance = distanceGrid[current]! + FLOW_BASE_COST;
-		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x + 1, y, nextDistance)) tail += 1;
-		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x - 1, y, nextDistance)) tail += 1;
-		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x, y + 1, nextDistance)) tail += 1;
-		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x, y - 1, nextDistance)) tail += 1;
+		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x + 1, y, nextDistance, canWalk)) tail += 1;
+		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x - 1, y, nextDistance, canWalk)) tail += 1;
+		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x, y + 1, nextDistance, canWalk)) tail += 1;
+		if (touchUnweightedFlowNeighbor(world, distanceGrid, next, queue, tail, current, x, y - 1, nextDistance, canWalk)) tail += 1;
 	}
 	return { goalId, createdTick: world.tick, clearanceRadius: 0, distance: distanceGrid, next };
 }
@@ -1083,8 +1226,9 @@ function touchUnweightedFlowNeighbor(
 	x: number,
 	y: number,
 	nextDistance: number,
+	canWalk: (x: number, y: number) => boolean = (walkX, walkY) => isWalkable(world, walkX, walkY),
 ) {
-	if (!isInMap(x, y) || !isWalkable(world, x, y)) return false;
+	if (!isInMap(x, y) || !canWalk(x, y)) return false;
 	const id = tileId(x, y);
 	if (distanceGrid[id] !== FLOW_UNREACHED) return false;
 	distanceGrid[id] = nextDistance;
@@ -1104,11 +1248,12 @@ function touchFlowNeighbor(
 	x: number,
 	y: number,
 	stepCost: number,
+	canWalk: (x: number, y: number) => boolean = (walkX, walkY) => isWalkable(world, walkX, walkY),
 ) {
-	if (!isInMap(x, y) || !isWalkable(world, x, y)) return false;
+	if (!isInMap(x, y) || !canWalk(x, y)) return false;
 	const currentX = current % MAP_SIZE;
 	const currentY = Math.floor(current / MAP_SIZE);
-	if (x !== currentX && y !== currentY && (!isWalkable(world, x, currentY) || !isWalkable(world, currentX, y))) return false;
+	if (x !== currentX && y !== currentY && (!canWalk(x, currentY) || !canWalk(currentX, y))) return false;
 	const id = tileId(x, y);
 	const nextDistance = distanceGrid[current]! + stepCost + clearancePenalty(clearance, clearanceRadius, id);
 	if (nextDistance >= distanceGrid[id]!) return false;
@@ -1227,18 +1372,31 @@ function occupied(world: World, x: number, y: number): boolean {
 }
 
 function isOwnGateTile(world: World, unit: Unit, x: number, y: number) {
-	return Object.values(world.buildings).some((building) => (
-		building.type === "gate" &&
-		building.ownerId === unit.ownerId &&
-		x >= building.x &&
-		x < building.x + building.width &&
-		y >= building.y &&
-		y < building.y + building.height
-	));
+	return ownGateTiles(world).get(unit.ownerId)?.has(tileId(x, y)) ?? false;
 }
 
 function hasPassableGateFor(unit: Unit, world: World) {
-	return Object.values(world.buildings).some((building) => building.type === "gate" && building.ownerId === unit.ownerId);
+	return !!ownGateTiles(world).get(unit.ownerId)?.size;
+}
+
+function ownGateTiles(world: World): Map<string, Set<number>> {
+	const gates = new Map<string, Set<number>>();
+	for (const building of Object.values(world.buildings)) {
+		if (building.type !== "gate" || building.hp <= 0) continue;
+		let tiles = gates.get(building.ownerId);
+		if (!tiles) {
+			tiles = new Set();
+			gates.set(building.ownerId, tiles);
+		}
+		for (let dy = 0; dy < building.height; dy += 1) {
+			for (let dx = 0; dx < building.width; dx += 1) {
+				const x = building.x + dx;
+				const y = building.y + dy;
+				if (isInMap(x, y)) tiles.add(tileId(x, y));
+			}
+		}
+	}
+	return gates;
 }
 
 function isInMap(x: number, y: number) {
