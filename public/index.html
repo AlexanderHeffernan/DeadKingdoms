@@ -1,309 +1,320 @@
 <!doctype html>
 <html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Dead Kingdoms</title>
-        <link rel="stylesheet" href="/styles.css?v=3" />
-    </head>
-    <body>
-        <div id="join" class="join">
-            <form id="joinForm" class="join-panel">
-                <h1>Dead Kingdoms</h1>
-                <div
-                    id="onlinePlayers"
-                    class="online-players"
-                    aria-live="polite"
-                >
-                    Players online: --
-                </div>
-                <label>
-                    Username
-                    <input
-                        id="nameInput"
-                        maxlength="18"
-                        autocomplete="off"
-                        placeholder="Town founder"
-                    />
-                </label>
-                <label>
-                    Player colour
-                    <input
-                        id="colorInput"
-                        type="color"
-                        value="#4f8fd8"
-                        aria-label="Player colour"
-                    />
-                </label>
-                <div
-                    id="joinNotice"
-                    class="join-notice"
-                    aria-live="polite"
-                ></div>
-                <button type="submit">Play Game</button>
-            </form>
-            <aside class="update-boxes" aria-label="Server update status">
-                <div class="update-box">
-                    <span>Map reset</span>
-                    <strong id="resetStatus">--</strong>
-                </div>
-                <div class="update-box">
-                    <span>Last update date</span>
-                    <strong id="lastUpdateDate">--</strong>
-                </div>
-                <div class="update-box">
-                    <span>Last update time</span>
-                    <strong id="lastUpdateTime">--</strong>
-                </div>
-            </aside>
-        </div>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Dead Kingdoms</title>
+		<link rel="stylesheet" href="/styles.css?v=3" />
+		<link rel="stylesheet" href="/mainMenu.css?v=3" />
+	</head>
+	<body>
+		<div id="mobile-not-supported" class="mobile-not-supported">
+			<p>Dead Kingdoms is not currently supported on mobile devices. Please visit on a desktop computer to play.</p>
+		</div>
+		<div id="join" class="join">
+			<form id="joinForm" class="join-panel">
+				<label>
+					Username
+					<span class="flex">
+						<input
+							id="nameInput"
+							maxlength="18"
+							name="town-founder-input"
+							autocomplete="off"
+							placeholder="Town founder"
+						/>
+						<input
+							id="colorInput"
+							type="color"
+							value="#4f8fd8"
+							aria-label="Player colour"
+						/>
+					</span>
+				</label>
+				<!--
+				<div
+					id="joinNotice"
+					class="join-notice"
+					aria-live="polite"
+				></div>
+				-->
+				<button type="submit">Play Game</button>
+				<div class="status flex">
+					<div id="onlinePlayers"></div>
+					<div id="statusSeparator">•</div>
+					<div id="resetStatus"></div>
+				</div>
+				<div class="gap"></div>
+				<div class="update">
+					Last update:
+					<div id="lastUpdateDate"></div>
+					<div id="lastUpdateTime"></div>
+				</div>
+			</form>
+			<aside class="update-boxes" aria-label="Server update status">
+				<div class="update-box">
+					<span>Map reset</span>
+					<strong id="resetStatus">--</strong>
+				</div>
+				<div class="update-box">
+					<span>Last update date</span>
+					<!--<strong id="lastUpdateDate">--</strong>-->
+				</div>
+				<div class="update-box">
+					<span>Last update time</span>
+					<!--<strong id="lastUpdateTime">--</strong>-->
+				</div>
+			</aside>
+			<img src="sprites/ui/mainMenu/logo.png" alt="Dead Kingdoms typographic logo" class="logo" />
+			<img src="sprites/ui/mainMenu/background.png" alt="Medieval helmet" class="background" />
+		</div>
 
-        <main id="game" class="game hidden">
-            <canvas
-                id="world"
-                width="1280"
-                height="720"
-                draggable="false"
-            ></canvas>
-            <section class="hud top-left">
-                <div id="resources" class="resources"></div>
-                <div id="status" class="status"></div>
-                <button id="leaveButton" class="leave-button" type="button">
-                    Leave game
-                </button>
-            </section>
-            <section class="hud top-right">
-                <h2>Leaderboard</h2>
-                <p class="leaderboard-subtitle">Build the strongest settlement and hold #1.</p>
-                <div id="timeOfDay" class="time-of-day">Day --:--</div>
-                <div id="ping" class="ping" hidden>Ping --ms</div>
-                <div id="fps" class="ping" hidden>FPS --</div>
-                <div id="serverPerf" class="ping" hidden>TPS -- Tick --ms</div>
-                <ol id="leaderboard"></ol>
-                <button
-                    id="muteButton"
-                    class="mute-button"
-                    type="button"
-                    aria-label="Mute music"
-                    title="Mute music"
-                ></button>
-                <canvas
-                    id="minimap"
-                    width="180"
-                    height="180"
-                    aria-label="Minimap"
-                ></canvas>
-            </section>
-            <section id="adminPanel" class="hud admin-panel hidden">
-                <div id="adminHeading" class="admin-heading">
-                    <h2>Admin</h2>
-                    <div class="admin-heading-actions">
-                        <span id="adminLevel"></span>
-                        <button
-                            id="adminFullscreenButton"
-                            class="admin-window-button"
-                            type="button"
-                            aria-label="Open full screen admin dashboard"
-                            title="Open full screen admin dashboard"
-                        >
-                            []
-                        </button>
-                        <button
-                            id="adminMinimizeButton"
-                            class="admin-window-button"
-                            type="button"
-                            aria-label="Minimize admin panel"
-                            title="Minimize admin panel"
-                        >
-                            -
-                        </button>
-                    </div>
-                </div>
-                <canvas
-                    id="adminPerfChart"
-                    width="320"
-                    height="92"
-                    aria-label="Server performance chart"
-                ></canvas>
-                <div id="adminMetrics" class="admin-metrics"></div>
-                <div id="adminPlayers" class="admin-players"></div>
-                <div id="adminEvents" class="admin-events"></div>
-                <div class="resize-handle resize-handle-nw" data-resize="nw"></div>
-                <div class="resize-handle resize-handle-ne" data-resize="ne"></div>
-                <div class="resize-handle resize-handle-sw" data-resize="sw"></div>
-                <div class="resize-handle resize-handle-se" data-resize="se"></div>
-            </section>
-            <section id="adminFullscreen" class="admin-fullscreen hidden">
-                <div class="admin-fullscreen-bar">
-                    <div>
-                        <h2>Admin Dashboard</h2>
-                        <span id="adminFullscreenLevel"></span>
-                    </div>
-                    <button
-                        id="adminFullscreenCloseButton"
-                        class="admin-window-button"
-                        type="button"
-                        aria-label="Close full screen admin dashboard"
-                        title="Close full screen admin dashboard"
-                    >
-                        X
-                    </button>
-                </div>
-                <div class="admin-tabs" role="tablist" aria-label="Admin dashboard views">
-                    <button id="adminOverviewTab" class="active" type="button" role="tab" aria-selected="true">Overview</button>
-                    <button id="adminPerformanceTab" type="button" role="tab" aria-selected="false">Performance</button>
-                    <button id="adminPlayersTab" type="button" role="tab" aria-selected="false">Players</button>
-                    <button id="adminLogsTab" type="button" role="tab" aria-selected="false">Logs</button>
-                    <button id="adminDevCommandsTab" type="button" role="tab" aria-selected="false">Dev Commands</button>
-                </div>
-                <div id="adminOverviewView" class="admin-tab-view admin-overview">
-                    <div class="admin-overview-metrics" id="adminOverviewMetrics"></div>
-                    <div class="admin-overview-grid">
-                        <section>
-                            <h3>Players</h3>
-                            <div id="adminOverviewPlayers" class="admin-overview-list"></div>
-                        </section>
-                        <section>
-                            <h3>Events</h3>
-                            <div id="adminOverviewEvents" class="admin-overview-list"></div>
-                        </section>
-                        <section>
-                            <h3>Logs</h3>
-                            <div id="adminOverviewLogs" class="admin-overview-list"></div>
-                        </section>
-                    </div>
-                </div>
-                <div id="adminPerformanceView" class="admin-tab-view hidden">
-                    <div id="adminPerfBreakdown" class="admin-perf-breakdown"></div>
-                    <div class="admin-chart-controls">
-                        <button id="adminChartOlderButton" type="button">Older</button>
-                        <button id="adminChartNewerButton" type="button">Newer</button>
-                        <label>
-                            Range
-                            <select id="adminChartRange">
-                                <option value="10">10s</option>
-                                <option value="30" selected>30s</option>
-                                <option value="60">1m</option>
-                                <option value="120">2m</option>
-                            </select>
-                        </label>
-                        <span id="adminChartWindow"></span>
-                    </div>
-                    <canvas
-                        id="adminFullscreenChart"
-                        width="1280"
-                        height="520"
-                        aria-label="Full screen server performance chart"
-                    ></canvas>
-                </div>
-                <div id="adminPlayersView" class="admin-tab-view hidden">
-                    <table class="admin-player-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Status</th>
-                                <th>Population</th>
-                                <th>Score</th>
-                                <th>Ping</th>
-                                <th>Alive</th>
-                                <th>Connection status</th>
-                                <th>Since</th>
-                                <th>IP</th>
-                            </tr>
-                        </thead>
-                        <tbody id="adminPlayerTableBody"></tbody>
-                    </table>
-                </div>
-                <div id="adminLogsView" class="admin-tab-view hidden">
-                    <table class="admin-log-table">
-                        <thead>
-                            <tr>
-                                <th>Time</th>
-                                <th>Source</th>
-                                <th>Message</th>
-                            </tr>
-                        </thead>
-                        <tbody id="adminLogTableBody"></tbody>
-                    </table>
-                </div>
-                <div id="adminDevCommandsView" class="admin-tab-view hidden">
-                    <div class="admin-command-grid">
-                        <button id="adminEnableVisionButton" type="button">
-                            <strong>Enable Full-Map Admin Vision</strong>
-                            <span>Reveal the complete map for this admin session.</span>
-                        </button>
-                        <button id="adminEnableSoundDebugButton" type="button">
-                            <strong>Show Sound Field</strong>
-                            <span>Display aggregated sound pressure and hearing ranges.</span>
-                        </button>
-                        <button id="adminEnableZombieDebugButton" type="button">
-                            <strong>Show Zombie State</strong>
-                            <span>Color-code zombies by their current server movement state.</span>
-                        </button>
-                        <button id="adminSpawnHordeButton" type="button">
-                            <strong>Deploy Hostile Stress Horde</strong>
-                            <span>Spawn a controlled hostile horde for testing.</span>
-                        </button>
-                        <button id="adminGrantSoldiersButton" type="button">
-                            <strong>Grant 100 Soldiers</strong>
-                            <span>Add a large friendly group near your base.</span>
-                        </button>
-                        <button id="adminInvincibleButton" type="button">
-                            <strong>Toggle Town Center Invincibility</strong>
-                            <span>Make your town center immune to all damage for zombie testing.</span>
-                        </button>
-                        <button id="adminNoiseToolButton" type="button">
-                            <strong>Noise Tool (Bang)</strong>
-                            <span>Closes this panel, then left-click the map to emit a loud bang. Esc or right-click to stop.</span>
-                        </button>
-                        <button id="adminInstantBuildButton" type="button">
-                            <strong>Instant Build Mode</strong>
-                            <span>Closes this panel. Use building hotkeys, then click the map to place completed buildings without villagers.</span>
-                        </button>
-                        <button id="adminMidnightButton" type="button">
-                            <strong>Set Midnight</strong>
-                            <span>Jump the day/night cycle to 00:00.</span>
-                        </button>
-                        <button id="adminDawnButton" type="button">
-                            <strong>Set Dawn</strong>
-                            <span>Jump the day/night cycle to 06:00.</span>
-                        </button>
-                        <button id="adminMiddayButton" type="button">
-                            <strong>Set Midday</strong>
-                            <span>Jump the day/night cycle to 12:00.</span>
-                        </button>
-                        <button id="adminEveningButton" type="button">
-                            <strong>Set Evening</strong>
-                            <span>Jump the day/night cycle to 18:00.</span>
-                        </button>
-                        <button id="adminDisableAdminModeButton" type="button">
-                            <strong>Disable Admin Mode</strong>
-                            <span>Return this player to normal visibility and hide admin tools.</span>
-                        </button>
-                        <button id="adminRestartServerButton" type="button">
-                            <strong>Restart Server</strong>
-                            <span>Clear the current map immediately. The next player to join starts a fresh map.</span>
-                        </button>
-                    </div>
-                    <div id="adminCommandStatus" class="admin-command-status"></div>
-                </div>
-            </section>
-            <button
-                id="adminRestoreButton"
-                class="admin-restore hidden"
-                type="button"
-                aria-label="Restore admin panel"
-                title="Restore admin panel"
-            >
-                Admin
-            </button>
-            <section class="hud bottom">
-                <div id="selection" class="selection"></div>
-                <div id="actions" class="actions"></div>
-            </section>
-            <section id="toast" class="toast"></section>
-        </main>
+		<main id="game" class="game hidden">
+			<canvas
+				id="world"
+				width="1280"
+				height="720"
+				draggable="false"
+			></canvas>
+			<section class="hud top-left">
+				<div id="resources" class="resources"></div>
+				<div id="status" class="status"></div>
+				<button id="leaveButton" class="leave-button" type="button">
+					Leave game
+				</button>
+			</section>
+			<section class="hud top-right">
+				<h2>Leaderboard</h2>
+				<p class="leaderboard-subtitle">Build the strongest settlement and hold #1.</p>
+				<div id="timeOfDay" class="time-of-day">Day --:--</div>
+				<div id="ping" class="ping" hidden>Ping --ms</div>
+				<div id="fps" class="ping" hidden>FPS --</div>
+				<div id="serverPerf" class="ping" hidden>TPS -- Tick --ms</div>
+				<ol id="leaderboard"></ol>
+				<button
+					id="muteButton"
+					class="mute-button"
+					type="button"
+					aria-label="Mute music"
+					title="Mute music"
+				></button>
+				<canvas
+					id="minimap"
+					width="180"
+					height="180"
+					aria-label="Minimap"
+				></canvas>
+			</section>
+			<section id="adminPanel" class="hud admin-panel hidden">
+				<div id="adminHeading" class="admin-heading">
+					<h2>Admin</h2>
+					<div class="admin-heading-actions">
+						<span id="adminLevel"></span>
+						<button
+							id="adminFullscreenButton"
+							class="admin-window-button"
+							type="button"
+							aria-label="Open full screen admin dashboard"
+							title="Open full screen admin dashboard"
+						>
+							[]
+						</button>
+						<button
+							id="adminMinimizeButton"
+							class="admin-window-button"
+							type="button"
+							aria-label="Minimize admin panel"
+							title="Minimize admin panel"
+						>
+							-
+						</button>
+					</div>
+				</div>
+				<canvas
+					id="adminPerfChart"
+					width="320"
+					height="92"
+					aria-label="Server performance chart"
+				></canvas>
+				<div id="adminMetrics" class="admin-metrics"></div>
+				<div id="adminPlayers" class="admin-players"></div>
+				<div id="adminEvents" class="admin-events"></div>
+				<div class="resize-handle resize-handle-nw" data-resize="nw"></div>
+				<div class="resize-handle resize-handle-ne" data-resize="ne"></div>
+				<div class="resize-handle resize-handle-sw" data-resize="sw"></div>
+				<div class="resize-handle resize-handle-se" data-resize="se"></div>
+			</section>
+			<section id="adminFullscreen" class="admin-fullscreen hidden">
+				<div class="admin-fullscreen-bar">
+					<div>
+						<h2>Admin Dashboard</h2>
+						<span id="adminFullscreenLevel"></span>
+					</div>
+					<button
+						id="adminFullscreenCloseButton"
+						class="admin-window-button"
+						type="button"
+						aria-label="Close full screen admin dashboard"
+						title="Close full screen admin dashboard"
+					>
+						X
+					</button>
+				</div>
+				<div class="admin-tabs" role="tablist" aria-label="Admin dashboard views">
+					<button id="adminOverviewTab" class="active" type="button" role="tab" aria-selected="true">Overview</button>
+					<button id="adminPerformanceTab" type="button" role="tab" aria-selected="false">Performance</button>
+					<button id="adminPlayersTab" type="button" role="tab" aria-selected="false">Players</button>
+					<button id="adminLogsTab" type="button" role="tab" aria-selected="false">Logs</button>
+					<button id="adminDevCommandsTab" type="button" role="tab" aria-selected="false">Dev Commands</button>
+				</div>
+				<div id="adminOverviewView" class="admin-tab-view admin-overview">
+					<div class="admin-overview-metrics" id="adminOverviewMetrics"></div>
+					<div class="admin-overview-grid">
+						<section>
+							<h3>Players</h3>
+							<div id="adminOverviewPlayers" class="admin-overview-list"></div>
+						</section>
+						<section>
+							<h3>Events</h3>
+							<div id="adminOverviewEvents" class="admin-overview-list"></div>
+						</section>
+						<section>
+							<h3>Logs</h3>
+							<div id="adminOverviewLogs" class="admin-overview-list"></div>
+						</section>
+					</div>
+				</div>
+				<div id="adminPerformanceView" class="admin-tab-view hidden">
+					<div id="adminPerfBreakdown" class="admin-perf-breakdown"></div>
+					<div class="admin-chart-controls">
+						<button id="adminChartOlderButton" type="button">Older</button>
+						<button id="adminChartNewerButton" type="button">Newer</button>
+						<label>
+							Range
+							<select id="adminChartRange">
+								<option value="10">10s</option>
+								<option value="30" selected>30s</option>
+								<option value="60">1m</option>
+								<option value="120">2m</option>
+							</select>
+						</label>
+						<span id="adminChartWindow"></span>
+					</div>
+					<canvas
+						id="adminFullscreenChart"
+						width="1280"
+						height="520"
+						aria-label="Full screen server performance chart"
+					></canvas>
+				</div>
+				<div id="adminPlayersView" class="admin-tab-view hidden">
+					<table class="admin-player-table">
+						<thead>
+							<tr>
+								<th>Name</th>
+								<th>Status</th>
+								<th>Population</th>
+								<th>Score</th>
+								<th>Ping</th>
+								<th>Alive</th>
+								<th>Connection status</th>
+								<th>Since</th>
+								<th>IP</th>
+							</tr>
+						</thead>
+						<tbody id="adminPlayerTableBody"></tbody>
+					</table>
+				</div>
+				<div id="adminLogsView" class="admin-tab-view hidden">
+					<table class="admin-log-table">
+						<thead>
+							<tr>
+								<th>Time</th>
+								<th>Source</th>
+								<th>Message</th>
+							</tr>
+						</thead>
+						<tbody id="adminLogTableBody"></tbody>
+					</table>
+				</div>
+				<div id="adminDevCommandsView" class="admin-tab-view hidden">
+					<div class="admin-command-grid">
+						<button id="adminEnableVisionButton" type="button">
+							<strong>Enable Full-Map Admin Vision</strong>
+							<span>Reveal the complete map for this admin session.</span>
+						</button>
+						<button id="adminEnableSoundDebugButton" type="button">
+							<strong>Show Sound Field</strong>
+							<span>Display aggregated sound pressure and hearing ranges.</span>
+						</button>
+						<button id="adminEnableZombieDebugButton" type="button">
+							<strong>Show Zombie State</strong>
+							<span>Color-code zombies by their current server movement state.</span>
+						</button>
+						<button id="adminSpawnHordeButton" type="button">
+							<strong>Deploy Hostile Stress Horde</strong>
+							<span>Spawn a controlled hostile horde for testing.</span>
+						</button>
+						<button id="adminGrantSoldiersButton" type="button">
+							<strong>Grant 100 Soldiers</strong>
+							<span>Add a large friendly group near your base.</span>
+						</button>
+						<button id="adminInvincibleButton" type="button">
+							<strong>Toggle Town Center Invincibility</strong>
+							<span>Make your town center immune to all damage for zombie testing.</span>
+						</button>
+						<button id="adminNoiseToolButton" type="button">
+							<strong>Noise Tool (Bang)</strong>
+							<span>Closes this panel, then left-click the map to emit a loud bang. Esc or right-click to stop.</span>
+						</button>
+						<button id="adminInstantBuildButton" type="button">
+							<strong>Instant Build Mode</strong>
+							<span>Closes this panel. Use building hotkeys, then click the map to place completed buildings without villagers.</span>
+						</button>
+						<button id="adminMidnightButton" type="button">
+							<strong>Set Midnight</strong>
+							<span>Jump the day/night cycle to 00:00.</span>
+						</button>
+						<button id="adminDawnButton" type="button">
+							<strong>Set Dawn</strong>
+							<span>Jump the day/night cycle to 06:00.</span>
+						</button>
+						<button id="adminMiddayButton" type="button">
+							<strong>Set Midday</strong>
+							<span>Jump the day/night cycle to 12:00.</span>
+						</button>
+						<button id="adminEveningButton" type="button">
+							<strong>Set Evening</strong>
+							<span>Jump the day/night cycle to 18:00.</span>
+						</button>
+						<button id="adminDisableAdminModeButton" type="button">
+							<strong>Disable Admin Mode</strong>
+							<span>Return this player to normal visibility and hide admin tools.</span>
+						</button>
+						<button id="adminRestartServerButton" type="button">
+							<strong>Restart Server</strong>
+							<span>Clear the current map immediately. The next player to join starts a fresh map.</span>
+						</button>
+					</div>
+					<div id="adminCommandStatus" class="admin-command-status"></div>
+				</div>
+			</section>
+			<button
+				id="adminRestoreButton"
+				class="admin-restore hidden"
+				type="button"
+				aria-label="Restore admin panel"
+				title="Restore admin panel"
+			>
+				Admin
+			</button>
+			<section class="hud bottom">
+				<div id="selection" class="selection"></div>
+				<div id="actions" class="actions"></div>
+			</section>
+			<section id="toast" class="toast"></section>
+		</main>
 
-        <script type="module" src="/js/app.js?v=3"></script>
-    </body>
+		<script type="module" src="/js/app.js?v=3"></script>
+	</body>
 </html>

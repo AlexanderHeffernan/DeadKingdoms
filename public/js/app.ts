@@ -1,4 +1,4 @@
-import { disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
+import { disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getStatus, ServerStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
@@ -283,17 +283,34 @@ function enterGame() {
 	startMusic();
 	connectEvents();
 }
+function onlinePlayersText(status: ServerStatus): string {
+	if (status.activePlayers == 0) return "";
+	if (status.activePlayers >= status.maxPlayers) return "Full";
+	return `${status.activePlayers} players`;
+}
 
 async function updateHomeStatus() {
 	const onlinePlayers = document.getElementById("onlinePlayers");
+	const separator = document.getElementById("statusSeparator");
 	const resetStatus = document.getElementById("resetStatus");
 	const lastUpdateDate = document.getElementById("lastUpdateDate");
 	const lastUpdateTime = document.getElementById("lastUpdateTime");
 	if (!onlinePlayers && !resetStatus && !lastUpdateDate && !lastUpdateTime) return;
 	try {
 		const status = await getStatus();
-		if (onlinePlayers) onlinePlayers.textContent = `Players online: ${status.activePlayers}/${status.maxPlayers}`;
-		if (resetStatus) resetStatus.textContent = formatResetStatus(status);
+		//if (onlinePlayers) onlinePlayers.textContent = `Players online: ${status.activePlayers}/${status.maxPlayers}`;
+		let count = 0;
+		if (onlinePlayers) {
+			onlinePlayers.textContent = onlinePlayersText(status);
+			count += onlinePlayers.textContent ? 1 : 0;
+		}
+		if (resetStatus) {
+			resetStatus.textContent = formatResetStatus(status);
+			count += resetStatus.textContent ? 1 : 0;
+		}
+		if (count > 1 && separator) separator.style.display = "inline";
+		else if (separator) separator.style.display = "none";
+
 		const updatedAt = status.lastUpdate ? new Date(status.lastUpdate) : null;
 		if (lastUpdateDate) lastUpdateDate.textContent = updatedAt ? updatedAt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "--";
 		if (lastUpdateTime) lastUpdateTime.textContent = updatedAt ? updatedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "--";
@@ -305,9 +322,9 @@ async function updateHomeStatus() {
 	}
 }
 
-function formatResetStatus(status: Awaited<ReturnType<typeof getStatus>>) {
-	if (status.reset.state === "active") return "Resets when 0 players remain";
-	if (status.reset.state === "cold") return "Map reset. New map on join";
+function formatResetStatus(status: ServerStatus): string {
+	if (status.reset.state === "active") return "";
+	if (status.reset.state === "cold") return "";
 	const remainingMs = Math.max(0, status.reset.resetAt! - Date.now());
 	return `Resetting in ${formatDuration(remainingMs)}`;
 }
