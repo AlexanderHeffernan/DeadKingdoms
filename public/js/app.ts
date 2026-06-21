@@ -627,7 +627,11 @@ function onMouseUp(event: MouseEvent) {
 }
 
 function handleRightClick(event: MouseEvent) {
-	view.buildMode = null;
+	if (view.buildMode) {
+		view.buildMode = null;
+		view.wallDragStartTile = null;
+		return;
+	}
 	view.wallDragStartTile = null;
 	view.rallyModeBuildingId = null;
 	if (view.noiseMode) {
