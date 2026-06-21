@@ -27,7 +27,7 @@ export const COLORS = [
 ];
 
 export const STARTING_UNITS = [
-	{ unitType: "soldier", x: 5.0, y: 5.0 },
+	{ unitType: "archer", x: 5.0, y: 5.0 },
 	{ unitType: "villager", x: 3.0, y: 5.0 },
 	{ unitType: "villager", x: 1.0, y: 5.0 },
 	{ unitType: "villager", x: 5.0, y: 3.0 },
