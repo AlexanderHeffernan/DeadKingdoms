@@ -58,11 +58,11 @@ export const RESOURCE_DEFS = {
 } as const;
 
 export const ACTION_SOUND_DEFS = {
-	chopWood: { sound: 46, duration: 0.1 },
-	mineOre: { sound: 58, duration: 0.1 },
-	gatherFood: { sound: 30, duration: 0.1 },
-	build: { sound: 60, duration: 0.1 },
-	unitAttack: { sound: 60, duration: 0.1 },
+	chopWood: { sound: 14, duration: 0.1 },
+	mineOre: { sound: 18, duration: 0.1 },
+	gatherFood: { sound: 10, duration: 0.1 },
+	build: { sound: 28, duration: 0.1 },
+	unitAttack: { sound: 42, duration: 0.1 },
 	towerAttack: { sound: 30, duration: 0.1 },
 	horn: { sound: 900, duration: 0.35 },
 	trainUnit: { sound: 0, duration: 0.1 },

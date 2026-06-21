@@ -11,8 +11,13 @@ const ZOMBIES_PER_ACTIVE_POPULATION = 2;
 const ZOMBIE_SPAWN_INTERVAL_SECONDS = 7;
 const ZOMBIE_SPAWN_BATCH_MIN = 2;
 const ZOMBIE_SPAWN_BATCH_MAX = 5;
-const ZOMBIE_SAFE_RADIUS = 44;
+const ZOMBIE_BASE_SAFE_RADIUS = 18;
+const ZOMBIE_FRESH_SAFE_RADIUS = 72;
+const ZOMBIE_FRESH_SAFE_SECONDS = 10 * 60;
 const ZOMBIE_SPAWN_SIGHT_BUFFER = 4;
+const ZOMBIE_NOISE_BIASED_SPAWN_CHANCE = 0.45;
+const ZOMBIE_NOISE_SPAWN_MIN_RADIUS = 24;
+const ZOMBIE_NOISE_SPAWN_MAX_RADIUS = 96;
 
 export type ZombieSpawnContext = SpawnContext & {
 	createZombie(point: Vec2): Unit;
@@ -66,9 +71,9 @@ function chooseZombieSpawn(context: ZombieSpawnContext): Vec2 | null {
 }
 
 function randomZombieSpawnPoint(context: ZombieSpawnContext, target: Vec2 | null) {
-	if (target && Math.random() < 0.2) {
+	if (target && Math.random() < ZOMBIE_NOISE_BIASED_SPAWN_CHANCE) {
 		const angle = Math.random() * Math.PI * 2;
-		const radius = 30 + Math.random() * 120;
+		const radius = ZOMBIE_NOISE_SPAWN_MIN_RADIUS + Math.random() * (ZOMBIE_NOISE_SPAWN_MAX_RADIUS - ZOMBIE_NOISE_SPAWN_MIN_RADIUS);
 		return {
 			x: clamp(target.x + Math.cos(angle) * radius, 1, MAP_SIZE - 2),
 			y: clamp(target.y + Math.sin(angle) * radius, 1, MAP_SIZE - 2),
@@ -84,9 +89,17 @@ function canSpawnZombieAt(context: ZombieSpawnContext, x: number, y: number): bo
 	if (!context.isWalkable(Math.floor(x), Math.floor(y))) return false;
 	for (const building of Object.values(context.world.buildings)) {
 		if (building.type !== "townCenter") continue;
-		if (context.distance({ x, y }, context.centerOf(building)) < ZOMBIE_SAFE_RADIUS) return false;
+		if (context.distance({ x, y }, context.centerOf(building)) < townCenterSafeRadius(context, building)) return false;
 	}
 	return !isInAnyPlayerSight(context, x, y);
+}
+
+function townCenterSafeRadius(context: ZombieSpawnContext, building: Building) {
+	const player = context.world.players[building.ownerId];
+	const joinedAt = player?.joinedAt ?? Date.now();
+	const ageSeconds = Math.max(0, (Date.now() - joinedAt) / 1000);
+	const freshRatio = Math.max(0, 1 - ageSeconds / ZOMBIE_FRESH_SAFE_SECONDS);
+	return ZOMBIE_BASE_SAFE_RADIUS + (ZOMBIE_FRESH_SAFE_RADIUS - ZOMBIE_BASE_SAFE_RADIUS) * freshRatio;
 }
 
 function isInAnyPlayerSight(context: ZombieSpawnContext, x: number, y: number): boolean {

@@ -1520,7 +1520,9 @@ function stepCorpseDecay(world: World, dt: number) {
 }
 
 function weightedWorldSound(world: World): { point: { x: number; y: number }; strength: number } | null {
-	const sources = buildSoundField(collectWorldSoundSources(world, ZOMBIE_OWNER_ID)).map((cell) => ({ point: { x: cell.x, y: cell.y }, strength: cell.strength }));
+	const sources = buildSoundField(collectWorldSoundSources(world, ZOMBIE_OWNER_ID))
+		.filter((cell) => cell.worldStrength > 0)
+		.map((cell) => ({ point: { x: cell.x, y: cell.y }, strength: cell.worldStrength ** 1.35 }));
 	let total = 0;
 	for (const source of sources) total += source.strength;
 	if (sources.length === 0) return null;

@@ -9,6 +9,6 @@ export class House extends Building {
 	static readonly score = 15;
 	static readonly cost = { wood: 25 };
 	static readonly vision = 5;
-	static readonly sound = 0;
+	static readonly sound = 1;
 	static readonly populationCapacity = 5;
 }

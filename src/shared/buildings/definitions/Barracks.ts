@@ -10,6 +10,6 @@ export class Barracks extends ProductionBuilding {
 	static readonly score = 90;
 	static readonly cost = { wood: 175 };
 	static readonly vision = 6;
-	static readonly sound = 0;
+	static readonly sound = 5;
 	static readonly trains = [SoldierUnit, ArcherUnit, ScoutUnit] as const;
 }

@@ -4,9 +4,15 @@ import { unitBehaviorFor } from "./unitRegistry.js";
 
 export const SOUND_FIELD_CELL_SIZE = 8;
 export const SOUND_FIELD_MAX_STRENGTH = 8;
-export const SOUND_FIELD_OVERFLOW_DECAY = 0.55;
-export const SOUND_FIELD_OVERFLOW_KNEE = 3000;
+export const SOUND_FIELD_OVERFLOW_DECAY = 0.62;
+export const SOUND_FIELD_OVERFLOW_KNEE = 2200;
 export const SOUND_FIELD_MIN_SPREAD_STRENGTH = 0.25;
+
+const SETTLEMENT_FREE_POPULATION = 10;
+const SETTLEMENT_FREE_BUILDINGS = 5;
+const POPULATION_SOUND_PER_UNIT = 0.45;
+const SETTLEMENT_BUILDING_SOUND = 0.4;
+const SETTLEMENT_HUM_MIN_STRENGTH = 4;
 
 export type SoundSourceKind = "unit" | "building" | "action" | "zombie";
 
@@ -65,8 +71,33 @@ export function collectWorldSoundSources(world: World, zombieOwnerId: string, op
 		const strength = building.soundLevel();
 		if (strength > 0) sources.push({ id: building.id, kind: "building", label: building.type, ...centerOf(building), strength });
 	}
+	sources.push(...collectSettlementHumSources(world, zombieOwnerId));
 	for (const noise of world.actionNoises) {
 		if (noise.sound > 0) sources.push({ id: noise.id, kind: "action", label: noise.action, x: noise.x, y: noise.y, strength: noise.sound });
+	}
+	return sources;
+}
+
+function collectSettlementHumSources(world: World, zombieOwnerId: string): SoundFieldSource[] {
+	const sources: SoundFieldSource[] = [];
+	for (const player of Object.values(world.players)) {
+		if (player.defeated || player.id === zombieOwnerId) continue;
+		const ownedBuildings = Object.values(world.buildings).filter((building) => building.ownerId === player.id && building.hp > 0 && building.isComplete());
+		const ownedUnits = Object.values(world.units).filter((unit) => unit.ownerId === player.id && unit.hp > 0);
+		if (ownedBuildings.length === 0 && ownedUnits.length === 0) continue;
+		const center = averagePoint([...ownedBuildings.map(centerOf), ...ownedUnits]);
+		const noisyPopulation = Math.max(0, ownedUnits.length - SETTLEMENT_FREE_POPULATION);
+		const noisyBuildings = Math.max(0, ownedBuildings.length - SETTLEMENT_FREE_BUILDINGS);
+		const strength = noisyPopulation * POPULATION_SOUND_PER_UNIT + noisyBuildings * SETTLEMENT_BUILDING_SOUND;
+		if (strength < SETTLEMENT_HUM_MIN_STRENGTH) continue;
+		sources.push({
+			id: `settlement:${player.id}`,
+			kind: "building",
+			label: "settlement",
+			x: center.x,
+			y: center.y,
+			strength,
+		});
 	}
 	return sources;
 }
@@ -204,6 +235,11 @@ function centerOf(entity: { x: number; y: number; size?: number; width?: number;
 	const width = entity.width ?? entity.size ?? 1;
 	const height = entity.height ?? entity.size ?? 1;
 	return { x: entity.x + (width - 1) / 2, y: entity.y + (height - 1) / 2 };
+}
+
+function averagePoint(points: Vec2[]): Vec2 {
+	const total = points.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 });
+	return { x: total.x / points.length, y: total.y / points.length };
 }
 
 function cellCoord(value: number) {

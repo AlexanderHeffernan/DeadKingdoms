@@ -10,7 +10,7 @@ export class Farm extends Building {
 	static readonly score = 20;
 	static readonly cost = { wood: 60 };
 	static readonly vision = 3;
-	static readonly sound = 0;
+	static readonly sound = 1.5;
 	static readonly walkBlocking = false;
 	static readonly gatherResource = "food";
 	static readonly gatherAmount = 16;

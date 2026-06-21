@@ -14,6 +14,6 @@ export class ArcherUnit extends BaseUnit {
 	public static readonly trainTime = 10.5;
 	public static readonly cost = { wood: 35, food: 45 };
 	public static readonly vision = 12;
-	public static readonly sound = 4;
+	public static readonly sound = 1.5;
 	public static readonly canAutoAcquireTargets = true;
 }

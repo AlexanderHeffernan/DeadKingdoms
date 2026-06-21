@@ -14,6 +14,6 @@ export class SoldierUnit extends BaseUnit {
 	public static readonly trainTime = 10.5;
 	public static readonly cost = { food: 50, ore: 20 };
 	public static readonly vision = 12;
-	public static readonly sound = 8;
+	public static readonly sound = 2;
 	public static readonly canAutoAcquireTargets = true;
 }

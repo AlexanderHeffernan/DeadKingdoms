@@ -10,7 +10,7 @@ export class TownCenter extends ProductionDepotBuilding {
 	static readonly score = 150;
 	static readonly cost = { wood: 300 };
 	static readonly vision = 16;
-	static readonly sound = 0;
+	static readonly sound = 6;
 	static readonly populationCapacity = 5;
 	static readonly trains = [VillagerUnit] as const;
 	static readonly accepts = ["wood", "food", "ore"] as const;

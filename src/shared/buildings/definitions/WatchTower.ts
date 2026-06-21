@@ -9,7 +9,7 @@ export class WatchTower extends AttackingBuilding {
 	static readonly score = 80;
 	static readonly cost = { wood: 35, ore: 125 };
 	static readonly vision = 24;
-	static readonly sound = 0;
+	static readonly sound = 2;
 	static readonly attack = 5;
 	static readonly attackRange = 8;
 	static readonly attackCooldown = 2;

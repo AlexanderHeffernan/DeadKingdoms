@@ -16,7 +16,7 @@ export class ScoutUnit extends BaseUnit {
 	public static readonly trainTime = 8;
 	public static readonly cost = { food: 200 };
 	public static readonly vision = 18;
-	public static readonly sound = 5;
+	public static readonly sound = 1;
 
 	public step(context: UnitSimulationContext, unit: Unit, dt: number) {
 		if (unit.hornActive && unit.command.type === "move") unit.hornActive = false;

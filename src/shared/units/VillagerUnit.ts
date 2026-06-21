@@ -18,7 +18,7 @@ export class VillagerUnit extends BaseUnit {
 	public static readonly trainTime = 3.5;
 	public static readonly cost = { food: 50 };
 	public static readonly vision = 12;
-	public static readonly sound = 6;
+	public static readonly sound = 0.5;
 	public static readonly canGather = true;
 	public static readonly canBuild = true;
 	public static readonly carryCapacity = 20;

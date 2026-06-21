@@ -9,6 +9,6 @@ export class MiningCamp extends DepotBuilding {
 	static readonly score = 25;
 	static readonly cost = { wood: 100 };
 	static readonly vision = 5;
-	static readonly sound = 0;
+	static readonly sound = 2;
 	static readonly accepts = ["ore"] as const;
 }
