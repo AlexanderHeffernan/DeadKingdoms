@@ -94,4 +94,5 @@ export interface World {
 	_zombieHordes?: Record<string, ZombieHorde>;
 	_zombieCadenceField?: ZombieCadenceFieldState;
 	_pendingGlobalLeaderboard?: PendingGlobalLeaderboard;
+	_countedDeadKingdomPlayerIds?: Partial<Record<PlayerId, true>>;
 }

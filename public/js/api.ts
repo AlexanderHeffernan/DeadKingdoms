@@ -3,12 +3,26 @@ import type { CommandPayload, CommandResult, GlobalLeaderboardEntry, PlayerId, S
 export type ServerStatus = {
 	activePlayers: number;
 	maxPlayers: number;
+	deadKingdoms: number;
 	lastUpdate: string | null;
 	reset: {
 		state: "active" | "countdown" | "cold";
 		idleResetMs: number;
 		resetAt: number | null;
 	};
+};
+
+export type ChangelogEntry = {
+	sha: string;
+	message: string;
+	url: string;
+	date: string | null;
+};
+
+export type Changelog = {
+	generatedAt: string | null;
+	repository: string;
+	entries: ChangelogEntry[];
 };
 
 export async function getStatus(): Promise<ServerStatus> {
@@ -23,6 +37,11 @@ export async function getGlobalLeaderboard(): Promise<{ entries: GlobalLeaderboa
 
 export async function getGlobalLeaderboardSnapshot(snapshotId: string): Promise<{ ok: boolean; snapshot?: Snapshot; error?: string }> {
 	const res = await fetch(`/api/global-leaderboard/${encodeURIComponent(snapshotId)}`);
+	return res.json();
+}
+
+export async function getChangelog(): Promise<Changelog> {
+	const res = await fetch("/changelog.json");
 	return res.json();
 }
 

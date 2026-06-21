@@ -15,6 +15,7 @@ logs/
 tmp/
 temp/
 data/
+public/changelog.json
 
 # Editor/OS noise
 .idea/

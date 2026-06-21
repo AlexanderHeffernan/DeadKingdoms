@@ -12,10 +12,11 @@ const STORE_FILE = join(STORE_DIR, "leaderboard.json");
 interface StoredLeaderboard {
 	entries: GlobalLeaderboardEntry[];
 	snapshots: Record<string, Snapshot>;
+	deadKingdoms: number;
 }
 
 export class GlobalLeaderboardStore {
-	private data: StoredLeaderboard = { entries: [], snapshots: {} };
+	private data: StoredLeaderboard = { entries: [], snapshots: {}, deadKingdoms: 0 };
 	private loaded = false;
 
 	async entries() {
@@ -28,8 +29,20 @@ export class GlobalLeaderboardStore {
 		return this.data.snapshots[id] ?? null;
 	}
 
+	async deadKingdoms() {
+		await this.load();
+		return this.data.deadKingdoms;
+	}
+
+	async countDeadKingdom() {
+		await this.load();
+		this.data.deadKingdoms += 1;
+		await this.save();
+	}
+
 	async trackWorldPeaks(world: World) {
 		await this.load();
+		this.trackDeadKingdoms(world);
 		let changed = false;
 		for (const player of Object.values(world.players)) {
 			if (this.shouldTrack(world, player)) {
@@ -44,7 +57,10 @@ export class GlobalLeaderboardStore {
 	async publishWorldPeaks(world: World | null) {
 		if (!world?._pendingGlobalLeaderboard?.entries.length) return;
 		await this.load();
-		this.data.entries.push(...this.finalizePendingEntries(world));
+		const entries = this.finalizePendingEntries(world);
+		const playerNames = new Set(entries.map((entry) => entry.playerName));
+		this.data.entries = this.data.entries.filter((entry) => !playerNames.has(entry.playerName));
+		this.data.entries.push(...entries);
 		Object.assign(this.data.snapshots, world._pendingGlobalLeaderboard.snapshots);
 		this.trimStored();
 		await this.save();
@@ -59,6 +75,18 @@ export class GlobalLeaderboardStore {
 		if (candidates.length < LEADERBOARD_LIMIT) return true;
 		candidates.sort(compareEntries);
 		return player.score > candidates[candidates.length - 1]!.score;
+	}
+
+	private trackDeadKingdoms(world: World) {
+		let changed = false;
+		world._countedDeadKingdomPlayerIds ??= {};
+		for (const player of Object.values(world.players)) {
+			if (!player.defeated || world._countedDeadKingdomPlayerIds[player.id]) continue;
+			world._countedDeadKingdomPlayerIds[player.id] = true;
+			this.data.deadKingdoms += 1;
+			changed = true;
+		}
+		if (changed) void this.save();
 	}
 
 	private trackPeak(world: World, player: Player) {
@@ -127,6 +155,7 @@ export class GlobalLeaderboardStore {
 					firstPlaceDurationMs: entry.firstPlaceDurationMs ?? 0,
 				})) : [],
 				snapshots: parsed.snapshots && typeof parsed.snapshots === "object" ? parsed.snapshots : {},
+				deadKingdoms: Number.isFinite(parsed.deadKingdoms) ? Number(parsed.deadKingdoms) : 0,
 			};
 			this.trimStored();
 		} catch (error) {

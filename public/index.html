@@ -38,7 +38,10 @@
 					</span>
 				</label>
 				<button type="submit">Play Game</button>
-				<button id="homeLeaderboardButton" class="home-leaderboard-button" type="button">Leaderboard</button>
+				<div class="home-secondary-actions">
+					<button id="homeLeaderboardButton" class="home-secondary-button" type="button">Leaderboard</button>
+					<button id="howToPlayButton" class="home-secondary-button" type="button">How To Play</button>
+				</div>
 				<div class="status flex">
 					<div
 						id="joinNotice"
@@ -51,9 +54,15 @@
 				</div>
 				<div class="gap"></div>
 				<div class="update">
-					Last update:
-					<div id="lastUpdateDate"></div>
-					<div id="lastUpdateTime"></div>
+					<div class="update-group">
+						Last update:
+						<div id="lastUpdateDate"></div>
+						<div id="lastUpdateTime"></div>
+					</div>
+					<div class="update-group dead-kingdoms-count">
+						Dead Kingdoms:
+						<div id="deadKingdomsCount">--</div>
+					</div>
 				</div>
 			</form>
 			<nav id="homeCredits" class="home-credits" aria-label="Project links and credits"></nav>
@@ -91,6 +100,21 @@
 				</div>
 				<canvas id="snapshotPreviewCanvas" width="1280" height="720" draggable="false"></canvas>
 				<div id="snapshotPreviewInfo" class="snapshot-preview-info"></div>
+			</div>
+		</section>
+		<section id="howToPlayModal" class="global-leaderboard-modal hidden" aria-modal="true" role="dialog" aria-labelledby="howToPlayTitle">
+			<div class="global-leaderboard-panel info-panel">
+				<button id="howToPlayClose" class="global-close-button" type="button" aria-label="Close how to play">X</button>
+				<h2 id="howToPlayTitle">How To Play</h2>
+				<div id="howToPlayRows" class="info-list"></div>
+			</div>
+		</section>
+		<section id="changelogModal" class="global-leaderboard-modal hidden" aria-modal="true" role="dialog" aria-labelledby="changelogTitle">
+			<div class="global-leaderboard-panel info-panel">
+				<button id="changelogClose" class="global-close-button" type="button" aria-label="Close changelog">X</button>
+				<h2 id="changelogTitle">Change Log</h2>
+				<p>Recent commits from the project repository.</p>
+				<div id="changelogRows" class="changelog-rows"></div>
 			</div>
 		</section>
 

@@ -33,7 +33,7 @@ export function createHandler(state: ServerState, clients: Set<Client>, globalLe
 		const host = req.headers.host || "localhost";
 		const url = new URL(req.url ?? "/", `http://${host}`);
 		if (req.method === "POST" && url.pathname === "/api/join") return joinGame(req, res, state.ensureWorld());
-		if (req.method === "GET" && url.pathname === "/api/status") return serverStatus(res, state);
+		if (req.method === "GET" && url.pathname === "/api/status") return serverStatus(res, state, globalLeaderboard);
 		if (req.method === "GET" && url.pathname === "/api/global-leaderboard") return json(res, { entries: await globalLeaderboard.entries() });
 		if (req.method === "GET" && url.pathname.startsWith("/api/global-leaderboard/")) return globalLeaderboardSnapshot(res, globalLeaderboard, url);
 		const world = state.currentWorld();
@@ -58,7 +58,7 @@ export function createHandler(state: ServerState, clients: Set<Client>, globalLe
 			if (url.pathname === "/api/dev/restart-server") return restartServer(req, res, state, clients, world, globalLeaderboard);
 			if (url.pathname === "/api/ping") return receiveClientPing(req, res, world);
 			if (url.pathname === "/api/command") return receiveCommand(req, res, world);
-			if (url.pathname === "/api/leave") return leaveGame(req, res, world);
+			if (url.pathname === "/api/leave") return leaveGame(req, res, world, globalLeaderboard);
 		}
 		if (req.method === "GET" && url.pathname === "/api/soundtrack") return listSoundtrack(res);
 		if (req.method === "GET" && url.pathname.startsWith("/assets/soundtrack/")) return serveSoundtrack(req, res, url);
@@ -93,12 +93,13 @@ async function shiftDevTime(req: import("node:http").IncomingMessage, res: impor
 	json(res, { ok: true });
 }
 
-async function serverStatus(res: import("node:http").ServerResponse, state: ServerState) {
+async function serverStatus(res: import("node:http").ServerResponse, state: ServerState, globalLeaderboard: GlobalLeaderboardStore) {
 	const world = state.currentWorld();
 	const activePlayers = world ? Object.values(world.players).filter((player) => !player.defeated).length : 0;
 	json(res, {
 		activePlayers,
 		maxPlayers: MAX_PLAYERS,
+		deadKingdoms: await globalLeaderboard.deadKingdoms(),
 		lastUpdate: await lastUpdateTime(),
 		reset: state.resetStatus(activePlayers > 0),
 	});
@@ -403,9 +404,12 @@ async function receiveCommand(req: import("node:http").IncomingMessage, res: imp
 	json(res, result, result.ok ? 200 : 400);
 }
 
-async function leaveGame(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+async function leaveGame(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
 	const body = (await readJson(req)) as { playerId?: unknown };
-	if (typeof body.playerId === "string") removePlayer(world, body.playerId);
+	if (typeof body.playerId === "string" && world.players[body.playerId]) {
+		await globalLeaderboard.countDeadKingdom();
+		removePlayer(world, body.playerId);
+	}
 	json(res, { ok: true });
 }
 

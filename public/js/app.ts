@@ -1,4 +1,4 @@
-import { disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getGlobalLeaderboard, getGlobalLeaderboardSnapshot, getStatus, ServerStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
+import { disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getChangelog, getGlobalLeaderboard, getGlobalLeaderboardSnapshot, getStatus, ServerStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
@@ -10,7 +10,19 @@ import { spriteMetrics } from "./sprites/spriteInfo.js";
 import { Logs } from "../../src/shared/logs.js";
 import { DAY_NIGHT_CYCLE_SECONDS, dayNightStateAt } from "../../src/shared/dayNight.js";
 import { escapeHtml } from "./ui/dom.js";
+import villagerBaseUrl from "./sprites/villager_base.png";
+import villagerFlagUrl from "./sprites/villager_flag.png";
+import houseBaseUrl from "./sprites/house_base.png";
+import houseFlagUrl from "./sprites/house_flag.png";
+import townCenterBaseUrl from "./sprites/town_centre_base_v2.png";
+import townCenterFlagUrl from "./sprites/town_centre_flag_v2.png";
+import zombieBaseUrl from "./sprites/zombie_def.png";
+import pillarBaseUrl from "./sprites/pillar_base.png";
+import pillarFlagUrl from "./sprites/pillar_flag.png";
+import soldierBaseUrl from "./sprites/soldier_base.png";
+import soldierFlagUrl from "./sprites/soldier_flag.png";
 import type { Building, BuildingType, CommandPayload, Corpse, EntityId, GlobalLeaderboardEntry, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
+import type { ChangelogEntry } from "./api.js";
 import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
 const state: GameState = {
@@ -97,11 +109,56 @@ const CONTRIBUTORS: ContributorCredit[] = [
 	},
 ];
 
+const HOW_TO_PLAY_ITEMS: HowToPlayItem[] = [
+	{
+		title: "Grow fast.",
+		body: "Villagers gather wood, food, and ore. Build depots near resources so carried supplies get dropped off sooner.",
+		baseUrl: villagerBaseUrl,
+		flagUrl: villagerFlagUrl,
+	},
+	{
+		title: "Build smart.",
+		body: "Houses raise population cap, farms make steady food, barracks train soldiers, archers, and scouts, and walls with towers help hold ground.",
+		baseUrl: houseBaseUrl,
+		flagUrl: houseFlagUrl,
+	},
+	{
+		title: "Keep the Town Center alive.",
+		body: "If it falls, your kingdom is dead and your units and buildings are wiped from the map.",
+		baseUrl: townCenterBaseUrl,
+		flagUrl: townCenterFlagUrl,
+	},
+	{
+		title: "Sound matters.",
+		body: "Chopping, mining, building, fighting, horns, and destroyed buildings can draw zombies toward your settlement.",
+		baseUrl: zombieBaseUrl,
+	},
+	{
+		title: "Night is dangerous.",
+		body: "Vision drops after dusk, so walls, towers, scouts, and fallback plans matter more as the map gets dark.",
+		baseUrl: pillarBaseUrl,
+		flagUrl: pillarFlagUrl,
+	},
+	{
+		title: "Score is power.",
+		body: "Completed buildings and living units decide your score. Global leaderboard entries are published after the map restarts.",
+		baseUrl: soldierBaseUrl,
+		flagUrl: soldierFlagUrl,
+	},
+];
+
 interface ContributorCredit {
 	name: string;
 	avatarUrl: string;
 	url: string;
 	contribution: string;
+}
+
+interface HowToPlayItem {
+	title: string;
+	body: string;
+	baseUrl: string;
+	flagUrl?: string;
 }
 
 const canvas = document.getElementById("world") as HTMLCanvasElement | null;
@@ -121,6 +178,7 @@ let lastFrameAt = performance.now();
 let smoothedFps = 60;
 let lastPingReportAt = 0;
 let adminDiagnosticsVisible = false;
+let latestHomeStatus: ServerStatus | null = null;
 
 const joinForm = document.getElementById("joinForm") as HTMLFormElement | null;
 const nameInput = document.getElementById("nameInput") as HTMLInputElement | null;
@@ -145,7 +203,7 @@ if (colorInput) {
 	});
 }
 renderHomeCredits();
-wireGlobalLeaderboard();
+wireHomeModals();
 const ui = new UI(state, {
 	setBuildMode(type) {
 		view.buildMode = type;
@@ -310,6 +368,7 @@ joinForm?.addEventListener("submit", async (event) => {
 document.getElementById("leaveButton")?.addEventListener("click", async () => {
 	sfx.unlock();
 	await leaveCurrentGame("You left the game.");
+	void updateHomeStatus({ force: true });
 });
 document.getElementById("muteButton")?.addEventListener("click", toggleMusicMute);
 
@@ -346,7 +405,8 @@ renderer.resize();
 drawLoop();
 initMusic();
 updateHomeStatus();
-setInterval(updateHomeStatus, 5000);
+setInterval(updateHomeStatus, 2000);
+setInterval(renderHomeStatus, 1000);
 if (state.playerId) enterGame();
 
 function enterGame() {
@@ -379,6 +439,7 @@ function renderHomeCredits() {
 	const credits = document.getElementById("homeCredits");
 	if (!credits) return;
 	credits.innerHTML = `
+		<button id="changelogButton" class="github-link changelog-link" type="button">Change Log</button>
 		<a class="github-link" href="${GITHUB_REPOSITORY_URL}" target="_blank" rel="noreferrer" aria-label="Open Dead Kingdoms on GitHub">
 			<svg class="github-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
 			<span>Open Source</span>
@@ -425,12 +486,19 @@ const previewView: ViewState = {
 };
 let previewAnimation = 0;
 
-function wireGlobalLeaderboard() {
+function wireHomeModals() {
+	renderHowToPlayRows();
 	document.getElementById("homeLeaderboardButton")?.addEventListener("click", () => void openGlobalLeaderboard());
 	document.getElementById("globalLeaderboardClose")?.addEventListener("click", closeGlobalLeaderboard);
 	document.getElementById("globalLeaderboardModal")?.addEventListener("mousedown", (event) => {
 		if (event.target === event.currentTarget) closeGlobalLeaderboard();
 	});
+	document.getElementById("howToPlayButton")?.addEventListener("click", () => openModal("howToPlayModal"));
+	document.getElementById("howToPlayClose")?.addEventListener("click", () => closeModal("howToPlayModal"));
+	document.getElementById("howToPlayModal")?.addEventListener("mousedown", closeModalFromBackdrop);
+	document.getElementById("changelogButton")?.addEventListener("click", () => void openChangelog());
+	document.getElementById("changelogClose")?.addEventListener("click", () => closeModal("changelogModal"));
+	document.getElementById("changelogModal")?.addEventListener("mousedown", closeModalFromBackdrop);
 	document.getElementById("snapshotPreviewClose")?.addEventListener("click", closeSnapshotPreview);
 	document.getElementById("snapshotPreviewModal")?.addEventListener("mousedown", (event) => {
 		if (event.target === event.currentTarget) closeSnapshotPreview();
@@ -445,6 +513,34 @@ function wireGlobalLeaderboard() {
 		previewView.mouse = { x: -Infinity, y: -Infinity };
 	});
 	snapshotPreviewCanvas.addEventListener("wheel", zoomPreview, { passive: false });
+}
+
+function renderHowToPlayRows() {
+	const rows = document.getElementById("howToPlayRows");
+	if (!rows) return;
+	rows.innerHTML = HOW_TO_PLAY_ITEMS.map((item) => `
+		<p>
+			<span class="how-to-sprite">
+				<img class="how-to-sprite-base" src="${item.baseUrl}" alt="" />
+				${item.flagUrl ? `<span class="how-to-sprite-flag" style="--flag-url: url('${item.flagUrl}')"></span>` : ""}
+			</span>
+			<span><strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.body)}</span>
+		</p>
+	`).join("");
+}
+
+function openModal(id: string) {
+	document.getElementById(id)?.classList.remove("hidden");
+}
+
+function closeModal(id: string) {
+	document.getElementById(id)?.classList.add("hidden");
+}
+
+function closeModalFromBackdrop(event: MouseEvent) {
+	if (event.target instanceof HTMLElement && event.target === event.currentTarget) {
+		event.target.classList.add("hidden");
+	}
 }
 
 async function openGlobalLeaderboard() {
@@ -463,6 +559,47 @@ async function openGlobalLeaderboard() {
 
 function closeGlobalLeaderboard() {
 	document.getElementById("globalLeaderboardModal")?.classList.add("hidden");
+}
+
+async function openChangelog() {
+	const rows = document.getElementById("changelogRows");
+	openModal("changelogModal");
+	if (!rows) return;
+	rows.innerHTML = `<div class="global-loading">Loading changes...</div>`;
+	try {
+		const changelog = await getChangelog();
+		renderChangelogRows(changelog.entries || []);
+	} catch {
+		rows.innerHTML = `<div class="global-loading">Could not load recent changes.</div>`;
+	}
+}
+
+function renderChangelogRows(entries: ChangelogEntry[]) {
+	const rows = document.getElementById("changelogRows");
+	if (!rows) return;
+	if (!entries.length) {
+		rows.innerHTML = `<div class="global-loading">No recent changes found.</div>`;
+		return;
+	}
+	rows.innerHTML = entries.map((entry) => `
+		<a class="changelog-row" href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer">
+			<span>${escapeHtml(shortCommitMessage(entry.message))}</span>
+			<small>${escapeHtml(formatCommitDate(entry.date))}</small>
+		</a>
+	`).join("") + `
+		<a class="changelog-all-link" href="${GITHUB_REPOSITORY_URL}/commits/main" target="_blank" rel="noreferrer">See all commits</a>
+	`;
+}
+
+function shortCommitMessage(message: string) {
+	return message.length > 72 ? `${message.slice(0, 69)}...` : message;
+}
+
+function formatCommitDate(value: string | null) {
+	if (!value) return "recent";
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "recent";
+	return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function renderGlobalLeaderboardRows(entries: GlobalLeaderboardEntry[]) {
@@ -705,47 +842,60 @@ function setJoinButtonFull(full: boolean) {
 	joinButton.textContent = full ? "World Full" : "Play Game";
 }
 
-async function updateHomeStatus() {
+async function updateHomeStatus(options: { force?: boolean } = {}) {
+	if (joinNotice?.textContent && !options.force) return;
+	try {
+		latestHomeStatus = await getStatus();
+		renderHomeStatus();
+	} catch {
+		latestHomeStatus = null;
+		renderHomeStatus();
+	}
+}
+
+function renderHomeStatus() {
 	const onlinePlayers = document.getElementById("onlinePlayers");
 	const separator = document.getElementById("statusSeparator");
 	const resetStatus = document.getElementById("resetStatus");
 	const lastUpdateDate = document.getElementById("lastUpdateDate");
 	const lastUpdateTime = document.getElementById("lastUpdateTime");
-	if (joinNotice?.textContent) return;
-	if (!onlinePlayers && !resetStatus && !lastUpdateDate && !lastUpdateTime) return;
-	try {
-		const status = await getStatus();
-		//if (onlinePlayers) onlinePlayers.textContent = `Players online: ${status.activePlayers}/${status.maxPlayers}`;
-		setJoinButtonFull(isServerFull(status));
-		let count = 0;
-		if (onlinePlayers) {
-			onlinePlayers.textContent = onlinePlayersText(status);
-			count += onlinePlayers.textContent ? 1 : 0;
-		}
-		if (resetStatus) {
-			resetStatus.textContent = formatResetStatus(status);
-			count += resetStatus.textContent ? 1 : 0;
-		}
-		if (count > 1 && separator) separator.style.display = "inline";
-		else if (separator) separator.style.display = "none";
-
-		const updatedAt = status.lastUpdate ? new Date(status.lastUpdate) : null;
-		if (lastUpdateDate) lastUpdateDate.textContent = updatedAt ? updatedAt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "--";
-		if (lastUpdateTime) lastUpdateTime.textContent = updatedAt ? updatedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "--";
-	} catch {
+	const deadKingdomsCount = document.getElementById("deadKingdomsCount");
+	if (!onlinePlayers && !resetStatus && !lastUpdateDate && !lastUpdateTime && !deadKingdomsCount) return;
+	const status = latestHomeStatus;
+	if (!status) {
 		setJoinButtonFull(false);
 		if (onlinePlayers) onlinePlayers.textContent = "Players online: --";
 		if (resetStatus) resetStatus.textContent = "--";
 		if (lastUpdateDate) lastUpdateDate.textContent = "--";
 		if (lastUpdateTime) lastUpdateTime.textContent = "--";
+		if (deadKingdomsCount) deadKingdomsCount.textContent = "--";
+		if (separator) separator.style.display = "none";
+		return;
 	}
+	setJoinButtonFull(isServerFull(status));
+	let count = 0;
+	if (onlinePlayers) {
+		onlinePlayers.textContent = onlinePlayersText(status);
+		count += onlinePlayers.textContent ? 1 : 0;
+	}
+	if (resetStatus) {
+		resetStatus.textContent = formatResetStatus(status);
+		count += resetStatus.textContent ? 1 : 0;
+	}
+	if (count > 1 && separator) separator.style.display = "inline";
+	else if (separator) separator.style.display = "none";
+
+	const updatedAt = status.lastUpdate ? new Date(status.lastUpdate) : null;
+	if (lastUpdateDate) lastUpdateDate.textContent = updatedAt ? updatedAt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "--";
+	if (lastUpdateTime) lastUpdateTime.textContent = updatedAt ? updatedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "--";
+	if (deadKingdomsCount) deadKingdomsCount.textContent = status.deadKingdoms.toLocaleString();
 }
 
 function formatResetStatus(status: ServerStatus): string {
 	if (status.reset.state === "active") return "";
 	if (status.reset.state === "cold") return "";
 	const remainingMs = Math.max(0, status.reset.resetAt! - Date.now());
-	return `Resetting in ${formatDuration(remainingMs)}`;
+	return `Map resetting in ${formatDuration(remainingMs)}`;
 }
 
 function formatDuration(ms: number) {
