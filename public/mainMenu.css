@@ -1,0 +1,149 @@
+.logo {
+	height: 100vh;
+	width: auto;
+	position: fixed;
+	left: 0;
+	top: 0;
+	image-rendering: pixelated;
+	z-index: 1;
+}
+
+.background {
+	height: 100vh;
+	width: auto;
+	position: fixed;
+	right: 0;
+	top: 0;
+	image-rendering: pixelated;
+}
+
+.join {
+	position: relative;
+	height: 100vh;
+	display: grid;
+	place-items: center;
+	background-color: black;
+}
+
+.join-panel {
+	display: grid;
+	flex-direction: column;
+	gap: 40px;
+	position: fixed;
+	left: 120px;
+	bottom: 20px;
+	z-index: 5;
+	gap: 20px;
+	font-size: 35px;
+	width: min(360px, calc(100vw - 32px));
+	/*border: 1px solid #645b4f;*/
+	border: none;
+	/*background: #20221d;*/
+	background: none;
+}
+
+.join-panel h1 {
+	margin: 0;
+	font-size: 24px;
+}
+
+.online-players {
+	position: fixed;
+	right: 0;
+	top: 0;
+	z-index: 10;
+	width: fit-content;
+	min-height: 28px;
+	display: inline-flex;
+	align-items: center;
+	padding: 0 9px;
+	border: 1px solid rgb(233 189 89 / 0.32);
+	background: rgb(18 20 18 / 0.74);
+	color: #e9bd59;
+	font-size: 13px;
+	font-weight: 700;
+}
+
+.join-panel label {
+	display: grid;
+	gap: 6px;
+	color: #cfc7b7;
+}
+
+.join-panel input {
+	border: 1px solid #645b4f;
+	background: #121411;
+	color: #f4efe6;
+	min-height: 38px;
+	padding: 18px;
+	border-right: none;
+}
+
+.join-panel input[type="color"] {
+	width: 70px;
+	height: 100%;
+	padding: 10px;
+	margin: 0;
+	cursor: pointer;
+	border: none;
+	border: 1px solid #645b4f;
+	border-left: none;
+}
+
+.join-notice {
+	min-height: 18px;
+	color: #e9bd59;
+	font-size: 13px;
+}
+
+.mobile-not-supported {
+	display: none;
+	position: fixed;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	box-sizing: border-box;
+	padding: 22px;
+	width: min(90vw, 300px);
+	height: min(90vh, 200px);
+	background: #20221d;
+	z-index: 1000;
+	font-size: 22px;
+}
+
+.flex {
+	width: 100%;
+	display: flex;
+	gap: 0;
+}
+
+#nameInput {
+	flex: 1;
+}
+@media (max-width: 800px) {
+	.join-panel {
+		display: none;
+	}
+	.logo {
+		display: none;
+	}
+	.mobile-not-supported {
+		display: block;
+	}
+}
+
+.update {
+	display: flex;
+	color: grey;
+	font-size: 20px;
+	gap: 10px;
+}
+.gap {
+	height: 100px;
+}
+
+.status {
+	gap: 10px;
+	font-size: 30px;
+	justify-content: center;
+}
