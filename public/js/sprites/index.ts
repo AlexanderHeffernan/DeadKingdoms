@@ -1,3 +1,4 @@
+import archer from "./archer.js";
 import barracks from "./barracks.js";
 import berry from "./berry.js";
 import corpse from "./corpse.js";
@@ -26,6 +27,7 @@ import zombie from "./zombie.js";
 import type { SpriteName } from "../../../src/shared/types.js";
 
 export const sprites: Partial<Record<SpriteName, readonly string[]>> = {
+  archer,
   barracks,
   berry,
   corpse,

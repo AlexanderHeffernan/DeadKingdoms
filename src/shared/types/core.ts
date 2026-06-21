@@ -7,7 +7,7 @@ import type {
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
 
 /** Unit archetype names supported by the shared unit class registry. */
-export type UnitType = "villager" | "soldier" | "zombie";
+export type UnitType = "villager" | "soldier" | "archer" | "zombie";
 
 /** Building archetype names supported by the shared building class registry. */
 export type BuildingType =

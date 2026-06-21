@@ -1,10 +1,11 @@
-import { SoldierUnit, VillagerUnit, ZombieUnit } from "./units/index.js";
+import { ArcherUnit, SoldierUnit, VillagerUnit, ZombieUnit } from "./units/index.js";
 import type { UnitBehavior, UnitClass } from "./units/index.js";
 import type { UnitType } from "./types.js";
 
 export const UNIT_CLASSES = [
 	VillagerUnit,
 	SoldierUnit,
+	ArcherUnit,
 	ZombieUnit,
 ] as const;
 
