@@ -1080,6 +1080,7 @@ function commandGather(world: World, playerId: PlayerId, body: Extract<CommandPa
 	let assigned = false;
 	forOwnUnits(world, playerId, body.unitIds, (unit) => {
 		if (unitBehavior(unit).canGather) {
+			if (isBuilding(resource) && !buildingHasGathererCapacity(world, resource, unit)) return;
 			unit.command = {
 				type: "gather",
 				targetId: resource.id,
@@ -1529,7 +1530,7 @@ function makeStump(resource: ResourceNode) {
 function assignPostBuildGather(world: World, unit: Unit, resourceKind: ResourceType | null, builtFarm: Building | null = null) {
 	if (builtFarm && unitBehavior(unit).canGather && isComplete(builtFarm)) {
 		const resource = builtFarm.gatherResource;
-		if (resource) {
+		if (resource && buildingHasGathererCapacity(world, builtFarm, unit)) {
 			unit.command = { type: "gather", targetId: builtFarm.id, resourceKind: resource, progress: 0, path: null };
 			return;
 		}
@@ -1571,10 +1572,10 @@ function findNextBuildSite(world: World, unit: Unit): Building | null {
 }
 
 function findNextResource(world: World, unit: Unit, resourceKind: ResourceType | null): ResourceNode | Building | null {
-	return findNextResourceNear(world, unit, resourceKind, unit.ownerId);
+	return findNextResourceNear(world, unit, resourceKind, unit.ownerId, unit);
 }
 
-function findNextResourceNear(world: World, source: { x: number; y: number }, resourceKind: ResourceType | null, playerId: PlayerId): ResourceNode | Building | null {
+function findNextResourceNear(world: World, source: { x: number; y: number }, resourceKind: ResourceType | null, playerId: PlayerId, assignedUnit: Unit | null = null): ResourceNode | Building | null {
 	if (!resourceKind) return null;
 	const RANGE = 30;
 	let best = null;
@@ -1589,6 +1590,7 @@ function findNextResourceNear(world: World, source: { x: number; y: number }, re
 	}
 	for (const b of Object.values(world.buildings)) {
 		if (!b.canBeGatheredBy(playerId) || b.gatherResource !== resourceKind || b.gatherExhausted) continue;
+		if (!buildingHasGathererCapacity(world, b, assignedUnit)) continue;
 		const d = distance(source, centerOf(b));
 		if (d < bestDist) {
 			best = b;
@@ -1604,7 +1606,7 @@ function assignRallyCommand(world: World, unit: Unit, rallyPoint: Vec2, targetId
 	const depot = depotAtPoint(world, unit.ownerId, rallyPoint);
 	const resourceKind = depot?.depotGatherKind() || depot?.gatherResource || null;
 	if (resourceKind && unitBehavior(unit).canGather) {
-		const resource = findNextResourceNear(world, depot ? centerOf(depot) : rallyPoint, resourceKind, unit.ownerId);
+		const resource = findNextResourceNear(world, depot ? centerOf(depot) : rallyPoint, resourceKind, unit.ownerId, unit);
 		if (resource) {
 			unit.command = { type: "gather", targetId: resource.id, resourceKind, progress: 0, path: null };
 			return;
@@ -1641,8 +1643,8 @@ function assignRallyTargetCommand(world: World, unit: Unit, target: Building) {
 	const resourceKind = target.depotGatherKind() || target.gatherResource;
 	if (target.ownerId === unit.ownerId && resourceKind && unitBehavior(unit).canGather) {
 		const resource = target.depotGatherKind()
-			? findNextResourceNear(world, centerOf(target), resourceKind, unit.ownerId)
-			: target.canBeGatheredBy(unit.ownerId) && !target.gatherExhausted ? target : null;
+			? findNextResourceNear(world, centerOf(target), resourceKind, unit.ownerId, unit)
+			: target.canBeGatheredBy(unit.ownerId) && !target.gatherExhausted && buildingHasGathererCapacity(world, target, unit) ? target : null;
 		if (resource) {
 			unit.command = { type: "gather", targetId: resource.id, resourceKind, progress: 0, path: null };
 			return true;
@@ -1678,6 +1680,19 @@ function nearestDepot(world: World, ownerId: PlayerId, resource: ResourceType, s
 function gatherableBuilding(building: Building | undefined, playerId: PlayerId): Building | null {
 	if (!building?.canBeGatheredBy(playerId)) return null;
 	return building;
+}
+
+function buildingHasGathererCapacity(world: World, building: Building, assignedUnit: Unit | null = null) {
+	return building.hasGathererCapacity(gathererCountFor(world, building, assignedUnit));
+}
+
+function gathererCountFor(world: World, building: Building, assignedUnit: Unit | null) {
+	let count = 0;
+	for (const unit of Object.values(world.units)) {
+		if (unit.id === assignedUnit?.id || unit.ownerId !== building.ownerId) continue;
+		if (unit.command.type === "gather" && unit.command.targetId === building.id) count += 1;
+	}
+	return count;
 }
 
 function maybeAutoReplenishBuilding(world: World, building: Building) {

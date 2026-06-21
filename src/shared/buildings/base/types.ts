@@ -92,6 +92,7 @@ export interface BuildingEntity extends GatherTarget {
 	readonly gatherAmount: number;
 	readonly gatherSeconds: number;
 	readonly gatherRange: number;
+	readonly maxGatherers: number;
 	readonly gatherExhausted: boolean;
 	readonly shouldGatherAfterBuild: boolean;
 	readonly canAttack: boolean;
@@ -120,6 +121,7 @@ export interface BuildingEntity extends GatherTarget {
 	depotGatherKind(): ResourceType | null;
 	soundLevel(): number;
 	canBeGatheredBy(playerId: PlayerId): boolean;
+	hasGathererCapacity(currentGatherers: number): boolean;
 	onGatheredOut(): void;
 	maybeReplenish(spend: (cost: ResourceCost) => boolean, autoReplenish: boolean): boolean;
 }

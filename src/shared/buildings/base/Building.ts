@@ -41,6 +41,7 @@ export abstract class Building implements BuildingEntity {
 	get gatherAmount() { return this.definition.gatherAmount ?? 0; }
 	get gatherSeconds() { return this.definition.gatherSeconds ?? 0; }
 	get gatherRange() { return this.definition.gatherRange ?? 1.1; }
+	get maxGatherers() { return Infinity; }
 	get gatherExhausted() { return true; }
 	get shouldGatherAfterBuild() { return this.definition.shouldGatherAfterBuild ?? false; }
 	get canAttack() { return false; }
@@ -117,6 +118,10 @@ export abstract class Building implements BuildingEntity {
 
 	canBeGatheredBy(_playerId: string) {
 		return false;
+	}
+
+	hasGathererCapacity(currentGatherers: number) {
+		return currentGatherers < this.maxGatherers;
 	}
 
 	gatherAmountFor(_unit: UnitBehavior) {

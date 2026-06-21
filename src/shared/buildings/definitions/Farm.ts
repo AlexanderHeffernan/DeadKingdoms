@@ -39,6 +39,10 @@ export class Farm extends Building {
 		return (this.amount ?? 0) <= 0;
 	}
 
+	get maxGatherers() {
+		return 1;
+	}
+
 	onGatheredOut() {
 		this.exhausted = this.gatherExhausted;
 	}
