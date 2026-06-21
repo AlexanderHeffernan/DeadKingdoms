@@ -8,9 +8,9 @@ export const TILE_H = 32;
 export const RESOURCE_TYPES = ["wood", "food", "ore"] as const;
 
 export const STARTING_RESOURCES = {
-	wood: 200,
-	food: 200,
-	ore: 100,
+	wood: 20000,
+	food: 20000,
+	ore: 10000,
 };
 
 export const COLORS = [

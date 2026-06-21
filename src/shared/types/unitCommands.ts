@@ -7,6 +7,8 @@ export interface UnitCommandBase {
 	pathCrowd?: number;
 	formationTarget?: Vec2;
 	moveStuckTicks?: number;
+	/** World tick of the last executed path search; used to throttle replans when no usable path exists. */
+	pathRetryTick?: number;
 }
 
 /** Unit command discriminants understood by the world simulation. */

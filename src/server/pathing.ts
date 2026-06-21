@@ -365,7 +365,7 @@ export function moveWithPath(world: World, unit: Unit, command: Extract<UnitComm
 	const unitTile = worldTile(unit);
 	if (isHardOccupied(world, unit, unitTile.x, unitTile.y) && escapeOccupiedTile(world, unit, target, maxStep)) return false;
 	if (shouldRefreshPath(world, unit, command, baseTarget)) {
-		const path = budgetedPath(world, unit, baseTarget, maxPathNodes);
+		const path = refreshedPath(world, unit, command, baseTarget, maxPathNodes);
 		if (!path) return false;
 		if (path.length === 0 && distance(unit, baseTarget) > exactArrivalRadius(command)) return false;
 		command.path = path;
@@ -428,7 +428,7 @@ export function moveNearTarget(world: World, unit: Unit, command: UnitCommand, t
 	const approachTarget = interactionApproachTarget(world, unit, target, range);
 	const unitTile = worldTile(unit);
 	if (isHardOccupied(world, unit, unitTile.x, unitTile.y) && escapeOccupiedTile(world, unit, approachTarget, maxStep)) return false;
-	if (shouldRefreshPath(world, unit, command, approachTarget)) command.path = budgetedPath(world, unit, approachTarget);
+	if (shouldRefreshPath(world, unit, command, approachTarget)) command.path = refreshedPath(world, unit, command, approachTarget);
 	followPathStep(world, unit, command, approachTarget, approachTarget, maxStep, movingUnitGrid(world));
 	return distance(unit, target) <= range;
 }
@@ -716,13 +716,26 @@ function laneWidthForCrowd(crowd: number): number {
 }
 
 function shouldRefreshPath(world: World, unit: Unit, command: UnitCommand, target: Vec2): boolean {
-	if (!command.path || command.path.length === 0) return true;
-	if (world.tick % PATH_REPLAN_TICKS !== unitPathSlot(unit)) return false;
-	const final = command.path.at(-1);
-	if (!final) return true;
-	const finalTile = worldTile(final);
-	const targetTile = worldTile(target);
-	return finalTile.x !== targetTile.x || finalTile.y !== targetTile.y;
+	if (command.path && command.path.length > 0) {
+		if (world.tick % PATH_REPLAN_TICKS !== unitPathSlot(unit)) return false;
+		const final = command.path.at(-1);
+		if (!final) return true;
+		const finalTile = worldTile(final);
+		const targetTile = worldTile(target);
+		return finalTile.x !== targetTile.x || finalTile.y !== targetTile.y;
+	}
+	// No usable path: plan immediately the first time, then fall back to the unit's
+	// replan slot. This stops unreachable or blocked targets from triggering a full
+	// A* search every tick (the main cause of stationary units pinning the CPU).
+	if (command.pathRetryTick === undefined) return true;
+	return world.tick % PATH_REPLAN_TICKS === unitPathSlot(unit);
+}
+
+/** Runs a budgeted path search and records when a real search executed so replans can back off. */
+function refreshedPath(world: World, unit: Unit, command: UnitCommand, target: Vec2, maxNodes = FOLLOW_PATH_MAX_NODES): PathNode[] | null {
+	const path = budgetedPath(world, unit, target, maxNodes);
+	if (path !== null) command.pathRetryTick = world.tick;
+	return path;
 }
 
 function budgetedPath(world: World, unit: Unit, target: Vec2, maxNodes = FOLLOW_PATH_MAX_NODES): PathNode[] | null {

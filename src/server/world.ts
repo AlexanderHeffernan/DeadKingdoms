@@ -39,6 +39,7 @@ import type {
 	ResourceType,
 	Ruin,
 	Unit,
+	UnitCommand,
 	UnitId,
 	UnitType,
 	Vec2,
@@ -61,6 +62,7 @@ const SERVER_PERF_SMOOTHING = 0.1;
 const SERVER_PERF_SAMPLE_LIMIT = TICK_RATE * 120;
 const TARGET_UNIT_GRID_CELL_SIZE = 4;
 const COMMAND_CLUSTER_DISTANCE = 12;
+const RALLY_GATHER_RADIUS = 6;
 const FOREST_COUNT = 71;
 const LONE_TREE_COUNT = 269;
 const FOREST_MIN_RADIUS = 4;
@@ -1560,7 +1562,21 @@ function assignRallyCommand(world: World, unit: Unit, rallyPoint: Vec2, targetId
 			return;
 		}
 	}
-	unit.command = { type: "move", ...rallyPoint, path: null };
+	unit.command = rallyMoveCommand(world, unit, rallyPoint);
+}
+
+/** Builds a rally move command whose crowd reflects nearby gathered units so they settle and spread instead of contending for one tile. */
+function rallyMoveCommand(world: World, unit: Unit, point: Vec2): Extract<UnitCommand, { type: "move" }> {
+	return { type: "move", ...point, path: null, pathCrowd: rallyCrowd(world, unit.ownerId, point) };
+}
+
+function rallyCrowd(world: World, ownerId: PlayerId, point: Vec2): number {
+	let crowd = 0;
+	for (const other of Object.values(world.units)) {
+		if (other.ownerId !== ownerId || other.type === "zombie") continue;
+		if (distance(other, point) <= RALLY_GATHER_RADIUS) crowd += 1;
+	}
+	return Math.max(1, crowd);
 }
 
 function assignRallyTargetCommand(world: World, unit: Unit, target: Building) {
@@ -1584,7 +1600,7 @@ function assignRallyTargetCommand(world: World, unit: Unit, target: Building) {
 			return true;
 		}
 	}
-	unit.command = { type: "move", ...centerOf(target), path: null };
+	unit.command = rallyMoveCommand(world, unit, centerOf(target));
 	return true;
 }
 
