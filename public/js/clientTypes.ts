@@ -51,6 +51,7 @@ export type UIActions = {
 	deleteBuilding: (buildingId: string) => void;
 	setRallyMode: (buildingId: string) => void;
 	respawn: () => Promise<void>;
+	disableAdminMode: () => Promise<string>;
 	enableFullMapVision: () => Promise<string>;
 	enableSoundDebug: () => Promise<string>;
 	enableZombieDebug: () => Promise<string>;

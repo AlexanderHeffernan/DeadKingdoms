@@ -41,6 +41,7 @@ export class AdminDashboard {
 	private readonly dawnButton: HTMLButtonElement;
 	private readonly middayButton: HTMLButtonElement;
 	private readonly eveningButton: HTMLButtonElement;
+	private readonly disableAdminModeButton: HTMLButtonElement;
 	private readonly restartServerButton: HTMLButtonElement;
 	private readonly commandStatus: HTMLElement;
 	private readonly actions: AdminDashboardActions;
@@ -90,6 +91,7 @@ export class AdminDashboard {
 		this.dawnButton = elements.dawnButton;
 		this.middayButton = elements.middayButton;
 		this.eveningButton = elements.eveningButton;
+		this.disableAdminModeButton = elements.disableAdminModeButton;
 		this.restartServerButton = elements.restartServerButton;
 		this.commandStatus = elements.commandStatus;
 		this.rangeSeconds = Number(this.range.value) || 30;
@@ -180,6 +182,10 @@ export class AdminDashboard {
 		this.dawnButton.addEventListener("click", () => this.runCommand(this.dawnButton, () => this.actions.setTimeOfDay(0.25, "Dawn")));
 		this.middayButton.addEventListener("click", () => this.runCommand(this.middayButton, () => this.actions.setTimeOfDay(0.5, "Midday")));
 		this.eveningButton.addEventListener("click", () => this.runCommand(this.eveningButton, () => this.actions.setTimeOfDay(0.75, "Evening")));
+		this.disableAdminModeButton.addEventListener("click", async () => {
+			await this.runCommand(this.disableAdminModeButton, this.actions.disableAdminMode);
+			this.hide();
+		});
 		this.restartServerButton.addEventListener("click", () => this.runCommand(this.restartServerButton, this.actions.restartServer));
 	}
 
@@ -567,11 +573,13 @@ export type AdminDashboardElements = {
 	dawnButton: HTMLButtonElement;
 	middayButton: HTMLButtonElement;
 	eveningButton: HTMLButtonElement;
+	disableAdminModeButton: HTMLButtonElement;
 	restartServerButton: HTMLButtonElement;
 	commandStatus: HTMLElement;
 };
 
 export type AdminDashboardActions = {
+	disableAdminMode: () => Promise<string>;
 	enableFullMapVision: () => Promise<string>;
 	enableSoundDebug: () => Promise<string>;
 	enableZombieDebug: () => Promise<string>;

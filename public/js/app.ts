@@ -1,4 +1,4 @@
-import { emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
+import { disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
@@ -108,6 +108,18 @@ const ui = new UI(state, {
 		await leave(state.playerId);
 		localStorage.removeItem("rtsPlayerId");
 		window.location.reload();
+	},
+	async disableAdminMode() {
+		if (!state.playerId) return "No active player.";
+		const result = await requestDisableAdminMode(state.playerId);
+		if (!result.ok) return result.error || "Could not disable admin mode.";
+		state.exploredSet.clear();
+		view.noiseMode = false;
+		adminDiagnosticsVisible = false;
+		connectEvents();
+		ui.showToast("Admin mode disabled.");
+		ui.render();
+		return "Admin mode disabled.";
 	},
 	async enableFullMapVision() {
 		if (!state.playerId) return "No active player.";

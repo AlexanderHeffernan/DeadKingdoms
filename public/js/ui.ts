@@ -54,9 +54,11 @@ export class UI {
 			dawnButton: mustGet("adminDawnButton") as HTMLButtonElement,
 			middayButton: mustGet("adminMiddayButton") as HTMLButtonElement,
 			eveningButton: mustGet("adminEveningButton") as HTMLButtonElement,
+			disableAdminModeButton: mustGet("adminDisableAdminModeButton") as HTMLButtonElement,
 			restartServerButton: mustGet("adminRestartServerButton") as HTMLButtonElement,
 			commandStatus: mustGet("adminCommandStatus"),
 		}, {
+			disableAdminMode: actions.disableAdminMode,
 			enableFullMapVision: actions.enableFullMapVision,
 			enableSoundDebug: actions.enableSoundDebug,
 			enableZombieDebug: actions.enableZombieDebug,

@@ -32,6 +32,10 @@ export async function enableAdminAccess(playerId: PlayerId, secret: string) {
 	return post("/api/dev/admin-access", { playerId, secret });
 }
 
+export async function disableAdminMode(playerId: PlayerId) {
+	return post("/api/dev/disable-admin", { playerId });
+}
+
 export async function enableFullMapVision(playerId: PlayerId) {
 	return post("/api/dev/full-map-vision", { playerId });
 }

@@ -40,6 +40,7 @@ export function createHandler(state: ServerState, clients: Set<Client>) {
 		if (req.method === "POST" && url.pathname.startsWith("/api/")) {
 			if (!world) return worldUnavailable(res);
 			if (url.pathname === "/api/dev/admin-access") return enableAdminAccess(req, res, world);
+			if (url.pathname === "/api/dev/disable-admin") return disableAdminAccess(req, res, world);
 			if (url.pathname === "/api/dev/full-map-vision") return enableFullMapVision(req, res, world);
 			if (url.pathname === "/api/dev/sound-debug") return enableSoundDebug(req, res, world);
 			if (url.pathname === "/api/dev/zombie-debug") return enableZombieDebug(req, res, world);
@@ -231,6 +232,22 @@ async function enableAdminAccess(req: import("node:http").IncomingMessage, res: 
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
 	player.adminLevel = adminLevel;
 	json(res, { ok: true, adminLevel });
+}
+
+async function disableAdminAccess(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown };
+	if (typeof body.playerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+	const player = world.players[body.playerId];
+	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	delete player.adminLevel;
+	player.godMode = false;
+	player.soundDebug = false;
+	player.zombieDebug = false;
+	player.pathDebug = false;
+	delete player._visCache;
+	Logs.log(`${player.name} disabled admin mode.`);
+	json(res, { ok: true });
 }
 
 async function enableFullMapVision(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
