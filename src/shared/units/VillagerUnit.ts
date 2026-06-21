@@ -11,7 +11,7 @@ export class VillagerUnit extends BaseUnit {
 	public static readonly trainShortcut = "V";
 	public static readonly maxHp = 40;
 	public static readonly speed = 3.2;
-	public static readonly attack = 3;
+	public static readonly attack = 1;
 	public static readonly range = 0.9;
 	public static readonly cooldown = 1.1;
 	public static readonly score = 10;
@@ -32,6 +32,12 @@ export class VillagerUnit extends BaseUnit {
 				else this.stepBuild(context, unit, command, dt);
 		}
 		else super.step(context, unit, dt);
+	}
+
+	public onAttacked(unit: Unit, attacker: Unit) {
+		if (attacker.ownerId === unit.ownerId || attacker.hp <= 0) return;
+		if (unit.command.type !== "idle" && unit.command.type !== "gather" && unit.command.type !== "build") return;
+		unit.command = { type: "attack", targetId: attacker.id };
 	}
 
 	private stepGather(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "gather" }>, dt: number) {

@@ -190,6 +190,9 @@ export interface UnitBehavior {
 	/** Advances this unit's simulation for one world tick. */
 	step(context: UnitSimulationContext, unit: Unit, dt: number): void;
 
+	/** Gives this unit a chance to react after taking damage from another unit. */
+	onAttacked(unit: Unit, attacker: Unit): void;
+
 	readonly canGather: boolean;
 	readonly canBuild: boolean;
 	readonly canAutoAcquireTargets: boolean;
@@ -271,6 +274,9 @@ export abstract class BaseUnit implements UnitBehavior {
 					else unit.command = { type: "idle" };
 	}
 
+	/** Gives this unit a chance to react after taking damage from another unit. */
+	public onAttacked(_unit: Unit, _attacker: Unit) {}
+
 	protected updateTimers(unit: Unit, dt: number) {
 		unit.cooldown = Math.max(0, unit.cooldown - dt);
 		unit.attackFlash = Math.max(0, (unit.attackFlash || 0) - dt);
@@ -304,7 +310,7 @@ export abstract class BaseUnit implements UnitBehavior {
 			return;
 		}
 		if (unit.cooldown <= 0) {
-			context.damage(explicitTarget, this.attack, unit.ownerId);
+			context.damage(explicitTarget, this.attack, unit.ownerId, unit);
 			context.emitActionSound("unitAttack", unit);
 			unit.cooldown = this.cooldown;
 			unit.attackFlash = 0.22;

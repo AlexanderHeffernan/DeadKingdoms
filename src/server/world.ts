@@ -399,7 +399,7 @@ function applyZombieAiAttack(world: World, attack: ZombieAiAttackIntent) {
 	const attacker = world.units[attack.attackerId];
 	const target = world.units[attack.targetId as UnitId] || world.buildings[attack.targetId as BuildingId] || world.corpses[attack.targetId as keyof typeof world.corpses];
 	if (!attacker || attacker.type !== "zombie" || attacker.hp <= 0 || !target) return;
-	damage(world, target, attack.amount, attack.attackerOwnerId);
+	damage(world, target, attack.amount, attack.attackerOwnerId, attacker);
 	attacker.cooldown = attack.cooldown;
 	attacker.attackFlash = attack.attackFlash;
 }
@@ -566,7 +566,7 @@ function createSimulationContext(world: World): UnitSimulationContext & import("
 			.filter((unit) => world.units[unit.id] === unit && unit.type !== "zombie" && unit.hp > 0),
 		nearestTargetUnit: (source, range) => nearestTargetUnit(world, targetUnitGrid, source, range),
 		nearestTargetBuilding: (source, range) => nearestTargetBuilding(world, buildingGrid, source, range),
-		damage: (target, amount, attackerId) => damage(world, target, amount, attackerId),
+		damage: (target, amount, attackerId, attacker) => damage(world, target, amount, attackerId, attacker),
 		emitActionSound: (action, point) => emitActionSound(world, action, point),
 		gatherTarget: (targetId, playerId) => world.resources[targetId as keyof typeof world.resources] || gatherableBuilding(world.buildings[targetId as BuildingId], playerId),
 		gatherResource,
@@ -1379,7 +1379,7 @@ function attackBlockingBuilding(world: World, zombie: Unit, targetPoint: { x: nu
 	const behavior = unitBehavior(zombie);
 	const building = blockingBuildingToward(world, zombie, targetPoint);
 	if (!building || zombie.cooldown > 0) return;
-	damage(world, building, behavior.attack, ZOMBIE_OWNER_ID);
+	damage(world, building, behavior.attack, ZOMBIE_OWNER_ID, zombie);
 	zombie.cooldown = behavior.cooldown;
 	zombie.attackFlash = 0.22;
 }
@@ -1769,7 +1769,7 @@ function gatherTargetFor(entity: ResourceNode | Building): GatherTarget {
 	};
 }
 
-function damage(world: World, target: Unit | Building | Corpse, amount: number, attackerId: PlayerId) {
+function damage(world: World, target: Unit | Building | Corpse, amount: number, attackerId: PlayerId, attacker?: Unit) {
 	if (target.kind === "corpse") {
 		target.hp -= amount;
 		if (target.hp <= 0) delete world.corpses[target.id];
@@ -1780,7 +1780,10 @@ function damage(world: World, target: Unit | Building | Corpse, amount: number, 
 	if (target.kind === "building" && target.repairPaidUntilHp !== undefined) {
 		target.repairPaidUntilHp = Math.min(target.repairPaidUntilHp, target.hp);
 	}
-	if (target.hp > 0) return;
+	if (target.hp > 0) {
+		if (target.kind === "unit" && attacker) unitBehavior(target).onAttacked(target, attacker);
+		return;
+	}
 	if (target.kind === "building") {
 		emitActionSound(world, "buildingDestroyed", centerOf(target));
 		createRuin(world, target);
