@@ -1,19 +1,25 @@
-import { mkdirSync, writeFileSync } from "node:fs";
 import { promises as fs } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { dirname, join } from "node:path";
-import { makeSnapshot } from "../shared/messages.js";
-import { firstPlaceDurationMs } from "./world.js";
-import type { GlobalLeaderboardEntry, Player, Snapshot, World } from "../shared/types.js";
+import { firstPlaceDurationMs, recordServerPerfPhase } from "./world.js";
+import type { GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, Player, PlayerId, World } from "../shared/types.js";
 
 const LEADERBOARD_LIMIT = 10;
 const STORE_DIR = process.env.LEADERBOARD_DATA_DIR || join(process.cwd(), "data");
 const STORE_FILE = join(STORE_DIR, "leaderboard.json");
 
+interface TrackWorldPeaksOptions {
+	force?: boolean;
+	playerId?: PlayerId;
+}
+
+type PerfSink = (name: string, label: string, ms: number) => void;
+
 interface StoredLeaderboard {
 	entries: GlobalLeaderboardEntry[];
-	snapshots: Record<string, Snapshot>;
+	snapshots: Record<string, LeaderboardPreviewSnapshot>;
 	pendingEntries: GlobalLeaderboardEntry[];
-	pendingSnapshots: Record<string, Snapshot>;
+	pendingSnapshots: Record<string, LeaderboardPreviewSnapshot>;
 	deadKingdoms: number;
 }
 
@@ -26,6 +32,13 @@ export class GlobalLeaderboardStore {
 		deadKingdoms: 0,
 	};
 	private loaded = false;
+	private saveQueued = false;
+	private saveInProgress = false;
+	private perfSink: PerfSink | null = null;
+
+	setPerfSink(perfSink: PerfSink | null) {
+		this.perfSink = perfSink;
+	}
 
 	async entries() {
 		await this.load();
@@ -45,46 +58,76 @@ export class GlobalLeaderboardStore {
 	async countDeadKingdom() {
 		await this.load();
 		this.data.deadKingdoms += 1;
-		await this.save();
+		this.queueSave();
 	}
 
-	async trackWorldPeaks(world: World) {
-		await this.load();
-		this.trackDeadKingdoms(world);
-		let changed = false;
-		for (const player of Object.values(world.players)) {
-			if (this.shouldTrack(world, player)) {
-				this.trackPeak(world, player);
-				changed = true;
+	async trackWorldPeaks(world: World, options: TrackWorldPeaksOptions = {}) {
+		const startedAt = performance.now();
+		try {
+			await this.load();
+			this.trackDeadKingdoms(world);
+			const players = this.qualifyingPlayers(world, options);
+			for (const player of Object.values(world.players)) {
+				if (this.shouldEvaluate(world, player, options)) this.rememberScore(world, player);
 			}
+			if (!players.length) return;
+			const snapshotId = `${Date.now()}-world-${world.tick}`;
+			this.data.pendingSnapshots[snapshotId] = this.snapshotForWorld(world);
+			for (const player of players) {
+				this.trackPeak(world, player, snapshotId);
+			}
+			this.trimPending();
+			this.queueSave();
+		} finally {
+			recordServerPerfPhase(world, "globalLeaderboardTrack", "Global leaderboard track", performance.now() - startedAt);
 		}
-		if (!changed) return;
-		this.trimPending();
-		await this.save();
 	}
 
 	async publishWorldPeaks(world: World | null) {
-		await this.load();
-		if (!this.data.pendingEntries.length) return;
-		const entries = this.finalizePendingEntries(world);
-		// const playerNames = new Set(entries.map((entry) => entry.playerName));
-		// this.data.entries = this.data.entries.filter((entry) => !playerNames.has(entry.playerName));
-		this.data.entries.push(...entries);
-		Object.assign(this.data.snapshots, this.data.pendingSnapshots);
-		this.data.pendingEntries = [];
-		this.data.pendingSnapshots = {};
-		this.trimStored();
-		await this.save();
+		const startedAt = performance.now();
+		try {
+			await this.load();
+			if (world) await this.trackWorldPeaks(world, { force: true });
+			if (!this.data.pendingEntries.length) return;
+			const entries = this.finalizePendingEntries(world);
+			// const playerNames = new Set(entries.map((entry) => entry.playerName));
+			// this.data.entries = this.data.entries.filter((entry) => !playerNames.has(entry.playerName));
+			this.data.entries.push(...entries);
+			Object.assign(this.data.snapshots, this.data.pendingSnapshots);
+			this.data.pendingEntries = [];
+			this.data.pendingSnapshots = {};
+			this.trimStored();
+			this.queueSave();
+		} finally {
+			if (world) recordServerPerfPhase(world, "globalLeaderboardPublish", "Global leaderboard publish", performance.now() - startedAt);
+		}
 	}
 
 	private shouldTrack(world: World, player: Player) {
 		if (player.defeated || player.score <= 0) return false;
-		// const existingBest = this.allCandidateEntries(world).find((entry) => entry.playerName === player.name);
-		// if (existingBest && existingBest.score >= player.score) return false;
-		const candidates = this.allCandidateEntries(world);
+		const existingBest = this.pendingEntryForPlayer(player.id);
+		if (existingBest && existingBest.score >= player.score) return false;
+		const candidates = this.allCandidateEntries();
 		if (candidates.length < LEADERBOARD_LIMIT) return true;
 		candidates.sort(compareEntries);
 		return player.score > candidates[candidates.length - 1]!.score;
+	}
+
+	private qualifyingPlayers(world: World, options: TrackWorldPeaksOptions) {
+		return Object.values(world.players).filter((player) => (
+			this.shouldEvaluate(world, player, options) &&
+			this.shouldTrack(world, player)
+		));
+	}
+
+	private shouldEvaluate(world: World, player: Player, options: TrackWorldPeaksOptions) {
+		if (options.playerId && player.id !== options.playerId) return false;
+		if (options.force) return true;
+		return world._globalLeaderboardDirtyPlayerIds?.[player.id] === true;
+	}
+
+	private rememberScore(world: World, player: Player) {
+		if (world._globalLeaderboardDirtyPlayerIds) delete world._globalLeaderboardDirtyPlayerIds[player.id];
 	}
 
 	private trackDeadKingdoms(world: World) {
@@ -96,16 +139,16 @@ export class GlobalLeaderboardStore {
 			this.data.deadKingdoms += 1;
 			changed = true;
 		}
-		if (changed) void this.save();
+		if (changed) this.queueSave();
 	}
 
-	private trackPeak(world: World, player: Player) {
-		const snapshotId = `${Date.now()}-${player.id}`;
-		const oldEntries = this.data.pendingEntries.filter((entry) => entry.playerName === player.name);
-		this.data.pendingEntries = this.data.pendingEntries.filter((entry) => entry.playerName !== player.name);
-		for (const entry of oldEntries) delete this.data.pendingSnapshots[entry.snapshotId];
+	private trackPeak(world: World, player: Player, snapshotId: string) {
+		const oldEntries = this.data.pendingEntries.filter((entry) => this.pendingEntryPlayerId(entry) === player.id);
+		this.data.pendingEntries = this.data.pendingEntries.filter((entry) => this.pendingEntryPlayerId(entry) !== player.id);
+		for (const entry of oldEntries) this.deleteSnapshotIfUnused(entry.snapshotId);
 		this.data.pendingEntries.push({
-			id: snapshotId,
+			id: `${snapshotId}-${player.id}`,
+			playerId: player.id,
 			playerName: player.name,
 			playerColor: player.color,
 			score: player.score,
@@ -113,15 +156,108 @@ export class GlobalLeaderboardStore {
 			snapshotId,
 			firstPlaceDurationMs: firstPlaceDurationMs(world, player.id),
 		});
-		this.data.pendingSnapshots[snapshotId] = {
-			...makeSnapshot(world),
-			playerId: player.id,
-			visibility: null,
-			serverPerf: null,
-			admin: null,
-			soundDebug: null,
-			pathDebug: false,
-		};
+	}
+
+	private snapshotForWorld(world: World) {
+		return {
+			type: "leaderboardPreview",
+			now: Date.now(),
+			playerId: null,
+			map: world.map,
+			players: Object.fromEntries(
+				Object.entries(world.players).map(([id, player]) => [
+					id,
+					{
+						id,
+						name: player.name,
+						color: player.color,
+						defeated: player.defeated,
+						score: player.score,
+					},
+				]),
+			),
+			units: Object.fromEntries(Object.entries(world.units).map(([id, unit]) => [
+				id,
+				{
+					id,
+					kind: unit.kind,
+					type: unit.type,
+					ownerId: unit.ownerId,
+					x: unit.x,
+					y: unit.y,
+					...(unit.size !== undefined ? { size: unit.size } : {}),
+					...(unit.width !== undefined ? { width: unit.width } : {}),
+					...(unit.height !== undefined ? { height: unit.height } : {}),
+					facing: unit.facing,
+					...(unit.sprite ? { sprite: unit.sprite } : {}),
+				},
+			])),
+			buildings: Object.fromEntries(Object.entries(world.buildings).map(([id, building]) => {
+				const snapshot = building.serialize();
+				return [
+					id,
+					{
+						id,
+						kind: snapshot.kind,
+						type: snapshot.type,
+						ownerId: snapshot.ownerId,
+						x: snapshot.x,
+						y: snapshot.y,
+						size: snapshot.size,
+						width: snapshot.width,
+						height: snapshot.height,
+					},
+				];
+			})),
+			resources: Object.fromEntries(Object.entries(world.resources).map(([id, resource]) => [
+				id,
+				{
+					id,
+					kind: resource.kind,
+					type: resource.type,
+					x: resource.x,
+					y: resource.y,
+					...(resource.size !== undefined ? { size: resource.size } : {}),
+					...(resource.width !== undefined ? { width: resource.width } : {}),
+					...(resource.height !== undefined ? { height: resource.height } : {}),
+					resource: resource.resource,
+					...(resource.stage ? { stage: resource.stage } : {}),
+					...(resource.sprite ? { sprite: resource.sprite } : {}),
+				},
+			])),
+			ruins: Object.fromEntries(Object.entries(world.ruins).map(([id, ruin]) => [
+				id,
+				{
+					id,
+					kind: ruin.kind,
+					type: ruin.type,
+					x: ruin.x,
+					y: ruin.y,
+					size: ruin.size,
+					...(ruin.width !== undefined ? { width: ruin.width } : {}),
+					...(ruin.height !== undefined ? { height: ruin.height } : {}),
+				},
+			])),
+			corpses: Object.fromEntries(Object.entries(world.corpses).map(([id, corpse]) => [
+				id,
+				{
+					id,
+					kind: corpse.kind,
+					type: corpse.type,
+					originUnitType: corpse.originUnitType,
+					ownerId: corpse.ownerId,
+					x: corpse.x,
+					y: corpse.y,
+					size: corpse.size,
+					zombieSprite: corpse.zombieSprite,
+				},
+			])),
+		} satisfies LeaderboardPreviewSnapshot;
+	}
+
+	private deleteSnapshotIfUnused(snapshotId: string) {
+		if (this.data.pendingEntries.some((entry) => entry.snapshotId === snapshotId)) return;
+		delete this.data.pendingSnapshots[snapshotId];
 	}
 
 	private trimStored() {
@@ -146,11 +282,19 @@ export class GlobalLeaderboardStore {
 		}
 	}
 
-	private allCandidateEntries(_world?: World) {
+	private allCandidateEntries() {
 		return [
 			...this.data.entries,
 			...this.data.pendingEntries,
 		];
+	}
+
+	private pendingEntryForPlayer(playerId: string) {
+		return this.data.pendingEntries.find((entry) => this.pendingEntryPlayerId(entry) === playerId);
+	}
+
+	private pendingEntryPlayerId(entry: GlobalLeaderboardEntry) {
+		return entry.playerId ?? this.data.pendingSnapshots[entry.snapshotId]?.playerId;
 	}
 
 	private async load() {
@@ -158,17 +302,21 @@ export class GlobalLeaderboardStore {
 		this.loaded = true;
 		try {
 			const parsed = JSON.parse(await fs.readFile(STORE_FILE, "utf8")) as Partial<StoredLeaderboard>;
+			const snapshots = parsed.snapshots && typeof parsed.snapshots === "object" ? parsed.snapshots : {};
+			const pendingSnapshots = parsed.pendingSnapshots && typeof parsed.pendingSnapshots === "object" ? parsed.pendingSnapshots : {};
 			this.data = {
 				entries: Array.isArray(parsed.entries) ? parsed.entries.map((entry) => ({
 					...entry,
+					playerId: entry.playerId ?? snapshots[entry.snapshotId]?.playerId ?? "",
 					firstPlaceDurationMs: entry.firstPlaceDurationMs ?? 0,
 				})) : [],
-				snapshots: parsed.snapshots && typeof parsed.snapshots === "object" ? parsed.snapshots : {},
+				snapshots,
 				pendingEntries: Array.isArray(parsed.pendingEntries) ? parsed.pendingEntries.map((entry) => ({
 					...entry,
+					playerId: entry.playerId ?? pendingSnapshots[entry.snapshotId]?.playerId ?? "",
 					firstPlaceDurationMs: entry.firstPlaceDurationMs ?? 0,
 				})) : [],
-				pendingSnapshots: parsed.pendingSnapshots && typeof parsed.pendingSnapshots === "object" ? parsed.pendingSnapshots : {},
+				pendingSnapshots,
 				deadKingdoms: Number.isFinite(parsed.deadKingdoms) ? Number(parsed.deadKingdoms) : 0,
 			};
 			this.trimStored();
@@ -180,19 +328,36 @@ export class GlobalLeaderboardStore {
 		}
 	}
 
-	private async save() {
-		const payload = JSON.stringify(this.data, null, 2);
-		try {
-			mkdirSync(dirname(STORE_FILE), { recursive: true });
-			writeFileSync(STORE_FILE, payload);
-		} catch (error) {
-			console.warn(`Could not write global leaderboard: ${(error as Error).message}`);
+	private queueSave() {
+		this.saveQueued = true;
+		if (!this.saveInProgress) void this.flushSave();
+	}
+
+	private async flushSave() {
+		this.saveInProgress = true;
+		while (this.saveQueued) {
+			this.saveQueued = false;
+			const payload = JSON.stringify(this.data, null, 2);
+			const startedAt = performance.now();
+			try {
+				await fs.mkdir(dirname(STORE_FILE), { recursive: true });
+				await fs.writeFile(STORE_FILE, payload);
+			} catch (error) {
+				console.warn(`Could not write global leaderboard: ${(error as Error).message}`);
+			} finally {
+				this.recordPerf("globalLeaderboardSave", "Global leaderboard save", performance.now() - startedAt);
+			}
 		}
+		this.saveInProgress = false;
+	}
+
+	private recordPerf(name: string, label: string, ms: number) {
+		this.perfSink?.(name, label, ms);
 	}
 
 	private finalizePendingEntries(world: World | null) {
 		return this.data.pendingEntries.map((entry) => {
-			const playerId = this.data.pendingSnapshots[entry.snapshotId]?.playerId;
+			const playerId = this.pendingEntryPlayerId(entry);
 			return {
 				...entry,
 				firstPlaceDurationMs: world && playerId ? firstPlaceDurationMs(world, playerId) : entry.firstPlaceDurationMs,

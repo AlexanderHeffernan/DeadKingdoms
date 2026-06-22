@@ -71,7 +71,13 @@ async function globalLeaderboardSnapshot(res: import("node:http").ServerResponse
 	if (!id) return json(res, { ok: false, error: "Snapshot not found." }, 404);
 	const snapshot = await globalLeaderboard.snapshot(id);
 	if (!snapshot) return json(res, { ok: false, error: "Snapshot not found." }, 404);
-	return json(res, { ok: true, snapshot });
+	const playerId = url.searchParams.get("playerId");
+	return json(res, {
+		ok: true,
+		snapshot: playerId && snapshot.players[playerId]
+			? { ...snapshot, playerId }
+			: snapshot,
+	});
 }
 
 async function setDevTime(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
@@ -407,6 +413,7 @@ async function receiveCommand(req: import("node:http").IncomingMessage, res: imp
 async function leaveGame(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
 	const body = (await readJson(req)) as { playerId?: unknown };
 	if (typeof body.playerId === "string" && world.players[body.playerId]) {
+		await globalLeaderboard.trackWorldPeaks(world, { playerId: body.playerId, force: true });
 		await globalLeaderboard.countDeadKingdom();
 		removePlayer(world, body.playerId);
 	}

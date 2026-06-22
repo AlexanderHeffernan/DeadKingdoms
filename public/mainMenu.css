@@ -476,6 +476,7 @@
 
 .global-leaderboard-panel {
 	display: grid;
+	grid-template-rows: auto auto minmax(0, 1fr);
 	gap: 14px;
 	width: min(680px, calc(100vw - 40px));
 	max-height: min(760px, calc(100vh - 40px));
@@ -616,13 +617,15 @@
 .global-leaderboard-rows {
 	display: grid;
 	gap: 8px;
-	overflow: auto;
+	min-height: 0;
+	overflow-x: hidden;
+	overflow-y: auto;
 	padding-right: 4px;
 }
 
 .global-leaderboard-row {
 	display: grid;
-	grid-template-columns: 64px minmax(0, 1fr) 90px auto;
+	grid-template-columns: 64px minmax(0, 1fr) minmax(190px, auto) auto;
 	align-items: center;
 	gap: 12px;
 	padding: 10px;
@@ -643,6 +646,46 @@
 
 .global-rank {
 	color: #e9bd59;
+}
+
+.global-leaderboard-stats {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 20px;
+	min-width: 0;
+	white-space: nowrap;
+}
+
+.global-leaderboard-stat {
+	position: relative;
+	color: #cfc7b7;
+	font-style: normal;
+	outline: none;
+}
+
+.global-leaderboard-stat:first-child {
+	color: #f4efe6;
+}
+
+.global-leaderboard-popup {
+	position: fixed;
+	z-index: 120;
+	pointer-events: none;
+	white-space: nowrap;
+	padding: 6px 8px;
+	border: 1px solid rgb(233 189 89 / 0.45);
+	background: rgb(17 24 19 / 0.96);
+	color: #f4efe6;
+	font-size: 16px;
+	opacity: 0;
+	transform: translateY(4px);
+	transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.global-leaderboard-popup.visible {
+	opacity: 1;
+	transform: translateY(0);
 }
 
 .global-leaderboard-row button,

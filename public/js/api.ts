@@ -1,4 +1,4 @@
-import type { CommandPayload, CommandResult, GlobalLeaderboardEntry, PlayerId, Snapshot } from "../../src/shared/types.js";
+import type { CommandPayload, CommandResult, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId } from "../../src/shared/types.js";
 
 export type ServerStatus = {
 	activePlayers: number;
@@ -35,8 +35,9 @@ export async function getGlobalLeaderboard(): Promise<{ entries: GlobalLeaderboa
 	return res.json();
 }
 
-export async function getGlobalLeaderboardSnapshot(snapshotId: string): Promise<{ ok: boolean; snapshot?: Snapshot; error?: string }> {
-	const res = await fetch(`/api/global-leaderboard/${encodeURIComponent(snapshotId)}`);
+export async function getGlobalLeaderboardSnapshot(snapshotId: string, playerId?: PlayerId): Promise<{ ok: boolean; snapshot?: LeaderboardPreviewSnapshot; error?: string }> {
+	const params = playerId ? `?playerId=${encodeURIComponent(playerId)}` : "";
+	const res = await fetch(`/api/global-leaderboard/${encodeURIComponent(snapshotId)}${params}`);
 	return res.json();
 }
 

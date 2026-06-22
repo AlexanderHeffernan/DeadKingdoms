@@ -537,6 +537,18 @@ function updateServerTickDuration(world: World, tickMs: number, phases: ServerPe
 	}
 }
 
+export function recordServerPerfPhase(world: World, name: string, label: string, ms: number) {
+	const phases = [...(world.serverPerf.phases ?? [])];
+	const existing = phases.find((phase) => phase.name === name);
+	if (existing) existing.ms += ms;
+	else phases.push({ name, label, ms, percent: 0 });
+	const total = phases.reduce((sum, phase) => sum + phase.ms, 0);
+	for (const phase of phases) phase.percent = total > 0 ? (phase.ms / total) * 100 : 0;
+	world.serverPerf.phases = phases;
+	const sample = world.serverPerf.samples.at(-1);
+	if (sample?.tick === world.tick) sample.phases = phases;
+}
+
 function hasAdminViewer(world: World) {
 	return Object.values(world.players).some((player) => player.adminLevel);
 }
@@ -1918,7 +1930,12 @@ function recalcPlayer(world: World, playerId: PlayerId) {
 	}, 0);
 	const unitScore = units.reduce((sum, unit) => sum + unitBehavior(unit).score, 0);
 	const buildingScore = buildings.filter(isComplete).reduce((sum, building) => sum + building.score, 0);
-	player.score = player.defeated ? 0 : unitScore + buildingScore;
+	const score = player.defeated ? 0 : unitScore + buildingScore;
+	if (player.score !== score) {
+		world._globalLeaderboardDirtyPlayerIds ??= {};
+		world._globalLeaderboardDirtyPlayerIds[player.id] = true;
+	}
+	player.score = score;
 }
 
 function isComplete(building: Building): boolean {

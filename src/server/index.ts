@@ -6,13 +6,17 @@ import { broadcast, createHandler } from "./http.js";
 import { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { Client } from "./http.js";
 import { ServerState } from "./serverState.js";
-import { stepWorld } from "./world.js";
+import { recordServerPerfPhase, stepWorld } from "./world.js";
 
 loadEnvFile();
 
 const port = Number(process.env.PORT || 3000);
 const state = new ServerState();
 const globalLeaderboard = new GlobalLeaderboardStore();
+globalLeaderboard.setPerfSink((name, label, ms) => {
+	const world = state.currentWorld();
+	if (world) recordServerPerfPhase(world, name, label, ms);
+});
 Logs.setSource("server");
 Logs.setSink((entry) => state.recordLog(entry.source, entry.message, entry.at));
 const clients = new Set<Client>();

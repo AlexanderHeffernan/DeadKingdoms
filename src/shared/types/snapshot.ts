@@ -23,12 +23,59 @@ export interface LeaderboardEntry {
 
 export interface GlobalLeaderboardEntry {
 	id: string;
+	playerId: PlayerId;
 	playerName: string;
 	playerColor: string;
 	score: number;
 	achievedAt: number;
 	snapshotId: string;
 	firstPlaceDurationMs: number;
+}
+
+export interface LeaderboardPreviewPlayer {
+	id: PlayerId;
+	name: string;
+	color: string;
+	defeated: boolean;
+	score: number;
+}
+
+export type LeaderboardPreviewUnit = Pick<
+Unit,
+"id" | "kind" | "type" | "ownerId" | "x" | "y" | "size" | "width" | "height" | "facing" | "sprite"
+>;
+
+export type LeaderboardPreviewBuilding = Pick<
+SerializedBuilding,
+"id" | "kind" | "type" | "ownerId" | "x" | "y" | "size" | "width" | "height"
+>;
+
+export type LeaderboardPreviewResource = Pick<
+ResourceNode,
+"id" | "kind" | "type" | "x" | "y" | "size" | "width" | "height" | "resource" | "stage" | "sprite"
+>;
+
+export type LeaderboardPreviewRuin = Pick<
+Ruin,
+"id" | "kind" | "type" | "x" | "y" | "size" | "width" | "height"
+>;
+
+export type LeaderboardPreviewCorpse = Pick<
+Corpse,
+"id" | "kind" | "type" | "originUnitType" | "ownerId" | "x" | "y" | "size" | "zombieSprite"
+>;
+
+export interface LeaderboardPreviewSnapshot {
+	type: "leaderboardPreview";
+	now: number;
+	playerId: PlayerId | null;
+	map: MapDef;
+	players: Record<PlayerId, LeaderboardPreviewPlayer>;
+	units: Record<UnitId, LeaderboardPreviewUnit>;
+	buildings: Record<BuildingId, LeaderboardPreviewBuilding>;
+	resources: Record<ResourceId, LeaderboardPreviewResource>;
+	ruins: Record<RuinId, LeaderboardPreviewRuin>;
+	corpses: Record<CorpseId, LeaderboardPreviewCorpse>;
 }
 
 /** Debug-only sound source sent to clients that enable the sound overlay. */

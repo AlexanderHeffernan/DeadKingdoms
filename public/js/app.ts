@@ -21,7 +21,7 @@ import pillarBaseUrl from "./sprites/pillar_base.png";
 import pillarFlagUrl from "./sprites/pillar_flag.png";
 import soldierBaseUrl from "./sprites/soldier_base.png";
 import soldierFlagUrl from "./sprites/soldier_flag.png";
-import type { Building, BuildingType, CommandPayload, Corpse, EntityId, GlobalLeaderboardEntry, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
+import type { Building, BuildingType, CommandPayload, Corpse, EntityId, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
 import type { ChangelogEntry } from "./api.js";
 import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
@@ -164,7 +164,7 @@ interface HowToPlayItem {
 const canvas = document.getElementById("world") as HTMLCanvasElement | null;
 const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
 if (!canvas || !minimap) throw new Error("Missing canvas elements");
-const renderer = new Renderer(canvas);
+const renderer = new Renderer(canvas, { minimap });
 const snapshotPreviewCanvas = document.getElementById("snapshotPreviewCanvas") as HTMLCanvasElement | null;
 const snapshotPreviewRenderer = snapshotPreviewCanvas ? new Renderer(snapshotPreviewCanvas) : null;
 let eventStream: EventSource | null = null;
@@ -412,6 +412,7 @@ if (state.playerId) enterGame();
 function enterGame() {
 	document.getElementById("join")!.classList.add("hidden");
 	document.getElementById("game")?.classList.remove("hidden");
+	renderer.resize();
 	startMusic();
 	connectEvents();
 }
@@ -613,19 +614,82 @@ function renderGlobalLeaderboardRows(entries: GlobalLeaderboardEntry[]) {
 		<div class="global-leaderboard-row">
 			<span class="global-rank">#${index + 1}</span>
 			<strong style="color: ${escapeHtml(entry.playerColor)}">${escapeHtml(entry.playerName)}</strong>
-			<span>${entry.score}${globalFirstPlaceTime(entry)}</span>
-			<button type="button" data-snapshot-id="${escapeHtml(entry.snapshotId)}">Preview</button>
+			<span class="global-leaderboard-stats">
+				${globalScore(entry)}
+				${globalFirstPlaceTime(entry)}
+				${globalAchievedDate(entry)}
+			</span>
+			<button type="button" data-snapshot-id="${escapeHtml(entry.snapshotId)}" data-player-id="${escapeHtml(entry.playerId)}">Preview</button>
 		</div>
 	`).join("");
-	rows.querySelectorAll<HTMLButtonElement>("button[data-snapshot-id]").forEach((button) => {
-		button.addEventListener("click", () => void openSnapshotPreview(button.dataset.snapshotId || ""));
+rows.querySelectorAll<HTMLButtonElement>("button[data-snapshot-id]").forEach((button) => {
+		button.addEventListener("click", () => void openSnapshotPreview(button.dataset.snapshotId || "", button.dataset.playerId || ""));
 	});
+	wireGlobalLeaderboardTooltips(rows);
+}
+
+function globalScore(entry: GlobalLeaderboardEntry) {
+	return `<em class="global-leaderboard-stat" tabindex="0" data-tooltip="Top score">${entry.score}</em>`;
 }
 
 function globalFirstPlaceTime(entry: GlobalLeaderboardEntry) {
 	const duration = entry.firstPlaceDurationMs ?? 0;
 	if (duration <= 0) return "";
-	return ` <em class="leader-time" tabindex="0">[${durationClock(duration)}]<span class="leader-time-popup" role="tooltip">time #1</span></em>`;
+	return `<em class="global-leaderboard-stat" tabindex="0" data-tooltip="time #1">${durationClock(duration)}</em>`;
+}
+
+function globalAchievedDate(entry: GlobalLeaderboardEntry) {
+	const date = new Date(entry.achievedAt);
+	if (Number.isNaN(date.getTime())) return "";
+	return `<em class="global-leaderboard-stat" tabindex="0" data-tooltip="${escapeHtml(formatLeaderboardTime(date))}">${escapeHtml(formatLeaderboardDate(date))}</em>`;
+}
+
+function wireGlobalLeaderboardTooltips(container: HTMLElement) {
+	container.querySelectorAll<HTMLElement>(".global-leaderboard-stat[data-tooltip]").forEach((stat) => {
+		stat.addEventListener("mouseenter", () => showGlobalLeaderboardTooltip(stat));
+		stat.addEventListener("focus", () => showGlobalLeaderboardTooltip(stat));
+		stat.addEventListener("mouseleave", hideGlobalLeaderboardTooltip);
+		stat.addEventListener("blur", hideGlobalLeaderboardTooltip);
+	});
+	container.addEventListener("scroll", hideGlobalLeaderboardTooltip);
+}
+
+function showGlobalLeaderboardTooltip(target: HTMLElement) {
+	const text = target.dataset.tooltip;
+	if (!text) return;
+	const tooltip = globalLeaderboardTooltip();
+	tooltip.textContent = text;
+	tooltip.classList.add("visible");
+	const rect = target.getBoundingClientRect();
+	const tooltipRect = tooltip.getBoundingClientRect();
+	const x = Math.min(window.innerWidth - tooltipRect.width - 8, Math.max(8, rect.right - tooltipRect.width));
+	const y = Math.max(8, rect.top - tooltipRect.height - 8);
+	tooltip.style.left = `${x}px`;
+	tooltip.style.top = `${y}px`;
+}
+
+function hideGlobalLeaderboardTooltip() {
+	document.getElementById("globalLeaderboardTooltip")?.classList.remove("visible");
+}
+
+function globalLeaderboardTooltip() {
+	let tooltip = document.getElementById("globalLeaderboardTooltip");
+	if (!tooltip) {
+		tooltip = document.createElement("div");
+		tooltip.id = "globalLeaderboardTooltip";
+		tooltip.className = "global-leaderboard-popup";
+		tooltip.setAttribute("role", "tooltip");
+		document.body.appendChild(tooltip);
+	}
+	return tooltip;
+}
+
+function formatLeaderboardDate(date: Date) {
+	return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatLeaderboardTime(date: Date) {
+	return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
 }
 
 function durationClock(durationMs: number) {
@@ -635,20 +699,20 @@ function durationClock(durationMs: number) {
 	return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
-async function openSnapshotPreview(snapshotId: string) {
+async function openSnapshotPreview(snapshotId: string, playerId?: PlayerId) {
 	if (!snapshotId || !snapshotPreviewRenderer || !snapshotPreviewCanvas) return;
 	const modal = document.getElementById("snapshotPreviewModal");
 	const info = document.getElementById("snapshotPreviewInfo");
 	modal?.classList.remove("hidden");
 	setSnapshotPreviewLoading(true);
 	if (info) info.textContent = "Loading snapshot...";
-	const result = await getGlobalLeaderboardSnapshot(snapshotId);
+	const result = await getGlobalLeaderboardSnapshot(snapshotId, playerId);
 	if (!result.ok || !result.snapshot) {
 		setSnapshotPreviewLoading(false);
 		if (info) info.textContent = result.error || "Could not load snapshot.";
 		return;
 	}
-	previewState.snapshot = hydrateSnapshot(result.snapshot);
+	previewState.snapshot = hydratePreviewSnapshot(result.snapshot);
 	previewState.playerId = result.snapshot.playerId;
 	previewState.selectedIds.clear();
 	previewView.camera.zoom = 1;
@@ -1118,6 +1182,86 @@ function hydrateSnapshot(snap: Snapshot): ClientSnapshot {
 		corpses: snap.corpses || {},
 		dayNight: offsetDayNight(snap.dayNight, state.timeOffsetSeconds),
 	};
+}
+
+function hydratePreviewSnapshot(snap: LeaderboardPreviewSnapshot): ClientSnapshot {
+	const snapshot: Snapshot = {
+		type: "snapshot",
+		now: snap.now,
+		playerId: snap.playerId,
+		map: snap.map,
+		players: Object.fromEntries(Object.entries(snap.players).map(([id, player]) => [
+			id,
+			{
+				...player,
+				resources: { wood: 0, food: 0, ore: 0 },
+				autoReplenishFarms: false,
+				population: 0,
+				popCap: 0,
+				joinedAt: 0,
+			},
+		])),
+		units: Object.fromEntries(Object.entries(snap.units).map(([id, unit]) => [
+			id,
+			{
+				...unit,
+				hp: 1,
+				maxHp: 1,
+				command: { type: "idle" },
+				cooldown: 0,
+				attackFlash: 0,
+				workFlash: 0,
+				carried: null,
+				selected: false,
+			},
+		])),
+		buildings: Object.fromEntries(Object.entries(snap.buildings).map(([id, building]) => [
+			id,
+			{
+				...building,
+				hp: 1,
+				maxHp: 1,
+				completed: true,
+				repairPaidUntilHp: undefined,
+				builderIds: [],
+				queue: [],
+			},
+		])),
+		resources: Object.fromEntries(Object.entries(snap.resources).map(([id, resource]) => [
+			id,
+			{
+				...resource,
+				amount: 1,
+				maxAmount: 1,
+			},
+		])),
+		ruins: Object.fromEntries(Object.entries(snap.ruins).map(([id, ruin]) => [
+			id,
+			{
+				...ruin,
+				age: 0,
+			},
+		])),
+		corpses: Object.fromEntries(Object.entries(snap.corpses).map(([id, corpse]) => [
+			id,
+			{
+				...corpse,
+				hp: 0,
+				maxHp: 1,
+				remaining: 1,
+			},
+		])),
+		visibility: null,
+		dayNight: dayNightStateAt(0),
+		leaderboard: [],
+		notices: [],
+		hornSounds: [],
+		soundDebug: null,
+		pathDebug: false,
+		serverPerf: null,
+		admin: null,
+	};
+	return hydrateSnapshot(snapshot);
 }
 
 function offsetDayNight(dayNight: ClientSnapshot["dayNight"], offsetSeconds: number) {

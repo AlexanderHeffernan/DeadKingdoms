@@ -48,6 +48,9 @@ type RenderedSpriteRect = {
 	height: number;
 };
 type RenderedAlphaMask = { rect: RenderedSpriteRect; mask: SpriteAlphaMask; flipped: boolean };
+interface RendererOptions {
+	minimap?: HTMLCanvasElement | null;
+}
 type TerrainChunk = {
 	key: string;
 	startX: number;
@@ -102,12 +105,14 @@ export class Renderer {
 	private lastMinimapDraw = 0;
 	private grassLightImage = new Image();
 	private grassLightReady = false;
+	private minimap: HTMLCanvasElement | null;
 
 	private grassDarkImage = new Image();
 	private grassDarkReady = false;
 
-	constructor(canvas: HTMLCanvasElement) {
+	constructor(canvas: HTMLCanvasElement, options: RendererOptions = {}) {
 		this.canvas = canvas;
+		this.minimap = options.minimap ?? null;
 		this.app = new Application({
 			view: canvas,
 			width: this.viewportWidth(),
@@ -1589,18 +1594,16 @@ export class Renderer {
 	}
 
 	private drawMinimap(state: GameState, view: ViewState) {
+		if (!this.minimap) return;
 		const now = performance.now();
 		if (now - this.lastMinimapDraw < 180) return;
 		this.lastMinimapDraw = now;
-		drawMinimapCanvas(state, view, this.viewportWidth(), this.viewportHeight());
+		drawMinimapCanvas(this.minimap, state, view, this.viewportWidth(), this.viewportHeight());
 	}
 }
 
-function drawMinimapCanvas(state: GameState, view: ViewState, viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
-	const minimap = document.getElementById(
-		"minimap",
-	) as HTMLCanvasElement | null;
-	if (!minimap || !state.snapshot) return;
+function drawMinimapCanvas(minimap: HTMLCanvasElement, state: GameState, view: ViewState, viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
+	if (!state.snapshot) return;
 	const ctx = minimap.getContext("2d")!;
 	const size = state.snapshot.map.size;
 	const project = (x: number, y: number) =>
