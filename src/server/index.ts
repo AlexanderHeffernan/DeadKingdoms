@@ -21,6 +21,7 @@ Logs.setSource("server");
 Logs.setSink((entry) => state.recordLog(entry.source, entry.message, entry.at));
 const clients = new Set<Client>();
 const server = http.createServer(createHandler(state, clients, globalLeaderboard));
+let shuttingDown = false;
 
 server.listen(port, "0.0.0.0", () => {
 	console.log(`RTS arena running at http://127.0.0.1:${port}`);
@@ -37,6 +38,26 @@ setInterval(() => {
 	const resetWorld = state.stepIdleReset(hasActivePlayers(world));
 	if (resetWorld) void globalLeaderboard.publishWorldPeaks(resetWorld);
 }, TICK_MS);
+
+async function shutdown(signal: NodeJS.Signals) {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	console.log(`Received ${signal}; saving leaderboard data before shutdown.`);
+	const world = state.currentWorld();
+	try {
+		await globalLeaderboard.publishWorldPeaks(world);
+		await globalLeaderboard.flush();
+	} catch (error) {
+		console.error(`Could not save leaderboard data during shutdown: ${(error as Error).message}`);
+	}
+	for (const client of clients) client.res.end();
+	clients.clear();
+	server.close(() => process.exit(0));
+	setTimeout(() => process.exit(0), 5000).unref();
+}
+
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
 
 function hasActivePlayers(world: ReturnType<ServerState["currentWorld"]>) {
 	return !!world && Object.values(world.players).some((player) => !player.defeated);

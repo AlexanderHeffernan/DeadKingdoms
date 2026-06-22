@@ -21,3 +21,4 @@ services:
 
 volumes:
   rts-leaderboard-data:
+    name: persistent-rts-arena-leaderboard-data

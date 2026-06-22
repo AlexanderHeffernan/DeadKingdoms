@@ -34,6 +34,7 @@ export class GlobalLeaderboardStore {
 	private loaded = false;
 	private saveQueued = false;
 	private saveInProgress = false;
+	private savePromise: Promise<void> | null = null;
 	private perfSink: PerfSink | null = null;
 
 	setPerfSink(perfSink: PerfSink | null) {
@@ -100,6 +101,14 @@ export class GlobalLeaderboardStore {
 			this.queueSave();
 		} finally {
 			if (world) recordServerPerfPhase(world, "globalLeaderboardPublish", "Global leaderboard publish", performance.now() - startedAt);
+		}
+	}
+
+	async flush() {
+		await this.load();
+		while (this.saveQueued || this.saveInProgress) {
+			if (!this.savePromise) this.savePromise = this.flushSave();
+			await this.savePromise;
 		}
 	}
 
@@ -330,25 +339,32 @@ export class GlobalLeaderboardStore {
 
 	private queueSave() {
 		this.saveQueued = true;
-		if (!this.saveInProgress) void this.flushSave();
+		if (!this.savePromise) {
+			this.savePromise = this.flushSave();
+			void this.savePromise;
+		}
 	}
 
 	private async flushSave() {
-		this.saveInProgress = true;
-		while (this.saveQueued) {
-			this.saveQueued = false;
-			const payload = JSON.stringify(this.data, null, 2);
-			const startedAt = performance.now();
-			try {
-				await fs.mkdir(dirname(STORE_FILE), { recursive: true });
-				await fs.writeFile(STORE_FILE, payload);
-			} catch (error) {
-				console.warn(`Could not write global leaderboard: ${(error as Error).message}`);
-			} finally {
-				this.recordPerf("globalLeaderboardSave", "Global leaderboard save", performance.now() - startedAt);
+		try {
+			this.saveInProgress = true;
+			while (this.saveQueued) {
+				this.saveQueued = false;
+				const payload = JSON.stringify(this.data, null, 2);
+				const startedAt = performance.now();
+				try {
+					await fs.mkdir(dirname(STORE_FILE), { recursive: true });
+					await fs.writeFile(STORE_FILE, payload);
+				} catch (error) {
+					console.warn(`Could not write global leaderboard: ${(error as Error).message}`);
+				} finally {
+					this.recordPerf("globalLeaderboardSave", "Global leaderboard save", performance.now() - startedAt);
+				}
 			}
+		} finally {
+			this.saveInProgress = false;
+			this.savePromise = null;
 		}
-		this.saveInProgress = false;
 	}
 
 	private recordPerf(name: string, label: string, ms: number) {

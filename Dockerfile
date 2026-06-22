@@ -14,9 +14,11 @@ RUN npm ci && npm run build && npm prune --omit=dev
 RUN mkdir -p /data && chown node:node /data
 
 ENV NODE_ENV=production
+ENV LEADERBOARD_DATA_DIR=/data
 
 USER node
 EXPOSE 3000
+VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/api/snapshot >/dev/null || exit 1
