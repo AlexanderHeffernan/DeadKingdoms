@@ -4,6 +4,7 @@ import { makeSnapshot } from "../shared/messages.js";
 import { MAX_PLAYERS } from "../shared/config.js";
 import { addAdminLog, addPlayer, command, emitDevBang, grantPlayerSoldiers, removePlayer, setWorldTimeOfDay, shiftWorldTime, spawnZombieHorde, toggleTownCenterInvincibility } from "./world.js";
 import { Logs } from "../shared/logs.js";
+import type { ChangelogStore } from "./changelog.js";
 import type { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { ServerState } from "./serverState.js";
 import type { AdminLevel, AdminView, CommandPayload, Player, PlayerId, Snapshot, SnapshotDelta, World } from "../shared/types.js";
@@ -36,12 +37,13 @@ export type Client = {
 };
 let nextSnapshotSeq = 1;
 
-export function createHandler(state: ServerState, clients: Set<Client>, globalLeaderboard: GlobalLeaderboardStore) {
+export function createHandler(state: ServerState, clients: Set<Client>, globalLeaderboard: GlobalLeaderboardStore, changelog: ChangelogStore) {
 	return async function handler(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) {
 		const host = req.headers.host || "localhost";
 		const url = new URL(req.url ?? "/", `http://${host}`);
 		if (req.method === "POST" && url.pathname === "/api/join") return joinGame(req, res, state.ensureWorld());
 		if (req.method === "GET" && url.pathname === "/api/status") return serverStatus(res, state, globalLeaderboard);
+		if (req.method === "GET" && url.pathname === "/api/changelog") return json(res, changelog.current());
 		if (req.method === "GET" && url.pathname === "/api/global-leaderboard") return json(res, { entries: await globalLeaderboard.entries() });
 		if (req.method === "GET" && url.pathname.startsWith("/api/global-leaderboard/")) return globalLeaderboardSnapshot(res, globalLeaderboard, url);
 		const world = state.currentWorld();

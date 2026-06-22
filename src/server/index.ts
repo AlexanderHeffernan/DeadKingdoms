@@ -2,6 +2,7 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { TICK_MS } from "../shared/config.js";
 import { Logs } from "../shared/logs.js";
+import { ChangelogStore } from "./changelog.js";
 import { broadcast, createHandler } from "./http.js";
 import { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { Client } from "./http.js";
@@ -13,6 +14,7 @@ loadEnvFile();
 const port = Number(process.env.PORT || 3000);
 const state = new ServerState();
 const globalLeaderboard = new GlobalLeaderboardStore();
+const changelog = new ChangelogStore(new URL("../../public/changelog.json", import.meta.url));
 globalLeaderboard.setPerfSink((name, label, ms) => {
 	const world = state.currentWorld();
 	if (world) recordServerPerfPhase(world, name, label, ms);
@@ -20,7 +22,8 @@ globalLeaderboard.setPerfSink((name, label, ms) => {
 Logs.setSource("server");
 Logs.setSink((entry) => state.recordLog(entry.source, entry.message, entry.at));
 const clients = new Set<Client>();
-const server = http.createServer(createHandler(state, clients, globalLeaderboard));
+await changelog.load();
+const server = http.createServer(createHandler(state, clients, globalLeaderboard, changelog));
 let shuttingDown = false;
 
 server.listen(port, "0.0.0.0", () => {

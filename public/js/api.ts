@@ -42,7 +42,7 @@ export async function getGlobalLeaderboardSnapshot(snapshotId: string, playerId?
 }
 
 export async function getChangelog(): Promise<Changelog> {
-	const res = await fetch("/changelog.json");
+	const res = await fetch("/api/changelog");
 	return res.json();
 }
 
