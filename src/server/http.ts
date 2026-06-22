@@ -336,7 +336,6 @@ async function joinGame(req: import("node:http").IncomingMessage, res: import("n
 	const color = typeof body.color === "string" ? body.color : null;
 	const playerId = addPlayer(world, name, color);
 	recordPlayerConnection(world.players[playerId], ipAddress, false);
-	restoreAdminForReconnect(world, world.players[playerId]!);
 	json(res, { ok: true, playerId });
 }
 
@@ -358,7 +357,6 @@ async function enableAdminAccess(req: import("node:http").IncomingMessage, res: 
 	const player = world.players[body.playerId];
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
 	if (player.adminLevel) {
-		rememberAdminSession(world, player);
 		delete player.adminLevel;
 		player.godMode = false;
 		player.soundDebug = false;
@@ -368,7 +366,6 @@ async function enableAdminAccess(req: import("node:http").IncomingMessage, res: 
 		return json(res, { ok: true, adminLevel: null, enabled: false });
 	}
 	player.adminLevel = adminLevel;
-	rememberAdminSession(world, player);
 	json(res, { ok: true, adminLevel, enabled: true });
 }
 
@@ -628,32 +625,6 @@ function adminPlayer(world: World, playerId: unknown): Player | null {
 	if (typeof playerId !== "string") return null;
 	const player = world.players[playerId];
 	return player?.adminLevel ? player : null;
-}
-
-function rememberAdminSession(world: World, player: Player) {
-	if (!player.adminLevel) return;
-	const ipAddress = player.connection?.ipAddress ?? null;
-	world.adminSessionGrants ??= [];
-	world.adminSessionGrants = world.adminSessionGrants.filter((grant) => {
-		if (grant.name === player.name) return false;
-		return ipAddress ? grant.ipAddress !== ipAddress : true;
-	});
-	world.adminSessionGrants.push({
-		level: player.adminLevel,
-		name: player.name,
-		ipAddress,
-		updatedAt: Date.now(),
-	});
-}
-
-function restoreAdminForReconnect(world: World, player: Player) {
-	const ipAddress = player.connection?.ipAddress ?? null;
-	const grant = [...(world.adminSessionGrants ?? [])]
-		.reverse()
-		.find((entry) => entry.name === player.name || (ipAddress && entry.ipAddress === ipAddress));
-	if (!grant) return;
-	player.adminLevel = grant.level;
-	rememberAdminSession(world, player);
 }
 
 function recordPlayerConnection(player: Player | null | undefined, ipAddress: string | null, openedStream: boolean) {

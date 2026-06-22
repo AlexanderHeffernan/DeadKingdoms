@@ -98,7 +98,6 @@ export function createWorld(): World {
 		notices: [],
 		adminLogs: [],
 		bannedIpAddresses: [],
-		adminSessionGrants: [],
 		actionNoises: [],
 		leaderboard: [],
 		startedAt,

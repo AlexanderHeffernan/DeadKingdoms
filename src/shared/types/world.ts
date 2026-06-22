@@ -59,13 +59,6 @@ export interface ZombieCadenceFieldState {
 	watchedPoints: number;
 }
 
-export interface AdminSessionGrant {
-	level: import("./snapshot.js").AdminLevel;
-	name: string;
-	ipAddress: string | null;
-	updatedAt: number;
-}
-
 /** Authoritative server-side simulation state for one running arena. */
 export interface World {
 	map: MapDef;
@@ -78,7 +71,6 @@ export interface World {
 	notices: Notice[];
 	adminLogs: AdminLogEntry[];
 	bannedIpAddresses?: string[];
-	adminSessionGrants?: AdminSessionGrant[];
 	actionNoises: ActionNoise[];
 	leaderboard: LeaderboardEntry[];
 	firstPlacePlayerId?: PlayerId;
