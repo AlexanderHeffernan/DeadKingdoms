@@ -18,9 +18,8 @@ ENV LEADERBOARD_DATA_DIR=/data
 
 USER node
 EXPOSE 3000
-VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/api/snapshot >/dev/null || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/api/status >/dev/null || exit 1
 
 CMD ["node", "dist/server/index.js"]
