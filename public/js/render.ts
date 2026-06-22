@@ -50,6 +50,7 @@ type RenderedSpriteRect = {
 type RenderedAlphaMask = { rect: RenderedSpriteRect; mask: SpriteAlphaMask; flipped: boolean };
 interface RendererOptions {
 	minimap?: HTMLCanvasElement | null;
+	sizeMode?: "element" | "viewport";
 }
 type TerrainChunk = {
 	key: string;
@@ -106,6 +107,7 @@ export class Renderer {
 	private grassLightImage = new Image();
 	private grassLightReady = false;
 	private minimap: HTMLCanvasElement | null;
+	private sizeMode: "element" | "viewport";
 
 	private grassDarkImage = new Image();
 	private grassDarkReady = false;
@@ -113,6 +115,7 @@ export class Renderer {
 	constructor(canvas: HTMLCanvasElement, options: RendererOptions = {}) {
 		this.canvas = canvas;
 		this.minimap = options.minimap ?? null;
+		this.sizeMode = options.sizeMode ?? "element";
 		this.app = new Application({
 			view: canvas,
 			width: this.viewportWidth(),
@@ -154,10 +157,12 @@ export class Renderer {
 	}
 
 	private viewportWidth() {
+		if (this.sizeMode === "viewport") return Math.max(1, Math.round(window.innerWidth));
 		return Math.max(1, Math.round(this.canvas.clientWidth || this.canvas.width || window.innerWidth));
 	}
 
 	private viewportHeight() {
+		if (this.sizeMode === "viewport") return Math.max(1, Math.round(window.innerHeight));
 		return Math.max(1, Math.round(this.canvas.clientHeight || this.canvas.height || window.innerHeight));
 	}
 
@@ -165,6 +170,7 @@ export class Renderer {
 		this.currentResolution = desiredRenderResolution(this.currentZoom);
 		this.app.renderer.resolution = this.currentResolution;
 		this.app.renderer.resize(this.viewportWidth(), this.viewportHeight());
+		this.restoreViewportCanvasStyle();
 	}
 
 	draw(state: GameState, view: ViewState) {
@@ -213,6 +219,13 @@ export class Renderer {
 		this.currentResolution = resolution;
 		this.app.renderer.resolution = resolution;
 		this.app.renderer.resize(this.viewportWidth(), this.viewportHeight());
+		this.restoreViewportCanvasStyle();
+	}
+
+	private restoreViewportCanvasStyle() {
+		if (this.sizeMode !== "viewport") return;
+		this.canvas.style.width = "100vw";
+		this.canvas.style.height = "100vh";
 	}
 
 	private updateEntityLayerSorting(camera: CameraState) {

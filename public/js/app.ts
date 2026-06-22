@@ -164,7 +164,7 @@ interface HowToPlayItem {
 const canvas = document.getElementById("world") as HTMLCanvasElement | null;
 const minimap = document.getElementById("minimap") as HTMLCanvasElement | null;
 if (!canvas || !minimap) throw new Error("Missing canvas elements");
-const renderer = new Renderer(canvas, { minimap });
+const renderer = new Renderer(canvas, { minimap, sizeMode: "viewport" });
 const snapshotPreviewCanvas = document.getElementById("snapshotPreviewCanvas") as HTMLCanvasElement | null;
 const snapshotPreviewRenderer = snapshotPreviewCanvas ? new Renderer(snapshotPreviewCanvas) : null;
 let eventStream: EventSource | null = null;
