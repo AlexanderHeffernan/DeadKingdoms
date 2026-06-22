@@ -208,14 +208,18 @@ export interface AdminPlayerSnapshot {
 	ipAddress?: string;
 }
 
+export type AdminView = "closed" | "popup" | "overview" | "performance" | "players" | "logs" | "devCommands" | "bans";
+
 export interface AdminSnapshot {
 	level: AdminLevel;
-	serverPerf: ServerPerfStats & {
+	view: AdminView;
+	serverPerf?: ServerPerfStats & {
 		samples: ServerPerfSample[];
 	};
-	players: AdminPlayerSnapshot[];
-	events: Notice[];
-	logs: AdminLogEntry[];
+	players?: AdminPlayerSnapshot[];
+	events?: Notice[];
+	logs?: AdminLogEntry[];
+	bannedIpAddresses?: string[];
 }
 
 /** Sanitized player state sent to clients in snapshots. */

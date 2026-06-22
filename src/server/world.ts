@@ -97,6 +97,8 @@ export function createWorld(): World {
 		corpses: {},
 		notices: [],
 		adminLogs: [],
+		bannedIpAddresses: [],
+		adminSessionGrants: [],
 		actionNoises: [],
 		leaderboard: [],
 		startedAt,

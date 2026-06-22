@@ -64,12 +64,15 @@ export class AdminPopup implements GameUiComponent {
 		}
 		this.updateVisibility(true);
 		this.level.textContent = admin.level;
+		const perf = admin.serverPerf;
+		const players = admin.players ?? [];
+		const events = admin.events ?? [];
 		this.metrics.innerHTML = `
-<span>TPS <strong>${Math.round(admin.serverPerf.tps)}</strong></span>
-<span>Tick <strong>${admin.serverPerf.tickMs.toFixed(1)}ms</strong></span>
-<span>Players <strong>${admin.players.length}</strong></span>
+<span>TPS <strong>${perf ? Math.round(perf.tps) : "--"}</strong></span>
+<span>Tick <strong>${perf ? `${perf.tickMs.toFixed(1)}ms` : "--"}</strong></span>
+<span>Players <strong>${players.length}</strong></span>
 `;
-		this.players.innerHTML = admin.players.map((player) => `
+		this.players.innerHTML = players.map((player) => `
 <div class="admin-player">
 	<span style="color:${player.color}">${escapeHtml(player.name)}</span>
 	<strong>${player.connected ? "online" : "idle"}</strong>
@@ -77,11 +80,11 @@ export class AdminPopup implements GameUiComponent {
 	<small>${player.lastSeenAt ? `seen ${timeAgo(now, player.lastSeenAt)}` : "not seen"}</small>
 </div>
 `).join("");
-		this.events.innerHTML = admin.events
+		this.events.innerHTML = events
 		.slice(-4)
 		.map((event) => `<div><span>${timeAgo(now, event.at)}</span>${escapeHtml(event.text)}</div>`)
 		.join("");
-		this.drawChart(admin);
+		if (perf) this.drawChart(admin);
 		this.dashboard.render(admin, now);
 	}
 
@@ -94,11 +97,13 @@ export class AdminPopup implements GameUiComponent {
 			event.preventDefault();
 			this.minimized = true;
 			this.updateVisibility(true);
+			this.requestAdminView("closed");
 		});
 		this.restoreButton.addEventListener("click", (event) => {
 			event.preventDefault();
 			this.minimized = false;
 			this.updateVisibility(true);
+			this.requestAdminView("popup");
 		});
 		this.heading.addEventListener("pointerdown", (event) => {
 			if (event.target instanceof HTMLButtonElement) return;
@@ -116,11 +121,15 @@ export class AdminPopup implements GameUiComponent {
 			this.panel.classList.add("hidden");
 			this.restoreButton.classList.add("hidden");
 			this.dashboard.hide();
+			this.requestAdminView("closed");
 			return;
 		}
 		this.restoreButton.classList.toggle("hidden", !this.minimized);
 		this.panel.classList.toggle("hidden", this.minimized);
-		if (!this.minimized) this.constrainToViewport();
+		if (!this.minimized) {
+			this.constrainToViewport();
+			this.requestAdminView("popup");
+		}
 	}
 
 	private beginPointer(event: PointerEvent, mode: AdminPointerMode) {
@@ -197,6 +206,7 @@ export class AdminPopup implements GameUiComponent {
 		if (!ctx) return;
 		const width = this.chart.width;
 		const height = this.chart.height;
+		if (!admin.serverPerf) return;
 		ctx.clearRect(0, 0, width, height);
 		ctx.fillStyle = "#101410";
 		ctx.fillRect(0, 0, width, height);
@@ -211,6 +221,10 @@ export class AdminPopup implements GameUiComponent {
 		}
 		drawSampleLine(ctx, admin.serverPerf.samples, width, height, "tickMs", "#e9bd59");
 		drawSampleLine(ctx, admin.serverPerf.samples, width, height, "tps", "#7ab6f0");
+	}
+
+	private requestAdminView(view: "closed" | "popup") {
+		window.dispatchEvent(new CustomEvent("admin-subscription", { detail: { view } }));
 	}
 }
 

@@ -11,12 +11,14 @@ export class AdminDashboard {
 	private readonly overviewTab: HTMLButtonElement;
 	private readonly performanceTab: HTMLButtonElement;
 	private readonly playersTab: HTMLButtonElement;
+	private readonly bansTab: HTMLButtonElement;
 	private readonly logsTab: HTMLButtonElement;
 	private readonly devCommandsTab: HTMLButtonElement;
 	private readonly overviewView: HTMLElement;
 	private readonly performanceView: HTMLElement;
 	private readonly perfBreakdown: HTMLElement;
 	private readonly playersView: HTMLElement;
+	private readonly bansView: HTMLElement;
 	private readonly logsView: HTMLElement;
 	private readonly devCommandsView: HTMLElement;
 	private readonly overviewMetrics: HTMLElement;
@@ -29,6 +31,7 @@ export class AdminDashboard {
 	private readonly range: HTMLSelectElement;
 	private readonly windowLabel: HTMLElement;
 	private readonly playerTableBody: HTMLTableSectionElement;
+	private readonly banTableBody: HTMLTableSectionElement;
 	private readonly logTableBody: HTMLTableSectionElement;
 	private readonly enableVisionButton: HTMLButtonElement;
 	private readonly enableSoundDebugButton: HTMLButtonElement;
@@ -62,12 +65,14 @@ export class AdminDashboard {
 		this.overviewTab = elements.overviewTab;
 		this.performanceTab = elements.performanceTab;
 		this.playersTab = elements.playersTab;
+		this.bansTab = elements.bansTab;
 		this.logsTab = elements.logsTab;
 		this.devCommandsTab = elements.devCommandsTab;
 		this.overviewView = elements.overviewView;
 		this.performanceView = elements.performanceView;
 		this.perfBreakdown = elements.perfBreakdown;
 		this.playersView = elements.playersView;
+		this.bansView = elements.bansView;
 		this.logsView = elements.logsView;
 		this.devCommandsView = elements.devCommandsView;
 		this.overviewMetrics = elements.overviewMetrics;
@@ -80,6 +85,7 @@ export class AdminDashboard {
 		this.range = elements.range;
 		this.windowLabel = elements.windowLabel;
 		this.playerTableBody = elements.playerTableBody;
+		this.banTableBody = elements.banTableBody;
 		this.logTableBody = elements.logTableBody;
 		this.enableVisionButton = elements.enableVisionButton;
 		this.enableSoundDebugButton = elements.enableSoundDebugButton;
@@ -120,9 +126,12 @@ export class AdminDashboard {
 		}
 		this.panel.classList.remove("hidden");
 		this.level.textContent = admin.level;
+		this.requestAdminView(this.activeTab);
 		this.renderOverview(admin, now);
 		this.renderPerfBreakdown(admin);
-		this.playerTableBody.innerHTML = admin.players.map((player) => `
+		const players = admin.players ?? [];
+		const logs = admin.logs ?? [];
+		this.playerTableBody.innerHTML = players.map((player) => `
 <tr>
 	<td><span class="admin-player-name" style="color:${player.color}">${escapeHtml(player.name)}</span></td>
 	<td>${player.connected ? "Online" : "Idle"}${player.defeated ? " · Defeated" : ""}</td>
@@ -133,9 +142,20 @@ export class AdminDashboard {
 	<td>${player.connected ? "Online" : "Idle"}${player.defeated ? " · Defeated" : ""}</td>
 	<td>${player.lastSeenAt ? timeAgo(now, player.lastSeenAt) : "not seen"}</td>
 	<td>${escapeHtml(player.ipAddress ?? "restricted")}</td>
+	<td>
+		<button type="button" data-admin-action="kick" data-player-id="${escapeHtml(player.id)}">Kick</button>
+		<button type="button" data-admin-action="ban" data-player-id="${escapeHtml(player.id)}">Ban</button>
+	</td>
 </tr>
 `).join("");
-		this.logTableBody.innerHTML = admin.logs
+		this.banTableBody.innerHTML = (admin.bannedIpAddresses ?? [])
+		.map((ipAddress) => `
+<tr>
+	<td>${escapeHtml(ipAddress)}</td>
+	<td><button type="button" data-admin-action="unban" data-ip-address="${escapeHtml(ipAddress)}">Unban</button></td>
+</tr>
+`).join("");
+		this.logTableBody.innerHTML = logs
 		.slice()
 		.reverse()
 		.map((entry) => `
@@ -145,7 +165,7 @@ export class AdminDashboard {
 	<td>${escapeHtml(entry.message)}</td>
 </tr>
 `).join("");
-		this.drawChart(admin.serverPerf.samples);
+		if (admin.serverPerf) this.drawChart(admin.serverPerf.samples);
 	}
 
 	private setupEvents() {
@@ -156,6 +176,7 @@ export class AdminDashboard {
 		this.overviewTab.addEventListener("click", () => this.setActiveTab("overview"));
 		this.performanceTab.addEventListener("click", () => this.setActiveTab("performance"));
 		this.playersTab.addEventListener("click", () => this.setActiveTab("players"));
+		this.bansTab.addEventListener("click", () => this.setActiveTab("bans"));
 		this.logsTab.addEventListener("click", () => this.setActiveTab("logs"));
 		this.devCommandsTab.addEventListener("click", () => this.setActiveTab("devCommands"));
 		this.range.addEventListener("change", () => {
@@ -168,8 +189,10 @@ export class AdminDashboard {
 		this.chart.addEventListener("pointermove", (event) => this.updateChartHover(event));
 		this.chart.addEventListener("pointerleave", () => {
 			this.chartHoverRatio = null;
-			if (this.currentAdmin) this.drawChart(this.currentAdmin.serverPerf.samples);
+			if (this.currentAdmin?.serverPerf) this.drawChart(this.currentAdmin.serverPerf.samples);
 		});
+		this.playerTableBody.addEventListener("click", (event) => void this.handlePlayerAction(event));
+		this.banTableBody.addEventListener("click", (event) => void this.handleBanAction(event));
 		this.enableVisionButton.addEventListener("click", () => this.runCommand(this.enableVisionButton, this.actions.enableFullMapVision));
 		this.enableSoundDebugButton.addEventListener("click", () => this.runCommand(this.enableSoundDebugButton, this.actions.enableSoundDebug));
 		this.enableZombieDebugButton.addEventListener("click", () => this.runCommand(this.enableZombieDebugButton, this.actions.enableZombieDebug));
@@ -200,24 +223,29 @@ export class AdminDashboard {
 		const showingOverview = tab === "overview";
 		const showingPerformance = tab === "performance";
 		const showingPlayers = tab === "players";
+		const showingBans = tab === "bans";
 		const showingLogs = tab === "logs";
 		const showingDevCommands = tab === "devCommands";
 		this.overviewTab.classList.toggle("active", showingOverview);
 		this.performanceTab.classList.toggle("active", showingPerformance);
 		this.playersTab.classList.toggle("active", showingPlayers);
+		this.bansTab.classList.toggle("active", showingBans);
 		this.logsTab.classList.toggle("active", showingLogs);
 		this.devCommandsTab.classList.toggle("active", showingDevCommands);
 		this.overviewTab.setAttribute("aria-selected", String(showingOverview));
 		this.performanceTab.setAttribute("aria-selected", String(showingPerformance));
 		this.playersTab.setAttribute("aria-selected", String(showingPlayers));
+		this.bansTab.setAttribute("aria-selected", String(showingBans));
 		this.logsTab.setAttribute("aria-selected", String(showingLogs));
 		this.devCommandsTab.setAttribute("aria-selected", String(showingDevCommands));
 		this.overviewView.classList.toggle("hidden", !showingOverview);
 		this.performanceView.classList.toggle("hidden", !showingPerformance);
 		this.playersView.classList.toggle("hidden", !showingPlayers);
+		this.bansView.classList.toggle("hidden", !showingBans);
 		this.logsView.classList.toggle("hidden", !showingLogs);
 		this.devCommandsView.classList.toggle("hidden", !showingDevCommands);
-		if (showingPerformance && this.currentAdmin) this.drawChart(this.currentAdmin.serverPerf.samples);
+		this.requestAdminView(tab);
+		if (showingPerformance && this.currentAdmin?.serverPerf) this.drawChart(this.currentAdmin.serverPerf.samples);
 	}
 
 	private async runCommand(button: HTMLButtonElement, command: () => Promise<string>) {
@@ -233,25 +261,29 @@ export class AdminDashboard {
 	}
 
 	private renderOverview(admin: AdminSnapshot, now: number) {
-		const onlinePlayers = admin.players.filter((player) => player.connected).length;
-		const defeatedPlayers = admin.players.filter((player) => player.defeated).length;
+		const players = admin.players ?? [];
+		const logs = admin.logs ?? [];
+		const events = admin.events ?? [];
+		const perf = admin.serverPerf;
+		const onlinePlayers = players.filter((player) => player.connected).length;
+		const defeatedPlayers = players.filter((player) => player.defeated).length;
 		this.overviewMetrics.innerHTML = `
-<div><span>TPS</span><strong>${Math.round(admin.serverPerf.tps)}</strong></div>
-<div><span>Tick</span><strong>${admin.serverPerf.tickMs.toFixed(1)}ms</strong></div>
-<div><span>Players</span><strong>${onlinePlayers}/${admin.players.length}</strong></div>
+<div><span>TPS</span><strong>${perf ? Math.round(perf.tps) : "--"}</strong></div>
+<div><span>Tick</span><strong>${perf ? `${perf.tickMs.toFixed(1)}ms` : "--"}</strong></div>
+<div><span>Players</span><strong>${onlinePlayers}/${players.length}</strong></div>
 <div><span>Defeated</span><strong>${defeatedPlayers}</strong></div>
-<div><span>Logs</span><strong>${admin.logs.length}</strong></div>
+<div><span>Logs</span><strong>${logs.length}</strong></div>
 `;
-		this.overviewPlayers.innerHTML = admin.players
+		this.overviewPlayers.innerHTML = players
 		.slice(0, 8)
 		.map((player) => `<div><strong style="color:${player.color}">${escapeHtml(player.name)}</strong><span>${player.connected ? "online" : "idle"} · ${formatPing(player.pingMs)} · ${player.population}/${player.popCap} pop · ${player.score}</span></div>`)
 		.join("");
-		this.overviewEvents.innerHTML = admin.events
+		this.overviewEvents.innerHTML = events
 		.slice(-5)
 		.reverse()
 		.map((event) => `<div><strong>${timeAgo(now, event.at)}</strong><span>${escapeHtml(event.text)}</span></div>`)
 		.join("");
-		this.overviewLogs.innerHTML = admin.logs
+		this.overviewLogs.innerHTML = logs
 		.slice(-6)
 		.reverse()
 		.map((entry) => `<div><strong>${formatClock(entry.at)} ${escapeHtml(entry.source)}</strong><span>${escapeHtml(entry.message)}</span></div>`)
@@ -259,6 +291,10 @@ export class AdminDashboard {
 	}
 
 	private renderPerfBreakdown(admin: AdminSnapshot) {
+		if (!admin.serverPerf) {
+			this.perfBreakdown.innerHTML = `<div class="admin-perf-empty">Open the Performance tab to load detailed samples.</div>`;
+			return;
+		}
 		const phases = [...(admin.serverPerf.phases ?? [])].sort((a, b) => b.ms - a.ms);
 		const unitAi = [...(admin.serverPerf.unitAi ?? [])].sort((a, b) => b.ms - a.ms);
 		const zombies = admin.serverPerf.zombies;
@@ -339,7 +375,7 @@ ${zombieAiWorkerDetail.map((bucket) => `
 	}
 
 	private panChart(direction: -1 | 1) {
-		const samples = this.currentAdmin?.serverPerf.samples ?? [];
+		const samples = this.currentAdmin?.serverPerf?.samples ?? [];
 		if (!samples.length) return;
 		const latestAt = samples.at(-1)?.at ?? Date.now();
 		const currentEndAt = this.windowEndAt ?? latestAt;
@@ -369,7 +405,7 @@ ${zombieAiWorkerDetail.map((bucket) => `
 	private updateChartHover(event: PointerEvent) {
 		const rect = this.chart.getBoundingClientRect();
 		this.chartHoverRatio = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)));
-		if (this.currentAdmin) this.drawChart(this.currentAdmin.serverPerf.samples);
+		if (this.currentAdmin?.serverPerf) this.drawChart(this.currentAdmin.serverPerf.samples);
 	}
 
 	private drawChartHover(ctx: CanvasRenderingContext2D, samples: ServerPerfSample[], width: number, height: number) {
@@ -441,6 +477,26 @@ ${zombieAiWorkerDetail.map((bucket) => `
 		this.newerButton.disabled = endAt >= maxEndAt;
 		this.windowLabel.textContent = `${formatClock(startAt)} - ${formatClock(endAt)}`;
 		return samples.filter((sample) => sample.at >= startAt && sample.at <= endAt);
+	}
+
+	private async handlePlayerAction(event: Event) {
+		const button = event.target instanceof HTMLButtonElement ? event.target : null;
+		const action = button?.dataset.adminAction;
+		const playerId = button?.dataset.playerId;
+		if (!button || !playerId) return;
+		if (action === "kick") await this.runCommand(button, () => this.actions.kickPlayer(playerId));
+		if (action === "ban") await this.runCommand(button, () => this.actions.banPlayer(playerId));
+	}
+
+	private async handleBanAction(event: Event) {
+		const button = event.target instanceof HTMLButtonElement ? event.target : null;
+		const ipAddress = button?.dataset.ipAddress;
+		if (!button || !ipAddress) return;
+		await this.runCommand(button, () => this.actions.unbanIp(ipAddress));
+	}
+
+	private requestAdminView(tab: AdminDashboardTab) {
+		window.dispatchEvent(new CustomEvent("admin-subscription", { detail: { view: tab } }));
 	}
 }
 
@@ -549,12 +605,14 @@ export type AdminDashboardElements = {
 	overviewTab: HTMLButtonElement;
 	performanceTab: HTMLButtonElement;
 	playersTab: HTMLButtonElement;
+	bansTab: HTMLButtonElement;
 	logsTab: HTMLButtonElement;
 	devCommandsTab: HTMLButtonElement;
 	overviewView: HTMLElement;
 	performanceView: HTMLElement;
 	perfBreakdown: HTMLElement;
 	playersView: HTMLElement;
+	bansView: HTMLElement;
 	logsView: HTMLElement;
 	devCommandsView: HTMLElement;
 	overviewMetrics: HTMLElement;
@@ -567,6 +625,7 @@ export type AdminDashboardElements = {
 	range: HTMLSelectElement;
 	windowLabel: HTMLElement;
 	playerTableBody: HTMLTableSectionElement;
+	banTableBody: HTMLTableSectionElement;
 	logTableBody: HTMLTableSectionElement;
 	enableVisionButton: HTMLButtonElement;
 	enableSoundDebugButton: HTMLButtonElement;
@@ -590,6 +649,9 @@ export type AdminDashboardActions = {
 	enableFullMapVision: () => Promise<string>;
 	enableSoundDebug: () => Promise<string>;
 	enableZombieDebug: () => Promise<string>;
+	kickPlayer: (targetPlayerId: string) => Promise<string>;
+	banPlayer: (targetPlayerId: string) => Promise<string>;
+	unbanIp: (ipAddress: string) => Promise<string>;
 	spawnHostileHorde: () => Promise<string>;
 	grantSoldiers: () => Promise<string>;
 	toggleTownCenterInvincible: () => Promise<string>;
@@ -599,4 +661,4 @@ export type AdminDashboardActions = {
 	restartServer: () => Promise<string>;
 };
 
-type AdminDashboardTab = "overview" | "performance" | "players" | "logs" | "devCommands";
+type AdminDashboardTab = "overview" | "performance" | "players" | "logs" | "devCommands" | "bans";

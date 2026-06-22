@@ -1,4 +1,4 @@
-import { disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getChangelog, getGlobalLeaderboard, getGlobalLeaderboardSnapshot, getStatus, ServerStatus, grantSoldiers as requestGrantSoldiers, join, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible } from "./api.js";
+import { banPlayer as requestBanPlayer, disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getChangelog, getGlobalLeaderboard, getGlobalLeaderboardSnapshot, getStatus, ServerStatus, grantSoldiers as requestGrantSoldiers, join, kickPlayer as requestKickPlayer, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible, unbanIp as requestUnbanIp } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
@@ -178,6 +178,7 @@ let lastFrameAt = performance.now();
 let smoothedFps = 60;
 let lastPingReportAt = 0;
 let adminDiagnosticsVisible = false;
+let adminView: "closed" | "popup" | "overview" | "performance" | "players" | "logs" | "devCommands" | "bans" = "closed";
 let latestHomeStatus: ServerStatus | null = null;
 
 const joinForm = document.getElementById("joinForm") as HTMLFormElement | null;
@@ -259,16 +260,18 @@ const ui = new UI(state, {
 		if (!result.ok) return result.error || "Could not enable full-map admin vision.";
 		state.exploredSet.clear();
 		connectEvents();
-		ui.showToast("Full-map admin vision enabled.");
-		return "Full-map admin vision enabled.";
+		const message = result.enabled ? "Full-map admin vision enabled." : "Full-map admin vision disabled.";
+		ui.showToast(message);
+		return message;
 	},
 	async enableSoundDebug() {
 		if (!state.playerId) return "No active player.";
 		const result = await requestSoundDebug(state.playerId);
 		if (!result.ok) return result.error || "Could not enable sound field overlay.";
 		connectEvents();
-		ui.showToast("Sound field overlay enabled.");
-		return "Sound field overlay enabled.";
+		const message = result.enabled ? "Sound field overlay enabled." : "Sound field overlay disabled.";
+		ui.showToast(message);
+		return message;
 	},
 	async setTimeOfDay(progress, label) {
 		if (!state.playerId) return "No active player.";
@@ -292,8 +295,27 @@ const ui = new UI(state, {
 		const result = await requestZombieDebug(state.playerId);
 		if (!result.ok) return result.error || "Could not enable zombie state overlay.";
 		connectEvents();
-		ui.showToast("Zombie state overlay enabled.");
-		return "Zombie state overlay enabled.";
+		const message = result.enabled ? "Zombie state overlay enabled." : "Zombie state overlay disabled.";
+		ui.showToast(message);
+		return message;
+	},
+	async kickPlayer(targetPlayerId) {
+		if (!state.playerId) return "No active player.";
+		const result = await requestKickPlayer(state.playerId, targetPlayerId);
+		if (!result.ok) return result.error || "Could not kick player.";
+		return "Player kicked.";
+	},
+	async banPlayer(targetPlayerId) {
+		if (!state.playerId) return "No active player.";
+		const result = await requestBanPlayer(state.playerId, targetPlayerId);
+		if (!result.ok) return result.error || "Could not ban player.";
+		return `Banned ${result.ipAddress ?? "player IP"}.`;
+	},
+	async unbanIp(ipAddress) {
+		if (!state.playerId) return "No active player.";
+		const result = await requestUnbanIp(state.playerId, ipAddress);
+		if (!result.ok) return result.error || "Could not unban IP.";
+		return "IP unbanned.";
 	},
 	async spawnHostileHorde() {
 		if (!state.playerId) return "No active player.";
@@ -371,6 +393,12 @@ document.getElementById("leaveButton")?.addEventListener("click", async () => {
 	void updateHomeStatus({ force: true });
 });
 document.getElementById("muteButton")?.addEventListener("click", toggleMusicMute);
+window.addEventListener("admin-subscription", (event) => {
+	const viewName = event instanceof CustomEvent && typeof event.detail?.view === "string" ? event.detail.view : "popup";
+	if (!isAdminView(viewName) || adminView === viewName) return;
+	adminView = viewName;
+	if (state.playerId && adminAccessEnabled) connectEvents();
+});
 
 window.addEventListener("resize", () => renderer.resize());
 window.addEventListener("beforeunload", () => {
@@ -1054,14 +1082,15 @@ function onDevShortcutKeyDown(event: KeyboardEvent) {
 }
 
 async function maybeEnableAdminAccess() {
-	if (adminAccessEnabled || godModeCheckPending || !state.playerId || devCommandInput.length < 3) return;
+	if (godModeCheckPending || !state.playerId || devCommandInput.length < 3) return;
 	const checkedInput = devCommandInput;
 	godModeCheckPending = true;
 	try {
 		const result = await enableAdminAccess(state.playerId, checkedInput);
 		if (result.ok) {
-			adminAccessEnabled = true;
-			ui.showToast("Admin dashboard unlocked.");
+			adminAccessEnabled = result.enabled !== false;
+			adminView = adminAccessEnabled ? "popup" : "closed";
+			ui.showToast(adminAccessEnabled ? "Admin dashboard unlocked." : "Admin mode disabled.");
 			connectEvents();
 		}
 	} catch {
@@ -1107,7 +1136,7 @@ async function maybeSpawnZombieHorde() {
 function connectEvents() {
 	if (eventStream) eventStream.close();
 	if (!state.playerId) return;
-	eventStream = new EventSource(`/events?playerId=${encodeURIComponent(state.playerId)}`);
+	eventStream = new EventSource(`/events?playerId=${encodeURIComponent(state.playerId)}&adminView=${encodeURIComponent(adminView)}`);
 	eventStream.onmessage = (event) => {
 		const snap = hydrateSnapshot(JSON.parse(event.data) as Snapshot);
 		if (!state.playerId || !snap.players?.[state.playerId] || snap.players[state.playerId]!.defeated) {
@@ -1117,6 +1146,7 @@ function connectEvents() {
 		applyVisibility(snap);
 		state.snapshot = snap;
 		adminDiagnosticsVisible = snap.admin !== null;
+		if (snap.admin !== null) adminAccessEnabled = true;
 		if (adminDiagnosticsVisible) maybeReportPing(Math.max(0, Date.now() - snap.now));
 		rememberStaticObjects();
 		cullSelection();
@@ -1149,6 +1179,8 @@ function resetToJoin(message: string) {
 	state.playerId = null;
 	state.snapshot = null;
 	adminDiagnosticsVisible = false;
+	adminAccessEnabled = false;
+	adminView = "closed";
 	state.selectedIds.clear();
 	state.effects = [];
 	sfx.reset();
@@ -1158,6 +1190,10 @@ function resetToJoin(message: string) {
 	const notice = document.getElementById("joinNotice");
 	if (notice) notice.textContent = message || "";
 	if (message) ui.showToast(message);
+}
+
+function isAdminView(value: string): value is typeof adminView {
+	return value === "closed" || value === "popup" || value === "overview" || value === "performance" || value === "players" || value === "logs" || value === "devCommands" || value === "bans";
 }
 
 function applyVisibility(snap: ClientSnapshot) {

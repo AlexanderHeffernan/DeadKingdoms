@@ -213,6 +213,7 @@
 					<button id="adminOverviewTab" class="active" type="button" role="tab" aria-selected="true">Overview</button>
 					<button id="adminPerformanceTab" type="button" role="tab" aria-selected="false">Performance</button>
 					<button id="adminPlayersTab" type="button" role="tab" aria-selected="false">Players</button>
+					<button id="adminBansTab" type="button" role="tab" aria-selected="false">Bans</button>
 					<button id="adminLogsTab" type="button" role="tab" aria-selected="false">Logs</button>
 					<button id="adminDevCommandsTab" type="button" role="tab" aria-selected="false">Dev Commands</button>
 				</div>
@@ -269,9 +270,21 @@
 								<th>Connection status</th>
 								<th>Since</th>
 								<th>IP</th>
+								<th>Actions</th>
 							</tr>
 						</thead>
 						<tbody id="adminPlayerTableBody"></tbody>
+					</table>
+				</div>
+				<div id="adminBansView" class="admin-tab-view hidden">
+					<table class="admin-log-table">
+						<thead>
+							<tr>
+								<th>IP</th>
+								<th>Actions</th>
+							</tr>
+						</thead>
+						<tbody id="adminBanTableBody"></tbody>
 					</table>
 				</div>
 				<div id="adminLogsView" class="admin-tab-view hidden">
@@ -289,16 +302,16 @@
 				<div id="adminDevCommandsView" class="admin-tab-view hidden">
 					<div class="admin-command-grid">
 						<button id="adminEnableVisionButton" type="button">
-							<strong>Enable Full-Map Admin Vision</strong>
-							<span>Reveal the complete map for this admin session.</span>
+							<strong>Toggle Full-Map Admin Vision</strong>
+							<span>Reveal or restore normal fog-of-war for this admin session.</span>
 						</button>
 						<button id="adminEnableSoundDebugButton" type="button">
-							<strong>Show Sound Field</strong>
-							<span>Display aggregated sound pressure and hearing ranges.</span>
+							<strong>Toggle Sound Field</strong>
+							<span>Show or hide aggregated sound pressure and hearing ranges.</span>
 						</button>
 						<button id="adminEnableZombieDebugButton" type="button">
-							<strong>Show Zombie State</strong>
-							<span>Color-code zombies by their current server movement state.</span>
+							<strong>Toggle Zombie State</strong>
+							<span>Show or hide zombie server movement state colors.</span>
 						</button>
 						<button id="adminSpawnHordeButton" type="button">
 							<strong>Deploy Hostile Stress Horde</strong>
@@ -317,7 +330,7 @@
 							<span>Closes this panel, then left-click the map to emit a loud bang. Esc or right-click to stop.</span>
 						</button>
 						<button id="adminInstantBuildButton" type="button">
-							<strong>Instant Build Mode</strong>
+							<strong>Toggle Instant Build Mode</strong>
 							<span>Closes this panel. Use building hotkeys, then click the map to place completed buildings without villagers.</span>
 						</button>
 						<button id="adminMidnightButton" type="button">

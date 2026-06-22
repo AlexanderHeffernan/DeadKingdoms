@@ -70,6 +70,18 @@ export async function enableFullMapVision(playerId: PlayerId) {
 	return post("/api/dev/full-map-vision", { playerId });
 }
 
+export async function kickPlayer(playerId: PlayerId, targetPlayerId: PlayerId) {
+	return post("/api/dev/kick-player", { playerId, targetPlayerId });
+}
+
+export async function banPlayer(playerId: PlayerId, targetPlayerId: PlayerId) {
+	return post("/api/dev/ban-player", { playerId, targetPlayerId });
+}
+
+export async function unbanIp(playerId: PlayerId, ipAddress: string) {
+	return post("/api/dev/unban-ip", { playerId, ipAddress });
+}
+
 export async function enableSoundDebug(playerId: PlayerId) {
 	return post("/api/dev/sound-debug", { playerId });
 }

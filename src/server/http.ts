@@ -6,7 +6,7 @@ import { addAdminLog, addPlayer, command, emitDevBang, grantPlayerSoldiers, remo
 import { Logs } from "../shared/logs.js";
 import type { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { ServerState } from "./serverState.js";
-import type { AdminLevel, CommandPayload, Player, PlayerId, World } from "../shared/types.js";
+import type { AdminLevel, AdminView, CommandPayload, Player, PlayerId, World } from "../shared/types.js";
 
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
 const CLIENT_BUILD_DIR = new URL("../../dist/client/public/", import.meta.url);
@@ -26,7 +26,7 @@ const MIME = {
 // the next snapshot to avoid runaway memory and "seconds-behind" lag.
 const BACKPRESSURE_BYTES = 256 * 1024;
 
-export type Client = { playerId: PlayerId | null; res: import("node:http").ServerResponse; sentExplored: Set<number> | null };
+export type Client = { playerId: PlayerId | null; res: import("node:http").ServerResponse; sentExplored: Set<number> | null; adminView: AdminView };
 
 export function createHandler(state: ServerState, clients: Set<Client>, globalLeaderboard: GlobalLeaderboardStore) {
 	return async function handler(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) {
@@ -45,6 +45,9 @@ export function createHandler(state: ServerState, clients: Set<Client>, globalLe
 			if (!world) return worldUnavailable(res);
 			if (url.pathname === "/api/dev/admin-access") return enableAdminAccess(req, res, world);
 			if (url.pathname === "/api/dev/disable-admin") return disableAdminAccess(req, res, world);
+			if (url.pathname === "/api/dev/kick-player") return kickPlayer(req, res, world, globalLeaderboard);
+			if (url.pathname === "/api/dev/ban-player") return banPlayer(req, res, world, globalLeaderboard);
+			if (url.pathname === "/api/dev/unban-ip") return unbanIp(req, res, world);
 			if (url.pathname === "/api/dev/full-map-vision") return enableFullMapVision(req, res, world);
 			if (url.pathname === "/api/dev/sound-debug") return enableSoundDebug(req, res, world);
 			if (url.pathname === "/api/dev/zombie-debug") return enableZombieDebug(req, res, world);
@@ -225,12 +228,14 @@ export function broadcast(world: World, clients: Set<Client>) {
 			// once their kernel buffer drains.
 			continue;
 		}
-		const payload = JSON.stringify(makeSnapshot(world, client.playerId, client.sentExplored));
+		const payload = JSON.stringify(makeSnapshot(world, client.playerId, client.sentExplored, client.adminView));
 		client.res.write(`data: ${payload}\n\n`);
 	}
 }
 
 async function joinGame(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const ipAddress = clientIp(req);
+	if (ipAddress && (world.bannedIpAddresses ?? []).includes(ipAddress)) return json(res, { ok: false, error: "This IP address is banned from this game." }, 403);
 	const active = Object.values(world.players).filter((player) => !player.defeated).length;
 	if (active >= MAX_PLAYERS) return json(res, { ok: false, error: "Server is full." }, 403);
 	const body = (await readJson(req)) as { name?: unknown; color?: unknown };
@@ -240,7 +245,8 @@ async function joinGame(req: import("node:http").IncomingMessage, res: import("n
 	}
 	const color = typeof body.color === "string" ? body.color : null;
 	const playerId = addPlayer(world, name, color);
-	recordPlayerConnection(world.players[playerId], clientIp(req), false);
+	recordPlayerConnection(world.players[playerId], ipAddress, false);
+	restoreAdminForReconnect(world, world.players[playerId]!);
 	json(res, { ok: true, playerId });
 }
 
@@ -261,8 +267,19 @@ async function enableAdminAccess(req: import("node:http").IncomingMessage, res: 
 	}
 	const player = world.players[body.playerId];
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (player.adminLevel) {
+		rememberAdminSession(world, player);
+		delete player.adminLevel;
+		player.godMode = false;
+		player.soundDebug = false;
+		player.zombieDebug = false;
+		player.pathDebug = false;
+		delete player._visCache;
+		return json(res, { ok: true, adminLevel: null, enabled: false });
+	}
 	player.adminLevel = adminLevel;
-	json(res, { ok: true, adminLevel });
+	rememberAdminSession(world, player);
+	json(res, { ok: true, adminLevel, enabled: true });
 }
 
 async function disableAdminAccess(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
@@ -286,10 +303,10 @@ async function enableFullMapVision(req: import("node:http").IncomingMessage, res
 	const player = typeof body.playerId === "string" ? world.players[body.playerId] : null;
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
 	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
-	player.godMode = true;
+	player.godMode = !player.godMode;
 	delete player._visCache;
-	Logs.log(`${player.name} enabled full-map admin vision.`);
-	json(res, { ok: true });
+	Logs.log(`${player.name} ${player.godMode ? "enabled" : "disabled"} full-map admin vision.`);
+	json(res, { ok: true, enabled: player.godMode });
 }
 
 async function enableSoundDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
@@ -298,8 +315,8 @@ async function enableSoundDebug(req: import("node:http").IncomingMessage, res: i
 	const player = world.players[body.playerId];
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
 	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
-	player.soundDebug = true;
-	json(res, { ok: true });
+	player.soundDebug = !player.soundDebug;
+	json(res, { ok: true, enabled: player.soundDebug });
 }
 
 async function enableZombieDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
@@ -308,7 +325,46 @@ async function enableZombieDebug(req: import("node:http").IncomingMessage, res: 
 	const player = world.players[body.playerId];
 	if (!player) return json(res, { ok: false, error: "Player not found." }, 404);
 	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
-	player.zombieDebug = true;
+	player.zombieDebug = !player.zombieDebug;
+	json(res, { ok: true, enabled: player.zombieDebug });
+}
+
+async function kickPlayer(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
+	const body = (await readJson(req)) as { playerId?: unknown; targetPlayerId?: unknown };
+	const admin = adminPlayer(world, body.playerId);
+	if (!admin) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (typeof body.targetPlayerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!world.players[body.targetPlayerId]) return json(res, { ok: false, error: "Player not found." }, 404);
+	await globalLeaderboard.trackWorldPeaks(world, { playerId: body.targetPlayerId, force: true });
+	removePlayer(world, body.targetPlayerId);
+	Logs.log(`${admin.name} kicked a player.`);
+	json(res, { ok: true });
+}
+
+async function banPlayer(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
+	const body = (await readJson(req)) as { playerId?: unknown; targetPlayerId?: unknown };
+	const admin = adminPlayer(world, body.playerId);
+	if (!admin || admin.adminLevel === "observer") return json(res, { ok: false, error: "Moderator access is required." }, 403);
+	if (typeof body.targetPlayerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
+	const target = world.players[body.targetPlayerId];
+	if (!target) return json(res, { ok: false, error: "Player not found." }, 404);
+	const ipAddress = target.connection?.ipAddress;
+	if (!ipAddress) return json(res, { ok: false, error: "No IP address recorded for that player." }, 400);
+	world.bannedIpAddresses ??= [];
+	if (!world.bannedIpAddresses.includes(ipAddress)) world.bannedIpAddresses.push(ipAddress);
+	await globalLeaderboard.trackWorldPeaks(world, { playerId: body.targetPlayerId, force: true });
+	removePlayer(world, body.targetPlayerId);
+	Logs.log(`${admin.name} banned ${ipAddress}.`);
+	json(res, { ok: true, ipAddress });
+}
+
+async function unbanIp(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+	const body = (await readJson(req)) as { playerId?: unknown; ipAddress?: unknown };
+	const admin = adminPlayer(world, body.playerId);
+	if (!admin || admin.adminLevel === "observer") return json(res, { ok: false, error: "Moderator access is required." }, 403);
+	if (typeof body.ipAddress !== "string") return json(res, { ok: false, error: "IP address is required." }, 400);
+	world.bannedIpAddresses = (world.bannedIpAddresses ?? []).filter((ipAddress) => ipAddress !== body.ipAddress);
+	Logs.log(`${admin.name} unbanned ${body.ipAddress}.`);
 	json(res, { ok: true });
 }
 
@@ -423,6 +479,7 @@ async function leaveGame(req: import("node:http").IncomingMessage, res: import("
 function streamEvents(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, clients: Set<Client>, url: URL) {
 	const playerIdParam = url.searchParams.get("playerId");
 	const playerId = playerIdParam ?? null;
+	const adminView = adminViewFromParam(url.searchParams.get("adminView"));
 	const player = playerId ? world.players[playerId] : null;
 	recordPlayerConnection(player, clientIp(req), true);
 	res.writeHead(200, {
@@ -433,9 +490,9 @@ function streamEvents(req: import("node:http").IncomingMessage, res: import("nod
 	// sentExplored is null for the first snapshot (server then sends the full
 	// explored set). After that we populate the Set so subsequent snapshots
 	// only carry the new tiles in `exploredDelta`.
-	const client: Client = { playerId, res, sentExplored: null };
+	const client: Client = { playerId, res, sentExplored: null, adminView };
 	clients.add(client);
-	res.write(`data: ${JSON.stringify(makeSnapshot(world, playerId, null))}\n\n`);
+	res.write(`data: ${JSON.stringify(makeSnapshot(world, playerId, null, adminView))}\n\n`);
 	client.sentExplored = new Set(playerId ? world.players[playerId]?.explored || [] : []);
 	req.on("close", () => {
 		clients.delete(client);
@@ -458,6 +515,52 @@ function adminLevelForSecret(secret: string): AdminLevel | null {
 		if (configuredSecret && secret.endsWith(configuredSecret)) return level;
 	}
 	return null;
+}
+
+function adminViewFromParam(value: string | null): AdminView {
+	if (
+		value === "closed" ||
+		value === "popup" ||
+		value === "overview" ||
+		value === "performance" ||
+		value === "players" ||
+		value === "logs" ||
+		value === "devCommands" ||
+		value === "bans"
+	) return value;
+	return "popup";
+}
+
+function adminPlayer(world: World, playerId: unknown): Player | null {
+	if (typeof playerId !== "string") return null;
+	const player = world.players[playerId];
+	return player?.adminLevel ? player : null;
+}
+
+function rememberAdminSession(world: World, player: Player) {
+	if (!player.adminLevel) return;
+	const ipAddress = player.connection?.ipAddress ?? null;
+	world.adminSessionGrants ??= [];
+	world.adminSessionGrants = world.adminSessionGrants.filter((grant) => {
+		if (grant.name === player.name) return false;
+		return ipAddress ? grant.ipAddress !== ipAddress : true;
+	});
+	world.adminSessionGrants.push({
+		level: player.adminLevel,
+		name: player.name,
+		ipAddress,
+		updatedAt: Date.now(),
+	});
+}
+
+function restoreAdminForReconnect(world: World, player: Player) {
+	const ipAddress = player.connection?.ipAddress ?? null;
+	const grant = [...(world.adminSessionGrants ?? [])]
+		.reverse()
+		.find((entry) => entry.name === player.name || (ipAddress && entry.ipAddress === ipAddress));
+	if (!grant) return;
+	player.adminLevel = grant.level;
+	rememberAdminSession(world, player);
 }
 
 function recordPlayerConnection(player: Player | null | undefined, ipAddress: string | null, openedStream: boolean) {

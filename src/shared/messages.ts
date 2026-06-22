@@ -1,7 +1,7 @@
 import { buildSoundField, collectWorldSoundSources, SOUND_FIELD_CELL_SIZE } from "./soundField.js";
 import { dayNightStateAt } from "./dayNight.js";
 import { ACTION_SOUND_DEFS } from "./config.js";
-import type { AdminLevel, AdminSnapshot, PlayerId, Snapshot, SoundDebugSource, Unit, VisibilityCache, World } from "./types.js";
+import type { AdminLevel, AdminSnapshot, AdminView, PlayerId, Snapshot, SoundDebugSource, Unit, VisibilityCache, World } from "./types.js";
 import { isVisible } from "./visibility.js";
 
 const ZOMBIE_OWNER_ID = "zombies" as PlayerId;
@@ -10,9 +10,10 @@ export function makeSnapshot(
 	world: World,
 	playerId: PlayerId | null = null,
 	sentExplored: Set<number> | null = null,
+	adminView: AdminView = "popup",
 ): Snapshot {
 	const player = playerId ? world.players[playerId] : null;
-	const admin = buildAdminSnapshot(world, player?.adminLevel);
+	const admin = buildAdminSnapshot(world, player?.adminLevel, adminView);
 	const dayNight = dayNightStateFor(world);
 	const visible = playerId && !player?.godMode ? cachedVisibility(world, playerId) : null;
 	const visibleSet = visible ? visible.visible : null;
@@ -86,7 +87,7 @@ export function makeSnapshot(
 		hornSounds: hornSoundSources(world),
 		soundDebug: player?.soundDebug ? buildSoundDebugSources(world) : null,
 		pathDebug: player?.pathDebug === true,
-		serverPerf: admin
+		serverPerf: admin?.serverPerf
 			? {
 				tps: world.serverPerf.tps,
 				tickMs: world.serverPerf.tickMs,
@@ -105,12 +106,18 @@ function dayNightStateFor(world: World) {
 	return dayNightStateAt((Date.now() - (world.startedAt ?? 0)) / 1000 + (world.timeOffsetSeconds || 0));
 }
 
-function buildAdminSnapshot(world: World, level: AdminLevel | undefined): AdminSnapshot | null {
+function buildAdminSnapshot(world: World, level: AdminLevel | undefined, view: AdminView): AdminSnapshot | null {
 	if (!level) return null;
+	if (view === "closed") return { level, view };
 	const canViewIpAddresses = level === "moderator" || level === "operator";
+	const includePerf = view === "popup" || view === "overview" || view === "performance";
+	const includePlayers = view === "popup" || view === "overview" || view === "players";
+	const includeLogs = view === "overview" || view === "logs";
+	const includeEvents = view === "popup" || view === "overview";
 	return {
 		level,
-		serverPerf: {
+		view,
+		...(includePerf ? { serverPerf: {
 			tps: world.serverPerf.tps,
 			tickMs: world.serverPerf.tickMs,
 			...(world.serverPerf.phases ? { phases: world.serverPerf.phases } : {}),
@@ -119,8 +126,8 @@ function buildAdminSnapshot(world: World, level: AdminLevel | undefined): AdminS
 			...(world.serverPerf.zombieWorker ? { zombieWorker: world.serverPerf.zombieWorker } : {}),
 			...(world.serverPerf.zombieAiWorker ? { zombieAiWorker: world.serverPerf.zombieAiWorker } : {}),
 			samples: world.serverPerf.samples.slice(),
-		},
-		players: Object.values(world.players).map((player) => ({
+		} } : {}),
+		...(includePlayers ? { players: Object.values(world.players).map((player) => ({
 			id: player.id,
 			name: player.name,
 			color: player.color,
@@ -133,9 +140,10 @@ function buildAdminSnapshot(world: World, level: AdminLevel | undefined): AdminS
 			lastSeenAt: player.connection?.lastSeenAt ?? null,
 			pingMs: player.connection?.pingMs ?? null,
 			...(canViewIpAddresses ? { ipAddress: player.connection?.ipAddress ?? "unknown" } : {}),
-		})),
-		events: world.notices.slice(-8),
-		logs: world.adminLogs.slice(-200),
+		})) } : {}),
+		...(includeEvents ? { events: world.notices.slice(-8) } : {}),
+		...(includeLogs ? { logs: world.adminLogs.slice(-200) } : {}),
+		...(view === "bans" && canViewIpAddresses ? { bannedIpAddresses: (world.bannedIpAddresses ?? []).slice() } : {}),
 	};
 }
 
