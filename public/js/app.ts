@@ -21,7 +21,7 @@ import pillarBaseUrl from "./sprites/pillar_base.png";
 import pillarFlagUrl from "./sprites/pillar_flag.png";
 import soldierBaseUrl from "./sprites/soldier_base.png";
 import soldierFlagUrl from "./sprites/soldier_flag.png";
-import type { Building, BuildingType, CommandPayload, Corpse, EntityId, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
+import type { Building, BuildingType, CommandPayload, Corpse, EntityId, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, SnapshotDelta, SnapshotMessage, Unit, UnitType } from "../../src/shared/types.js";
 import type { ChangelogEntry } from "./api.js";
 import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
@@ -180,6 +180,7 @@ let lastPingReportAt = 0;
 let adminDiagnosticsVisible = false;
 let adminView: "closed" | "popup" | "overview" | "performance" | "players" | "logs" | "devCommands" | "bans" = "closed";
 let latestHomeStatus: ServerStatus | null = null;
+let lastSnapshotSeq = 0;
 
 const joinForm = document.getElementById("joinForm") as HTMLFormElement | null;
 const nameInput = document.getElementById("nameInput") as HTMLInputElement | null;
@@ -1138,7 +1139,11 @@ function connectEvents() {
 	if (!state.playerId) return;
 	eventStream = new EventSource(`/events?playerId=${encodeURIComponent(state.playerId)}&adminView=${encodeURIComponent(adminView)}`);
 	eventStream.onmessage = (event) => {
-		const snap = hydrateSnapshot(JSON.parse(event.data) as Snapshot);
+		const snap = snapshotFromMessage(JSON.parse(event.data) as SnapshotMessage);
+		if (!snap) {
+			connectEvents();
+			return;
+		}
 		if (!state.playerId || !snap.players?.[state.playerId] || snap.players[state.playerId]!.defeated) {
 			handleEliminated();
 			return;
@@ -1155,6 +1160,17 @@ function connectEvents() {
 		centerOnTownOnce();
 	};
 	eventStream.onerror = () => ui.showToast("Connection interrupted.");
+}
+
+function snapshotFromMessage(message: SnapshotMessage): ClientSnapshot | null {
+	if (message.type === "snapshot") {
+		lastSnapshotSeq = message.seq ?? 0;
+		return hydrateSnapshot(message);
+	}
+	if (!state.snapshot || message.baseSeq !== lastSnapshotSeq) return null;
+	const merged = mergeSnapshotDelta(state.snapshot, message);
+	lastSnapshotSeq = message.seq;
+	return hydrateSnapshot(merged);
 }
 
 function maybeReportPing(pingMs: number) {
@@ -1175,6 +1191,7 @@ function handleEliminated() {
 function resetToJoin(message: string) {
 	if (eventStream) eventStream.close();
 	eventStream = null;
+	lastSnapshotSeq = 0;
 	localStorage.removeItem("rtsPlayerId");
 	state.playerId = null;
 	state.snapshot = null;
@@ -1218,6 +1235,38 @@ function hydrateSnapshot(snap: Snapshot): ClientSnapshot {
 		corpses: snap.corpses || {},
 		dayNight: offsetDayNight(snap.dayNight, state.timeOffsetSeconds),
 	};
+}
+
+function mergeSnapshotDelta(previous: ClientSnapshot, delta: SnapshotDelta): Snapshot {
+	return {
+		type: "snapshot",
+		seq: delta.seq,
+		now: delta.now,
+		playerId: delta.playerId,
+		map: previous.map,
+		players: patchRecord(previous.players, delta.players),
+		units: patchRecord(previous.units, delta.units),
+		buildings: patchRecord(Object.fromEntries(Object.entries(previous.buildings).map(([id, building]) => [id, building.serialize()])), delta.buildings),
+		resources: patchRecord(previous.resources, delta.resources),
+		ruins: patchRecord(previous.ruins, delta.ruins),
+		corpses: patchRecord(previous.corpses, delta.corpses),
+		visibility: delta.visibility,
+		dayNight: delta.dayNight,
+		leaderboard: delta.leaderboard,
+		notices: delta.notices,
+		hornSounds: delta.hornSounds,
+		soundDebug: delta.soundDebug,
+		pathDebug: delta.pathDebug,
+		serverPerf: delta.serverPerf,
+		admin: delta.admin,
+	};
+}
+
+function patchRecord<T>(previous: Record<string, T>, delta: { updated: Record<string, T>; removed: string[] }): Record<string, T> {
+	const next = { ...previous };
+	for (const id of delta.removed) delete next[id];
+	for (const [id, value] of Object.entries(delta.updated)) next[id] = value as T;
+	return next;
 }
 
 function hydratePreviewSnapshot(snap: LeaderboardPreviewSnapshot): ClientSnapshot {

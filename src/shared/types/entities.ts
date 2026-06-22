@@ -34,6 +34,8 @@ export interface PlayerConnection {
 	lastSeenAt: number;
 	streamCount: number;
 	pingMs?: number;
+	lastSnapshotBytes?: number;
+	lastSnapshotKind?: "full" | "delta";
 }
 
 /** Player-owned economy, score, fog-of-war, and population state. */

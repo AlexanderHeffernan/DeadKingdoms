@@ -6,7 +6,7 @@ import { addAdminLog, addPlayer, command, emitDevBang, grantPlayerSoldiers, remo
 import { Logs } from "../shared/logs.js";
 import type { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { ServerState } from "./serverState.js";
-import type { AdminLevel, AdminView, CommandPayload, Player, PlayerId, World } from "../shared/types.js";
+import type { AdminLevel, AdminView, CommandPayload, Player, PlayerId, Snapshot, SnapshotDelta, World } from "../shared/types.js";
 
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
 const CLIENT_BUILD_DIR = new URL("../../dist/client/public/", import.meta.url);
@@ -26,7 +26,15 @@ const MIME = {
 // the next snapshot to avoid runaway memory and "seconds-behind" lag.
 const BACKPRESSURE_BYTES = 256 * 1024;
 
-export type Client = { playerId: PlayerId | null; res: import("node:http").ServerResponse; sentExplored: Set<number> | null; adminView: AdminView };
+export type Client = {
+	playerId: PlayerId | null;
+	res: import("node:http").ServerResponse;
+	sentExplored: Set<number> | null;
+	adminView: AdminView;
+	lastSnapshot: Snapshot | null;
+	lastSeq: number;
+};
+let nextSnapshotSeq = 1;
 
 export function createHandler(state: ServerState, clients: Set<Client>, globalLeaderboard: GlobalLeaderboardStore) {
 	return async function handler(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) {
@@ -228,9 +236,91 @@ export function broadcast(world: World, clients: Set<Client>) {
 			// once their kernel buffer drains.
 			continue;
 		}
-		const payload = JSON.stringify(makeSnapshot(world, client.playerId, client.sentExplored, client.adminView));
+		const snapshot = makeSnapshot(world, client.playerId, client.sentExplored, client.adminView);
+		const message = snapshotMessageForClient(client, snapshot);
+		const payload = serializeSnapshotMessage(world, client.playerId, message);
 		client.res.write(`data: ${payload}\n\n`);
 	}
+}
+
+function serializeSnapshotMessage(world: World, playerId: PlayerId | null, message: Snapshot | SnapshotDelta) {
+	const kind = message.type === "snapshot" ? "full" : "delta";
+	const firstPayload = JSON.stringify(message);
+	recordSnapshotBytes(world, playerId, firstPayload.length, kind);
+	annotateAdminPlayerSnapshot(message, playerId, firstPayload.length, kind);
+	const payload = JSON.stringify(message);
+	recordSnapshotBytes(world, playerId, payload.length, kind);
+	return payload;
+}
+
+function annotateAdminPlayerSnapshot(message: Snapshot | SnapshotDelta, playerId: PlayerId | null, bytes: number, kind: "full" | "delta") {
+	if (!playerId || !message.admin?.players) return;
+	const player = message.admin.players.find((entry) => entry.id === playerId);
+	if (!player) return;
+	player.lastSnapshotBytes = bytes;
+	player.lastSnapshotKind = kind;
+}
+
+function snapshotMessageForClient(client: Client, snapshot: Snapshot): Snapshot | SnapshotDelta {
+	const seq = nextSnapshotSeq++;
+	if (!client.lastSnapshot) {
+		snapshot.seq = seq;
+		client.lastSnapshot = snapshot;
+		client.lastSeq = seq;
+		return snapshot;
+	}
+	const delta = makeSnapshotDelta(client.lastSnapshot, snapshot, client.lastSeq, seq);
+	client.lastSnapshot = snapshot;
+	client.lastSeq = seq;
+	return delta;
+}
+
+export function makeSnapshotDelta(previous: Snapshot, current: Snapshot, baseSeq: number, seq: number): SnapshotDelta {
+	return {
+		type: "snapshot-delta",
+		baseSeq,
+		seq,
+		now: current.now,
+		playerId: current.playerId,
+		players: diffRecord(previous.players, current.players),
+		units: diffRecord(previous.units, current.units),
+		buildings: diffRecord(previous.buildings, current.buildings),
+		resources: diffRecord(previous.resources, current.resources),
+		ruins: diffRecord(previous.ruins, current.ruins),
+		corpses: diffRecord(previous.corpses, current.corpses),
+		visibility: current.visibility,
+		dayNight: current.dayNight,
+		leaderboard: current.leaderboard,
+		notices: current.notices,
+		hornSounds: current.hornSounds,
+		soundDebug: current.soundDebug,
+		pathDebug: current.pathDebug,
+		serverPerf: current.serverPerf,
+		admin: current.admin,
+	};
+}
+
+function diffRecord<T>(previous: Record<string, T>, current: Record<string, T>) {
+	const updated: Record<string, T> = {};
+	const removed: string[] = [];
+	for (const [id, value] of Object.entries(current)) {
+		if (!hasOwn(previous, id) || JSON.stringify(previous[id]) !== JSON.stringify(value)) updated[id] = value;
+	}
+	for (const id of Object.keys(previous)) {
+		if (!hasOwn(current, id)) removed.push(id);
+	}
+	return { updated, removed };
+}
+
+function hasOwn<T>(record: Record<string, T>, key: string) {
+	return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function recordSnapshotBytes(world: World, playerId: PlayerId | null, bytes: number, kind: "full" | "delta") {
+	const player = playerId ? world.players[playerId] : null;
+	if (!player?.connection) return;
+	player.connection.lastSnapshotBytes = bytes;
+	player.connection.lastSnapshotKind = kind;
 }
 
 async function joinGame(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
@@ -490,9 +580,12 @@ function streamEvents(req: import("node:http").IncomingMessage, res: import("nod
 	// sentExplored is null for the first snapshot (server then sends the full
 	// explored set). After that we populate the Set so subsequent snapshots
 	// only carry the new tiles in `exploredDelta`.
-	const client: Client = { playerId, res, sentExplored: null, adminView };
+	const client: Client = { playerId, res, sentExplored: null, adminView, lastSnapshot: null, lastSeq: 0 };
 	clients.add(client);
-	res.write(`data: ${JSON.stringify(makeSnapshot(world, playerId, null, adminView))}\n\n`);
+	const initialSnapshot = makeSnapshot(world, playerId, null, adminView);
+	const initialMessage = snapshotMessageForClient(client, initialSnapshot);
+	const initialPayload = serializeSnapshotMessage(world, playerId, initialMessage);
+	res.write(`data: ${initialPayload}\n\n`);
 	client.sentExplored = new Set(playerId ? world.players[playerId]?.explored || [] : []);
 	req.on("close", () => {
 		clients.delete(client);

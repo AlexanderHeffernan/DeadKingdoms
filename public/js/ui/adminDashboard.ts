@@ -109,12 +109,18 @@ export class AdminDashboard {
 	show(admin: AdminSnapshot, now: number) {
 		this.open = true;
 		this.windowEndAt = null;
+		this.requestAdminView(this.activeTab);
 		this.render(admin, now);
 	}
 
 	hide() {
 		this.open = false;
 		this.panel.classList.add("hidden");
+		this.requestAdminView("popup");
+	}
+
+	isOpen() {
+		return this.open;
 	}
 
 	render(admin: AdminSnapshot | null, now: number) {
@@ -126,7 +132,6 @@ export class AdminDashboard {
 		}
 		this.panel.classList.remove("hidden");
 		this.level.textContent = admin.level;
-		this.requestAdminView(this.activeTab);
 		this.renderOverview(admin, now);
 		this.renderPerfBreakdown(admin);
 		const players = admin.players ?? [];
@@ -138,6 +143,7 @@ export class AdminDashboard {
 	<td>${player.population}/${player.popCap}</td>
 	<td>${player.score}</td>
 	<td>${formatPing(player.pingMs)}</td>
+	<td>${formatSnapshotBytes(player.lastSnapshotBytes, player.lastSnapshotKind)}</td>
 	<td>${aliveTime(player.joinedAt, now)}</td>
 	<td>${player.connected ? "Online" : "Idle"}${player.defeated ? " · Defeated" : ""}</td>
 	<td>${player.lastSeenAt ? timeAgo(now, player.lastSeenAt) : "not seen"}</td>
@@ -495,8 +501,8 @@ ${zombieAiWorkerDetail.map((bucket) => `
 		await this.runCommand(button, () => this.actions.unbanIp(ipAddress));
 	}
 
-	private requestAdminView(tab: AdminDashboardTab) {
-		window.dispatchEvent(new CustomEvent("admin-subscription", { detail: { view: tab } }));
+	private requestAdminView(view: AdminDashboardTab | "popup") {
+		window.dispatchEvent(new CustomEvent("admin-subscription", { detail: { view } }));
 	}
 }
 
@@ -548,6 +554,12 @@ function drawChartGrid(ctx: CanvasRenderingContext2D, width: number, height: num
 
 function formatPing(pingMs: number | null) {
 	return pingMs === null ? "--" : `${pingMs}ms`;
+}
+
+function formatSnapshotBytes(bytes: number | undefined, kind: string | undefined) {
+	if (bytes === undefined) return "--";
+	const label = bytes >= 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${bytes}B`;
+	return kind ? `${label} ${kind}` : label;
 }
 
 function sampleY(

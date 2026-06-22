@@ -205,6 +205,8 @@ export interface AdminPlayerSnapshot {
 	connected: boolean;
 	lastSeenAt: number | null;
 	pingMs: number | null;
+	lastSnapshotBytes?: number;
+	lastSnapshotKind?: "full" | "delta";
 	ipAddress?: string;
 }
 
@@ -233,6 +235,7 @@ Player,
 /** Server-to-client world view after visibility filtering. */
 export interface Snapshot {
 	type: "snapshot";
+	seq?: number;
 	now: number;
 	playerId: PlayerId | null;
 	map: MapDef;
@@ -252,3 +255,33 @@ export interface Snapshot {
 	serverPerf: ServerPerfStats | null;
 	admin: AdminSnapshot | null;
 }
+
+export interface SnapshotEntityDelta<T> {
+	updated: Record<string, T>;
+	removed: string[];
+}
+
+export interface SnapshotDelta {
+	type: "snapshot-delta";
+	baseSeq: number;
+	seq: number;
+	now: number;
+	playerId: PlayerId | null;
+	players: SnapshotEntityDelta<SnapshotPlayer>;
+	units: SnapshotEntityDelta<Unit>;
+	buildings: SnapshotEntityDelta<SerializedBuilding>;
+	resources: SnapshotEntityDelta<ResourceNode>;
+	ruins: SnapshotEntityDelta<Ruin>;
+	corpses: SnapshotEntityDelta<Corpse>;
+	visibility: VisibilityPayload | null;
+	dayNight: DayNightState;
+	leaderboard: LeaderboardEntry[];
+	notices: Notice[];
+	hornSounds: HornSoundSource[];
+	soundDebug: SoundDebugSource[] | null;
+	pathDebug: boolean;
+	serverPerf: ServerPerfStats | null;
+	admin: AdminSnapshot | null;
+}
+
+export type SnapshotMessage = Snapshot | SnapshotDelta;

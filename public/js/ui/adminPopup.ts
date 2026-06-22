@@ -103,7 +103,7 @@ export class AdminPopup implements GameUiComponent {
 			event.preventDefault();
 			this.minimized = false;
 			this.updateVisibility(true);
-			this.requestAdminView("popup");
+			if (!this.dashboard.isOpen()) this.requestAdminView("popup");
 		});
 		this.heading.addEventListener("pointerdown", (event) => {
 			if (event.target instanceof HTMLButtonElement) return;
@@ -128,7 +128,7 @@ export class AdminPopup implements GameUiComponent {
 		this.panel.classList.toggle("hidden", this.minimized);
 		if (!this.minimized) {
 			this.constrainToViewport();
-			this.requestAdminView("popup");
+			if (!this.dashboard.isOpen()) this.requestAdminView("popup");
 		}
 	}
 

@@ -5,6 +5,8 @@ import type { AdminLevel, AdminSnapshot, AdminView, PlayerId, Snapshot, SoundDeb
 import { isVisible } from "./visibility.js";
 
 const ZOMBIE_OWNER_ID = "zombies" as PlayerId;
+const POPUP_PERF_SAMPLE_LIMIT = 30;
+const OVERVIEW_PERF_SAMPLE_LIMIT = 60;
 
 export function makeSnapshot(
 	world: World,
@@ -125,7 +127,7 @@ function buildAdminSnapshot(world: World, level: AdminLevel | undefined, view: A
 			...(world.serverPerf.unitAi ? { unitAi: world.serverPerf.unitAi } : {}),
 			...(world.serverPerf.zombieWorker ? { zombieWorker: world.serverPerf.zombieWorker } : {}),
 			...(world.serverPerf.zombieAiWorker ? { zombieAiWorker: world.serverPerf.zombieAiWorker } : {}),
-			samples: world.serverPerf.samples.slice(),
+			samples: adminPerfSamples(world, view),
 		} } : {}),
 		...(includePlayers ? { players: Object.values(world.players).map((player) => ({
 			id: player.id,
@@ -139,12 +141,20 @@ function buildAdminSnapshot(world: World, level: AdminLevel | undefined, view: A
 			connected: (player.connection?.streamCount ?? 0) > 0,
 			lastSeenAt: player.connection?.lastSeenAt ?? null,
 			pingMs: player.connection?.pingMs ?? null,
+			...(player.connection?.lastSnapshotBytes !== undefined ? { lastSnapshotBytes: player.connection.lastSnapshotBytes } : {}),
+			...(player.connection?.lastSnapshotKind !== undefined ? { lastSnapshotKind: player.connection.lastSnapshotKind } : {}),
 			...(canViewIpAddresses ? { ipAddress: player.connection?.ipAddress ?? "unknown" } : {}),
 		})) } : {}),
 		...(includeEvents ? { events: world.notices.slice(-8) } : {}),
 		...(includeLogs ? { logs: world.adminLogs.slice(-200) } : {}),
 		...(view === "bans" && canViewIpAddresses ? { bannedIpAddresses: (world.bannedIpAddresses ?? []).slice() } : {}),
 	};
+}
+
+function adminPerfSamples(world: World, view: AdminView) {
+	if (view === "popup") return world.serverPerf.samples.slice(-POPUP_PERF_SAMPLE_LIMIT);
+	if (view === "overview") return world.serverPerf.samples.slice(-OVERVIEW_PERF_SAMPLE_LIMIT);
+	return world.serverPerf.samples.slice();
 }
 
 function serializeUnit(unit: Unit, includeZombieDebug: boolean): Unit {
