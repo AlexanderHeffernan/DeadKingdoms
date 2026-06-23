@@ -74,6 +74,7 @@ const view: ViewState = {
 const sfx = new SoundEffects(view.camera);
 
 const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const EDGE_PAN_MARGIN = 14;
 const DEV_COMMAND_BUFFER_LENGTH = 40;
 const PLAYER_NAME_STORAGE_KEY = "rtsPlayerName";
 const PLAYER_COLOR_STORAGE_KEY = "rtsPlayerColor";
@@ -394,6 +395,19 @@ document.getElementById("leaveButton")?.addEventListener("click", async () => {
 	void updateHomeStatus({ force: true });
 });
 document.getElementById("muteButton")?.addEventListener("click", toggleMusicMute);
+document.getElementById("leaderboardToggle")?.addEventListener("click", () => {
+	const container = document.querySelector<HTMLElement>(".leaderboard-container");
+	const body = document.getElementById("leaderboardBody");
+	const toggle = document.getElementById("leaderboardToggle");
+	if (!container || !body || !toggle) return;
+	const collapsed = !container.classList.contains("collapsed");
+	container.classList.toggle("collapsed", collapsed);
+	body.classList.toggle("hidden", collapsed);
+	toggle.textContent = collapsed ? "+" : "-";
+	toggle.setAttribute("aria-expanded", String(!collapsed));
+	toggle.setAttribute("aria-label", collapsed ? "Expand leaderboard" : "Collapse leaderboard");
+	toggle.title = collapsed ? "Expand leaderboard" : "Collapse leaderboard";
+});
 window.addEventListener("admin-subscription", (event) => {
 	const viewName = event instanceof CustomEvent && typeof event.detail?.view === "string" ? event.detail.view : "popup";
 	if (!isAdminView(viewName) || adminView === viewName) return;
@@ -402,6 +416,7 @@ window.addEventListener("admin-subscription", (event) => {
 });
 
 window.addEventListener("resize", () => renderer.resize());
+window.addEventListener("mousemove", trackMousePosition);
 window.addEventListener("beforeunload", () => {
 	if (state.playerId) leave(state.playerId);
 });
@@ -1409,7 +1424,6 @@ function onMouseDown(event: MouseEvent) {
 }
 
 function onMouseMove(event: MouseEvent) {
-	view.mouse = { x: event.clientX, y: event.clientY };
 	const iso = screenToIso(event.clientX, event.clientY, view.camera);
 	view.hoverTile = { x: Math.floor(iso.x), y: Math.floor(iso.y) };
 	if (view.panning) {
@@ -1419,6 +1433,10 @@ function onMouseMove(event: MouseEvent) {
 		view.panLast = { x: event.clientX, y: event.clientY };
 	}
 	if (view.dragging) view.dragCurrent = { x: event.clientX, y: event.clientY };
+}
+
+function trackMousePosition(event: MouseEvent) {
+	view.mouse = { x: event.clientX, y: event.clientY };
 }
 
 function onMouseUp(event: MouseEvent) {
@@ -1884,12 +1902,11 @@ function pointInFootprint(px: number, py: number, x: number, y: number, footprin
 function edgePan() {
 	const game = document.getElementById("game");
 	if (!game || game.classList.contains("hidden")) return;
-	const margin = 28;
 	const speed = 10;
-	if (view.mouse.x <= margin) view.camera.x += speed;
-	if (view.mouse.x >= window.innerWidth - margin) view.camera.x -= speed;
-	if (view.mouse.y <= margin) view.camera.y += speed;
-	if (view.mouse.y >= window.innerHeight - margin) view.camera.y -= speed;
+	if (view.mouse.x <= EDGE_PAN_MARGIN) view.camera.x += speed;
+	if (view.mouse.x >= window.innerWidth - EDGE_PAN_MARGIN) view.camera.x -= speed;
+	if (view.mouse.y <= EDGE_PAN_MARGIN) view.camera.y += speed;
+	if (view.mouse.y >= window.innerHeight - EDGE_PAN_MARGIN) view.camera.y -= speed;
 	clampCamera();
 }
 

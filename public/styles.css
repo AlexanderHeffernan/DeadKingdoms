@@ -108,9 +108,6 @@ button:disabled {
 
 
 .mute-button {
-	position: absolute;
-	top: 8px;
-	right: 8px;
 	width: 28px;
 	height: 28px;
 	min-height: 0;
@@ -770,4 +767,3 @@ button:disabled {
 	bottom: 0;
 	cursor: nwse-resize;
 }
-

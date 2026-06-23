@@ -7,21 +7,103 @@
 }
 
 .top-left {
-	top: 12px;
-	left: 12px;
+	top: 0;
+	left: 0;
 	min-width: 260px;
 }
 
 .top-right {
-	top: 12px;
-	right: 12px;
-	width: 250px;
+	top: 0;
+	right: 0;
 	max-height: 500px;
-	padding: 10px 12px;
+	padding: 0;
+	border: none;
+	background: none;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
 }
+
+.leaderboard-container {
+	width: 250px;
+	box-sizing: border-box;
+	padding: 0 12px 12px;
+	border: 1px solid rgb(244 239 230 / 0.22);
+	border-top: none;
+	background: rgb(17 24 19 / 0.8);
+}
+
+.leaderboard-container.collapsed {
+	padding-bottom: 0;
+}
+
+.leaderboard-heading {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 43px;
+}
+
+.leaderboard-heading h2 {
+	flex: 1;
+	min-width: 0;
+	margin: 0;
+}
+
+.leaderboard-toggle {
+	width: 24px;
+	height: 24px;
+	min-height: 0;
+	padding: 0;
+	display: grid;
+	place-items: center;
+	font-size: 18px;
+	line-height: 1;
+}
+
+.leaderboard-body.hidden {
+	display: none;
+}
+
+.banner {
+	margin: 0;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	box-sizing: border-box;
+	width: 250px;
+	height: 40px;
+	padding: 4px;
+	background: rgb(17 24 19 / 0.8);
+	border: 1px solid rgb(244 239 230 / 0.22);
+	justify-content: flex-end;
+}
+
+.banner button {
+	height: 28px;
+	min-height: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+.banner .time-of-day {
+	flex: 1;
+	min-width: 0;
+	margin: 0 4px 0 6px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.banner .leave-button {
+	width: auto;
+	margin: 0;
+	padding: 0 10px;
+}
+
 .bottom-right {
-	bottom: 12px;
-	right: 12px;
+	bottom: 0;
+	right: 0;
 	width: 250px;
 	max-height: 500px;
 	padding: 10px 12px;
@@ -29,9 +111,6 @@
 	background: none;
 }
 
-.top-right h2 {
-	padding-right: 34px;
-}
 #minimap {
 	position: fixed;
 	bottom: 0;
@@ -201,8 +280,8 @@
 }
 
 .bottom {
-	left: 12px;
-	bottom: 12px;
+	left: 0;
+	bottom: 0;
 	min-height: 180px;
 	display: flex;
 	flex-direction: row;
@@ -223,7 +302,3 @@
 	color: #cfc7b7;
 	font-size: 13px;
 }
-
-
-
-

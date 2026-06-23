@@ -128,26 +128,42 @@
 			></canvas>
 			<section class="hud top-left">
 				<div id="resources" class="resources"></div>
-				<div id="status" class="status"></div>
-				<button id="leaveButton" class="leave-button" type="button">
-					Leave game
-				</button>
 			</section>
 			<section class="hud top-right">
-				<h2>Leaderboard</h2>
-				<p class="leaderboard-subtitle">Build the strongest settlement and hold #1.</p>
-				<div id="timeOfDay" class="time-of-day">Day --:--</div>
-				<div id="ping" class="ping" hidden>Ping --ms</div>
-				<div id="fps" class="ping" hidden>FPS --</div>
-				<div id="serverPerf" class="ping" hidden>TPS -- Tick --ms</div>
-				<ol id="leaderboard"></ol>
-				<button
-					id="muteButton"
-					class="mute-button"
-					type="button"
-					aria-label="Mute music"
-					title="Mute music"
-				></button>
+				<div class="banner">
+					<div id="timeOfDay" class="time-of-day">Day --:--</div>
+					<button
+						id="muteButton"
+						class="mute-button"
+						type="button"
+						aria-label="Mute music"
+						title="Mute music"
+					></button>
+					<button id="leaveButton" class="leave-button" type="button">
+						Leave
+					</button>
+				</div>
+				<div class="leaderboard-container">
+					<div class="leaderboard-heading">
+						<h2>Leaderboard</h2>
+						<button
+							id="leaderboardToggle"
+							class="leaderboard-toggle"
+							type="button"
+							aria-label="Collapse leaderboard"
+							aria-expanded="true"
+							aria-controls="leaderboardBody"
+							title="Collapse leaderboard"
+						>-</button>
+					</div>
+					<div id="leaderboardBody" class="leaderboard-body">
+						<p class="leaderboard-subtitle">Build the strongest settlement and hold #1.</p>
+						<div id="ping" class="ping" hidden>Ping --ms</div>
+						<div id="fps" class="ping" hidden>FPS --</div>
+						<div id="serverPerf" class="ping" hidden>TPS -- Tick --ms</div>
+						<ol id="leaderboard"></ol>
+					</div>
+				</div>
 			</section>
 			<section class="hud bottom-right">
 				<canvas
