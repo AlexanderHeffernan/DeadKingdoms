@@ -173,6 +173,30 @@
 	image-rendering: pixelated;
 	pointer-events: none;
 }
+
+.action-icon-png {
+	position: relative;
+	display: inline-block;
+	width: 32px;
+	height: 32px;
+}
+
+.action-icon-png-layer {
+	position: absolute;
+	left: calc(50% + var(--icon-offset-x, 0px));
+	top: calc(50% + var(--icon-offset-y, 0px));
+	width: var(--icon-width);
+	height: var(--icon-height);
+	transform: translate(-50%, -50%);
+	image-rendering: pixelated;
+	pointer-events: none;
+}
+
+.action-icon-png-flag {
+	background: var(--icon-flag-color, #4f8fd8);
+	mask: var(--flag-url) center / contain no-repeat;
+	-webkit-mask: var(--flag-url) center / contain no-repeat;
+}
 .queue {
 	min-width: 170px;
 	height: 48px;
@@ -283,9 +307,28 @@
 .resource-icon {
 	position: relative;
 	display: inline-block;
-	width: 24px;
-	height: 24px;
+	width: 26px;
+	height: 26px;
 	image-rendering: pixelated;
+}
+
+.resource-gatherer-badge {
+	position: absolute;
+	right: -5px;
+	bottom: -3px;
+	min-width: 13px;
+	height: 13px;
+	box-sizing: border-box;
+	padding: 0 3px;
+	display: grid;
+	place-items: center;
+	border: 1px solid rgb(17 24 19 / 0.95);
+	border-radius: 7px;
+	background: #e9bd59;
+	color: #111813;
+	font-size: 12px;
+	font-weight: 900;
+	line-height: 1;
 }
 
 .resource-icon i {
@@ -327,6 +370,92 @@
 	border-right: 1px solid rgb(244 239 230 / 0.18);
 }
 
+.selection.multi-selection {
+	align-self: flex-end;
+	display: flex;
+	flex-direction: column-reverse;
+	gap: 6px;
+	padding: 0 0 0 6px;
+	border-right: none;
+}
+
+.actions.hidden + .selection.multi-selection {
+	padding-left: 0;
+}
+
+.multi-selection-icon {
+	position: relative;
+	width: 38px;
+	height: 38px;
+	display: grid;
+	place-items: center;
+	border: 1px solid rgb(244 239 230 / 0.22);
+	background: rgb(17 24 19 / 0.85);
+	cursor: pointer;
+}
+
+.multi-selection-icon .action-icon {
+	width: 32px;
+	height: 32px;
+}
+
+.multi-selection-health {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 4px;
+	background: #8f2f28;
+}
+
+.multi-selection-health-fill {
+	display: block;
+	height: 100%;
+	background: #4fa64f;
+}
+
+.multi-selection-health-list {
+	position: absolute;
+	left: calc(100% + 6px);
+	bottom: 0;
+	min-width: 54px;
+	display: none;
+	flex-direction: column;
+	gap: 2px;
+	padding: 5px 6px;
+	border: 1px solid rgb(244 239 230 / 0.22);
+	background: rgb(17 24 19 / 0.95);
+	color: #f4efe6;
+	font-size: 11px;
+	line-height: 1.1;
+	pointer-events: none;
+	z-index: 3;
+}
+
+.multi-selection-icon:hover .multi-selection-health-list,
+.multi-selection-icon:focus-within .multi-selection-health-list {
+	display: flex;
+}
+
+.multi-selection-count {
+	position: absolute;
+	right: -5px;
+	top: -5px;
+	min-width: 16px;
+	height: 16px;
+	box-sizing: border-box;
+	padding: 0 4px;
+	display: grid;
+	place-items: center;
+	border: 1px solid rgb(17 24 19 / 0.95);
+	border-radius: 8px;
+	background: #e9bd59;
+	color: #111813;
+	font-size: 10px;
+	font-weight: 900;
+	line-height: 1;
+}
+
 .selection-title {
 	font-weight: 700;
 	margin-bottom: 6px;
@@ -335,4 +464,22 @@
 .selection-detail {
 	color: #cfc7b7;
 	font-size: 13px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+
+}
+
+.selection-carry {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	vertical-align: middle;
+}
+
+.selection-carry .resource-icon {
+	width: 18px;
+	height: 18px;
+	transform: scale(0.75);
+	transform-origin: center;
 }

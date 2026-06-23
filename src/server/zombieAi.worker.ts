@@ -158,6 +158,9 @@ function createZombieSimulationContext(
 	const targetLookup = new ZombieTargetLookupCache(world, profiler, targetUnitGrid, buildingGrid);
 	return {
 		world,
+		setCommand: (unit, command) => {
+			unit.command = command;
+		},
 		targetById: (targetId) => world.units[targetId] || world.buildings[targetId] || world.corpses[targetId as keyof typeof world.corpses] || null,
 		buildingById: (buildingId) => world.buildings[buildingId] || null,
 		isComplete: (building) => building.hp >= building.maxHp,

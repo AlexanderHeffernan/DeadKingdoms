@@ -1,12 +1,14 @@
 import { BUILDINGS, TRAINING } from "../constants.js";
 import { palette } from "../sprites/palette.js";
 import { sprites } from "../sprites/index.js";
+import { pngSprites } from "../sprites/pngSprites.js";
 import { unitBehaviorFor } from "../../../src/shared/unitRegistry.js";
-import type { Building, ResourceNode, SpriteName, Unit } from "../../../src/shared/types.js";
+import type { Building, ResourceNode, ResourceType, SpriteName, Unit } from "../../../src/shared/types.js";
 import type { ClientSnapshot, GameState, SelectionEntity, UIActions } from "../clientTypes.js";
 import type { GameUiComponent } from "./component.js";
 import { escapeHtml, label } from "./dom.js";
 import type { HoverCard } from "./hoverCard.js";
+import { resourceIcon } from "./resources.js";
 
 const BUILD_SHORTCUTS = {
 	house: "H",
@@ -42,27 +44,75 @@ export class BottomPanel implements GameUiComponent {
 		.filter((item): item is SelectionEntity => Boolean(item));
 		if (selected.length === 0) {
 			const defeated = this.state.playerId ? snapshot.players[this.state.playerId]?.defeated : undefined;
+			this.selection.classList.remove("multi-selection");
 			this.selection.innerHTML = `<div class="selection-title">${defeated ? "Defeated" : "No selection"}</div><div class="selection-detail">${defeated ? "Refresh and join again to start from scratch." : "Drag-select units. Right-click to move, gather, or attack."}</div>`;
-			this.renderActionSet(defeated ? [{ spriteName: "townCenter", label: "Respawn", cost: {}, action: () => this.actions.respawn() }] : []);
+			this.renderActionSet(defeated ? [new ButtonAction({ spriteName: "townCenter", label: "Respawn", cost: {}, run: () => this.actions.respawn() })] : []);
 			return;
 		}
+		const selectedUnits = selected.filter(isUnit);
+		if (selectedUnits.length > 1) {
+			this.renderActions(selected);
+			this.renderMultiUnitSelection(selectedUnits, snapshot);
+			return;
+		}
+		this.selection.classList.remove("multi-selection");
 		const first = selected[0]!;
 		const owner = first.ownerId ? snapshot.players[first.ownerId] : null;
 		const ownership = owner ? (owner.id === this.state.playerId! ? "Owned by you" : `Owned by ${escapeHtml(owner.name)}`) : "Neutral";
 		const names = selected.reduce<Record<string, number>>((counts, entity) => {
-			counts[entity.type] = (counts[entity.type] || 0) + 1;
+			const name = selectionName(entity);
+			counts[name] = (counts[name] || 0) + 1;
 			return counts;
 		}, {});
-		const carried = isUnit(first) && first.carried ? ` · carrying ${Math.floor(first.carried.amount)} ${first.carried.resource}` : "";
+		const carried = isUnit(first) ? carriedDetail(first) : "";
 		const resource = first.kind === "resource" ? ` · ${Math.floor(first.amount)}/${first.maxAmount} ${first.resource} left` : "";
 		const farm = isBuilding(first) && first.gatherResource
 			? ` · ${Math.floor(first.amount || 0)}/${first.maxAmount || 0} food left${first.exhausted ? " · exhausted" : ""}`
 			: "";
 		this.selection.innerHTML = `
-<div class="selection-title">${Object.entries(names).map(([type, count]) => `${label(type)} x${count}`).join(", ")}</div>
+<div class="selection-title">${Object.entries(names).map(([name, count]) => `${escapeHtml(name)} x${count}`).join(", ")}</div>
 <div class="selection-detail">${ownership}${"hp" in first ? ` · ${Math.round(first.hp)}/${first.maxHp} hp` : ""}${carried}${resource}${farm}</div>
 `;
 		this.renderActions(selected);
+	}
+
+	private renderMultiUnitSelection(units: Unit[], snapshot: ClientSnapshot) {
+		this.selection.classList.add("multi-selection");
+		this.selection.innerHTML = "";
+		for (const [unitType, matchingUnits] of Object.entries(unitsByType(units))) {
+			const count = matchingUnits.length;
+			const item = document.createElement("div");
+			item.className = "multi-selection-icon";
+			item.setAttribute("aria-label", `${label(unitType)} x${count}`);
+			const ownerColor = matchingUnits[0]?.ownerId ? snapshot.players[matchingUnits[0]!.ownerId]?.color : undefined;
+			item.append(icon(unitType, DEFAULT_HUD_ICON_OFFSET, DEFAULT_HUD_ICON_MAX_SIZE, ownerColor || DEFAULT_HUD_ICON_COLOR));
+			item.append(multiSelectionHealthBar(matchingUnits));
+			item.append(multiSelectionHealthList(matchingUnits));
+			item.addEventListener("pointerdown", (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				if (event.metaKey) this.removeUnitTypeFromSelection(matchingUnits, snapshot);
+					else this.selectOnlyUnitType(matchingUnits, snapshot);
+			});
+			if (count > 1) {
+				const badge = document.createElement("span");
+				badge.className = "multi-selection-count";
+				badge.textContent = String(count);
+				item.append(badge);
+			}
+			this.selection.append(item);
+		}
+	}
+
+	private selectOnlyUnitType(units: Unit[], snapshot: ClientSnapshot) {
+		this.state.selectedIds.clear();
+		for (const unit of units) this.state.selectedIds.add(unit.id);
+		this.render(snapshot);
+	}
+
+	private removeUnitTypeFromSelection(units: Unit[], snapshot: ClientSnapshot) {
+		for (const unit of units) this.state.selectedIds.delete(unit.id);
+		this.render(snapshot);
 	}
 
 	private renderActions(selected: SelectionEntity[]) {
@@ -74,41 +124,48 @@ export class BottomPanel implements GameUiComponent {
 		const scouts = ownedUnits.filter((entity) => entity.type === "scout");
 		if (hasBuilder) {
 			for (const [buildingType, def] of Object.entries(BUILDINGS)) {
-				actions.push({ spriteName: buildingType, label: def.label, cost: def.cost, shortcut: BUILD_SHORTCUTS[buildingType as keyof typeof BUILD_SHORTCUTS], action: () => this.actions.setBuildMode(buildingType) });
+				actions.push(new ButtonAction({
+					spriteName: buildingType,
+					label: def.label,
+					description: def.description,
+					cost: def.cost,
+					shortcut: BUILD_SHORTCUTS[buildingType as keyof typeof BUILD_SHORTCUTS],
+					run: () => this.actions.setBuildMode(buildingType),
+				}));
 			}
 		}
 		if (scouts.length > 0) {
-			actions.push({
+			actions.push(new ButtonAction({
 				spriteName: "scout",
 				label: scouts.some((unit) => unit.hornActive) ? "Stop horn" : "Blow horn",
 				cost: {},
 				shortcut: "O",
-				action: () => this.actions.blowHorn(scouts.map((unit) => unit.id)),
-			});
+				run: () => this.actions.blowHorn(scouts.map((unit) => unit.id)),
+			}));
 		}
 		for (const building of ownedBuildings) {
 			if (building.gatherResource) {
 				const player = this.state.snapshot!.players[this.state.playerId!];
 				if (!player) continue;
-				actions.push({ spriteName: building.type, label: player.autoReplenishFarms ? "Auto reseed: on" : "Auto reseed: off", cost: {}, displayCost: { wood: 45 }, shortcut: "A", action: () => this.actions.toggleAutoFarm() });
-				actions.push({ spriteName: building.type, label: "Reseed farm", cost: { wood: 45 }, shortcut: "R", action: () => this.actions.replenishFarm(building.id), forceDisabled: !building.exhausted && (building.amount ?? 0) > 0 });
+				actions.push(new ButtonAction({ spriteName: building.type, label: player.autoReplenishFarms ? "Auto reseed: on" : "Auto reseed: off", cost: {}, displayCost: { wood: 45 }, shortcut: "A", run: () => this.actions.toggleAutoFarm() }));
+				actions.push(new ButtonAction({ spriteName: building.type, label: "Reseed farm", cost: { wood: 45 }, shortcut: "R", run: () => this.actions.replenishFarm(building.id), forceDisabled: !building.exhausted && (building.amount ?? 0) > 0 }));
 			}
 			if (building.queue?.length) {
 				const first = building.queue[0];
-				if (first) actions.push({ queue: true, label: `Training ${building.queue.length}/10`, detail: `${Math.max(0, Math.round(first.remaining))}s` });
+				if (first) actions.push(new QueueAction(`Training ${building.queue.length}/10`, `${Math.max(0, Math.round(first.remaining))}s`));
 			}
 			const training = TRAINING[building.type as keyof typeof TRAINING];
 			if (training) {
 				for (const train of training) {
-					actions.push({ spriteName: train.unitType, label: train.label, cost: train.cost, shortcut: train.shortcut, action: () => this.actions.train(building.id, train.unitType), forceDisabled: (building.queue?.length ?? 0) >= 10 });
+					actions.push(new ButtonAction({ spriteName: train.unitType, label: train.label, cost: train.cost, shortcut: train.shortcut, run: () => this.actions.train(building.id, train.unitType), forceDisabled: (building.queue?.length ?? 0) >= 10 }));
 				}
 			}
 			if (training?.length) {
-				actions.push({ spriteName: training[0]?.unitType, label: "Set rally point", cost: {}, shortcut: "Y", action: () => this.actions.setRallyMode(building.id) });
+				actions.push(new ButtonAction({ spriteName: training[0]?.unitType, label: "Set rally point", cost: {}, shortcut: "Y", run: () => this.actions.setRallyMode(building.id) }));
 			}
 		}
 		for (const building of ownedAnyBuildings) {
-			actions.push({ spriteName: "ruin", label: `Delete ${label(building.type)}`, cost: {}, shortcut: "Del", action: () => this.actions.deleteBuilding(building.id) });
+			actions.push(new ButtonAction({ spriteName: "ruin", label: `Delete ${label(building.type)}`, cost: {}, shortcut: "Del", run: () => this.actions.deleteBuilding(building.id) }));
 		}
 		this.renderActionSet(actions);
 	}
@@ -117,21 +174,24 @@ export class BottomPanel implements GameUiComponent {
 		const player = this.state.snapshot?.players[this.state.playerId || ""];
 		if (!player) return;
 		const signature = JSON.stringify(actions.map((action) => ({
-			queue: action.queue,
+			type: action.kind,
 			spriteName: action.spriteName,
+			iconSpriteName: action.getIconSpriteName(),
+			iconColor: action.getIconColor(player.color),
 			label: action.label,
+			tooltip: action.getTooltip(),
 			detail: action.detail,
 			cost: action.displayCost || action.cost,
-			shortcut: action.shortcut,
 			disabled: action.forceDisabled || !canAfford(player.resources, action.cost || {}),
 		})));
 		if (signature === this.actionSignature) return;
 		this.actionSignature = signature;
 		this.actionsEl.innerHTML = "";
+		this.actionsEl.classList.toggle("hidden", actions.length === 0);
 		this.hoverCard.hide();
 		for (const action of actions) {
-			if (action.queue) this.addQueue(action.label, action.detail ?? "");
-				else this.addButton(action.spriteName ?? "", action.label, action.cost ?? {}, action.action ?? (() => {}), action.forceDisabled, action.displayCost, action.shortcut ?? "");
+			if (action.kind === "queue") this.addQueue(action.label, action.detail ?? "");
+				else this.addButton(action as ButtonAction, player);
 		}
 	}
 
@@ -142,24 +202,24 @@ export class BottomPanel implements GameUiComponent {
 		this.actionsEl.append(queue);
 	}
 
-	private addButton(spriteName: string, label: string, cost: Record<string, number> = {}, onPointerDown: () => void, forceDisabled = false, displayCost: Record<string, number> | null = null, shortcut = "") {
-		const player = this.state.snapshot?.players[this.state.playerId || ""];
-		if (!player) return;
-		const disabled = forceDisabled || !canAfford(player.resources, cost);
+	private addButton(action: ButtonAction, player: ClientSnapshot["players"][string]) {
+		const tooltip = action.getTooltip();
+		const disabled = action.forceDisabled || !canAfford(player.resources, action.cost);
 		const button = document.createElement("button");
 		button.className = "action";
 		button.disabled = disabled;
 		button.type = "button";
-		button.setAttribute("aria-label", label);
-		button.dataset.label = label;
-		button.dataset.cost = formatCost(displayCost || cost);
-		button.dataset.shortcut = shortcut || "";
-		button.dataset.disabledReason = disabled ? disabledReason(player.resources, cost, forceDisabled) : "";
-		button.append(icon(spriteName));
+		button.setAttribute("aria-label", action.label);
+		button.dataset.label = tooltip.label;
+		button.dataset.description = tooltip.description ?? "";
+		button.dataset.cost = tooltip.cost;
+		button.dataset.shortcut = tooltip.shortcut ?? "";
+		button.dataset.disabledReason = disabled ? disabledReason(player.resources, action.cost, action.forceDisabled) : "";
+		button.append(icon(action.getIconSpriteName(), action.getIconOffset(), action.getIconMaxSize(), action.getIconColor(player.color)));
 		button.addEventListener("pointerdown", (event: PointerEvent) => {
 			event.preventDefault();
 			event.stopPropagation();
-			if (!button.disabled) onPointerDown();
+			if (!button.disabled) action.run();
 		});
 		button.addEventListener("mouseenter", () => this.hoverCard.showAction(button));
 		button.addEventListener("mousemove", () => this.hoverCard.showAction(button));
@@ -174,6 +234,68 @@ function isUnit(entity: SelectionEntity): entity is Unit {
 
 function isBuilding(entity: SelectionEntity): entity is Building {
 	return entity.kind === "building";
+}
+
+function unitsByType(units: Unit[]) {
+	return units.reduce<Record<string, Unit[]>>((groups, unit) => {
+		groups[unit.type] ??= [];
+		groups[unit.type]!.push(unit);
+		return groups;
+	}, {});
+}
+
+function multiSelectionHealthBar(units: Unit[]) {
+	const bar = document.createElement("span");
+	bar.className = "multi-selection-health";
+	const average = units.length
+		? units.reduce((sum, unit) => sum + Math.max(0, unit.hp) / Math.max(1, unit.maxHp), 0) / units.length
+		: 0;
+	const fill = document.createElement("span");
+	fill.className = "multi-selection-health-fill";
+	fill.style.width = `${Math.round(average * 100)}%`;
+	bar.append(fill);
+	return bar;
+}
+
+function multiSelectionHealthList(units: Unit[]) {
+	const list = document.createElement("span");
+	list.className = "multi-selection-health-list";
+	for (const unit of units) {
+		const row = document.createElement("span");
+		row.textContent = `${Math.round(unit.hp)}/${unit.maxHp}`;
+		list.append(row);
+	}
+	return list;
+}
+
+function selectionName(entity: SelectionEntity) {
+	if (!isUnit(entity)) return label(entity.type);
+	if (entity.type !== "villager") return unitBehaviorFor(entity.type).label;
+	if (entity.command.type === "gather") return villagerGatherJob(entity.command.resourceKind);
+	if (entity.command.type === "build") return "Builder";
+	if (entity.command.type === "attack") return "Villager";
+	return unitBehaviorFor(entity.type).label;
+}
+
+function villagerGatherJob(resource: ResourceType) {
+	if (resource === "wood") return "Lumberjack";
+	if (resource === "food") return "Farmer";
+	if (resource === "ore") return "Quarryman";
+	return "Villager";
+}
+
+function carriedDetail(unit: Unit) {
+	const capacity = unitBehaviorFor(unit.type).carryCapacity;
+	if (capacity <= 0) return "";
+	const carried = unit.carried;
+	const resource = carried?.resource ?? gatherResourceForCommand(unit);
+	if (!resource) return "";
+	const amount = Math.floor(carried?.amount ?? 0);
+	return `<span class="selection-carry">${resourceIcon(resource)} <span>${amount}/${capacity}</span></span>`;
+}
+
+function gatherResourceForCommand(unit: Unit) {
+	return unit.command.type === "gather" ? unit.command.resourceKind : null;
 }
 
 function canAfford(resources: Record<string, number>, cost: Record<string, number>) {
@@ -196,7 +318,23 @@ function disabledReason(resources: Record<string, number>, cost: Record<string, 
 	return `Need ${missing.map(([resource, amount]) => `${amount - Math.floor(resources[resource] || 0)} more ${resource}`).join(", ")}`;
 }
 
-function icon(spriteName: string) {
+type HudIconOffset = {
+	x: number;
+	y: number;
+};
+
+const DEFAULT_HUD_ICON_OFFSET: HudIconOffset = { x: 0, y: 0 };
+const DEFAULT_HUD_ICON_MAX_SIZE = 28;
+const DEFAULT_HUD_ICON_COLOR = "#4f8fd8";
+
+function icon(
+	spriteName: string,
+	offset: HudIconOffset = DEFAULT_HUD_ICON_OFFSET,
+	maxSize = DEFAULT_HUD_ICON_MAX_SIZE,
+	flagColor: string = DEFAULT_HUD_ICON_COLOR,
+) {
+	const png = pngSprites[spriteName as SpriteName];
+	if (png) return pngIcon(png, offset, maxSize, flagColor);
 	const canvas = document.createElement("canvas");
 	canvas.className = "action-icon";
 	canvas.width = 56;
@@ -219,14 +357,162 @@ function icon(spriteName: string) {
 	return canvas;
 }
 
-type ActionDef = {
-	queue?: boolean;
+function pngIcon(png: NonNullable<(typeof pngSprites)[SpriteName]>, offset: HudIconOffset, maxSize: number, flagColor: string) {
+	const wrapper = document.createElement("span");
+	const scale = Math.min(2, maxSize / png.width, maxSize / png.height);
+	wrapper.className = "action-icon action-icon-png";
+	wrapper.style.setProperty("--icon-width", `${png.width * scale}px`);
+	wrapper.style.setProperty("--icon-height", `${png.height * scale}px`);
+	wrapper.style.setProperty("--icon-offset-x", `${offset.x}px`);
+	wrapper.style.setProperty("--icon-offset-y", `${offset.y}px`);
+	wrapper.style.setProperty("--icon-flag-color", flagColor);
+	if (png.flag && png.flagLayer !== "over") wrapper.append(pngFlagLayer(png.flag));
+	const base = document.createElement("img");
+	base.src = png.base;
+	base.alt = "";
+	base.draggable = false;
+	base.className = "action-icon-png-layer";
+	wrapper.append(base);
+	if (png.flag && png.flagLayer === "over") wrapper.append(pngFlagLayer(png.flag));
+	return wrapper;
+}
+
+function pngFlagLayer(flagUrl: string) {
+	const flag = document.createElement("span");
+	flag.className = "action-icon-png-layer action-icon-png-flag";
+	flag.style.setProperty("--flag-url", `url("${flagUrl}")`);
+	return flag;
+}
+
+interface TooltipAction {
+	readonly kind: "button" | "queue";
+	readonly spriteName: string;
+	readonly label: string;
+	readonly detail?: string;
+	readonly cost: Record<string, number>;
+	readonly displayCost: Record<string, number> | null;
+	readonly forceDisabled: boolean;
+	getTooltip(): ActionTooltip;
+	getIconSpriteName(): string;
+	getIconMaxSize(): number;
+	getIconColor(playerColor?: string): string;
+}
+
+type ActionTooltip = {
+	label: string;
+	description?: string;
+	cost: string;
+	shortcut?: string;
+};
+
+class ButtonAction implements TooltipAction {
+	private static readonly iconSpriteNames: Partial<Record<SpriteName, SpriteName>> = {
+		wall: "pillarConnected",
+	};
+
+	private static readonly iconOffsets: Partial<Record<SpriteName, HudIconOffset>> = {
+		house: { x: -2, y: -2 },
+		wall: { x: -2, y: -2 },
+		gate: { x: 0, y: -2 },
+	};
+
+	private static readonly iconMaxSizes: Partial<Record<SpriteName, number>> = {
+		wall: 31,
+	};
+
+	readonly kind = "button";
+	readonly spriteName: string;
+	readonly label: string;
+	readonly description: string;
+	readonly cost: Record<string, number>;
+	readonly displayCost: Record<string, number> | null;
+	readonly shortcut: string;
+	readonly forceDisabled: boolean;
+	private readonly onRun: () => void;
+
+	constructor(def: ButtonActionDef) {
+		this.spriteName = def.spriteName ?? "";
+		this.label = def.label;
+		this.description = def.description ?? "";
+		this.cost = def.cost ?? {};
+		this.displayCost = def.displayCost ?? null;
+		this.shortcut = def.shortcut ?? "";
+		this.forceDisabled = def.forceDisabled ?? false;
+		this.onRun = def.run;
+	}
+
+	getTooltip(): ActionTooltip {
+		return {
+			label: this.label,
+			...(this.description ? { description: this.description } : {}),
+			cost: formatCost(this.displayCost || this.cost),
+			...(this.shortcut ? { shortcut: this.shortcut } : {}),
+		};
+	}
+
+	run() {
+		this.onRun();
+	}
+
+	getIconSpriteName(): string {
+		return ButtonAction.iconSpriteNames[this.spriteName as SpriteName] ?? this.spriteName;
+	}
+
+	getIconOffset(): HudIconOffset {
+		return ButtonAction.iconOffsets[this.spriteName as SpriteName] ?? DEFAULT_HUD_ICON_OFFSET;
+	}
+
+	getIconMaxSize(): number {
+		return ButtonAction.iconMaxSizes[this.spriteName as SpriteName] ?? DEFAULT_HUD_ICON_MAX_SIZE;
+	}
+
+	getIconColor(playerColor?: string): string {
+		return playerColor || DEFAULT_HUD_ICON_COLOR;
+	}
+}
+
+class QueueAction implements TooltipAction {
+	readonly kind = "queue";
+	readonly spriteName = "";
+	readonly cost = {};
+	readonly displayCost = null;
+	readonly forceDisabled = false;
+
+	constructor(
+		readonly label: string,
+		readonly detail: string,
+	) {}
+
+	getTooltip(): ActionTooltip {
+		return {
+			label: this.label,
+			description: this.detail,
+			cost: "free",
+		};
+	}
+
+	getIconSpriteName(): string {
+		return this.spriteName;
+	}
+
+	getIconMaxSize(): number {
+		return DEFAULT_HUD_ICON_MAX_SIZE;
+	}
+
+	getIconColor(): string {
+		return DEFAULT_HUD_ICON_COLOR;
+	}
+}
+
+type ActionDef = TooltipAction;
+
+type ButtonActionDef = {
 	spriteName?: string;
 	label: string;
-	detail?: string;
+	description?: string;
 	cost?: Record<string, number>;
 	displayCost?: Record<string, number>;
 	shortcut?: string;
-	action?: () => void;
+	run: () => void;
 	forceDisabled?: boolean;
 };

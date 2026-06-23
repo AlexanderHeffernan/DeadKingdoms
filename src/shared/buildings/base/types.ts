@@ -46,6 +46,7 @@ export type BuildingInit = {
 export type BuildingClass = {
 	readonly type: BuildingType;
 	readonly label: string;
+	readonly description: string;
 	readonly sprite: string;
 	readonly maxHp: number;
 	readonly size: number;
@@ -77,6 +78,7 @@ export interface BuildingEntity extends GatherTarget {
 	repairPaidUntilHp: number | undefined;
 	readonly type: BuildingType;
 	readonly label: string;
+	readonly description: string;
 	readonly sprite: string;
 	readonly maxHp: number;
 	readonly size: number;

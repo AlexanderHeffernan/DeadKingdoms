@@ -4,6 +4,7 @@ import type { PlayerId, ResourceCost } from "../../types.js";
 export class Farm extends Building {
 	static readonly type = "farm";
 	static readonly label = "Farm";
+	static readonly description = "Produces food for villagers to gather. Can be reseeded after it is exhausted.";
 	static readonly sprite = "farm";
 	static readonly maxHp = 480;
 	static readonly size = 4;

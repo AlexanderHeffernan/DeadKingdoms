@@ -1,4 +1,3 @@
-import { unitBehaviorFor } from "../../../src/shared/unitRegistry.js";
 import type { GameState } from "../clientTypes.js";
 import type { UIActions } from "../clientTypes.js";
 import type { ClientSnapshot } from "../clientTypes.js";
@@ -23,11 +22,12 @@ export class ResourcePanel implements GameUiComponent {
 		if (!playerId) return;
 		const player = snapshot.players[playerId];
 		if (!player) return;
-		const idleWorkers = idleWorkerCount(snapshot, playerId);
+		const workerCounts = player.workerCounts;
+		const idleWorkers = workerCounts.idle;
 		this.el.innerHTML = `
-			${resourcePill("wood", Math.floor(player.resources.wood))}
-			${resourcePill("food", Math.floor(player.resources.food))}
-			${resourcePill("ore", Math.floor(player.resources.ore))}
+			${resourcePill("wood", Math.floor(player.resources.wood), workerCounts.gathering.wood)}
+			${resourcePill("food", Math.floor(player.resources.food), workerCounts.gathering.food)}
+			${resourcePill("ore", Math.floor(player.resources.ore), workerCounts.gathering.ore)}
 			<span
 				class="population-resource-group resource-pill"
 				data-hover-title="Population"
@@ -60,12 +60,8 @@ export class ResourcePanel implements GameUiComponent {
 	}
 }
 
-function idleWorkerCount(snapshot: ClientSnapshot, playerId: string) {
-	return Object.values(snapshot.units).filter((unit) => unit.ownerId === playerId && unitBehaviorFor(unit.type).canGather && (!unit.command || unit.command.type === "idle")).length;
-}
-
-function resourcePill(resource: string, amount: number) {
-	return `<span class="resource-pill" data-hover-title="${resourceLabel(resource)}" data-hover-detail="${resourceDescription(resource)}">${resourceIcon(resource)}<strong>${amount}</strong></span>`;
+function resourcePill(resource: string, amount: number, gatherers: number) {
+	return `<span class="resource-pill" data-hover-title="${resourceLabel(resource)}" data-hover-detail="${resourceDescription(resource)}">${resourceIcon(resource, gatherers)}<strong>${amount}</strong></span>`;
 }
 
 function populationPill(population: number, popCap: number) {
@@ -109,7 +105,7 @@ function populationIcon() {
 </span>`;
 }
 
-function resourceIcon(resource: string) {
+export function resourceIcon(resource: string, gatherers = 0) {
 	const grids = {
 		wood: [
 			"........",
@@ -157,5 +153,9 @@ function resourceIcon(resource: string) {
 	const pixels = grid.flatMap((row: string, y: number) =>
 		[...row].map((key: string, x: number) => `<i style="left:${x * 3}px;top:${y * 3}px;background:${colors[key as keyof typeof colors]}"></i>`),
 	).join("");
-	return `<span class="resource-icon" aria-hidden="true">${pixels}</span>`;
+	return `<span class="resource-icon" aria-hidden="true">${pixels}${gathererBadge(gatherers)}</span>`;
+}
+
+function gathererBadge(gatherers: number) {
+	return gatherers > 0 ? `<span class="resource-gatherer-badge">${gatherers}</span>` : "";
 }

@@ -1299,6 +1299,7 @@ function hydratePreviewSnapshot(snap: LeaderboardPreviewSnapshot): ClientSnapsho
 				autoReplenishFarms: false,
 				population: 0,
 				popCap: 0,
+				workerCounts: { idle: 0, gathering: { wood: 0, food: 0, ore: 0 } },
 				joinedAt: 0,
 			},
 		])),

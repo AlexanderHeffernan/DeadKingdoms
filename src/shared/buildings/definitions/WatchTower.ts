@@ -3,6 +3,7 @@ import { AttackingBuilding } from "../base/index.js";
 export class WatchTower extends AttackingBuilding {
 	static readonly type = "watchTower";
 	static readonly label = "Watch Tower";
+	static readonly description = "Attacks nearby enemies and gives long-range vision.";
 	static readonly sprite = "watchTower";
 	static readonly maxHp = 850;
 	static readonly size = 1;

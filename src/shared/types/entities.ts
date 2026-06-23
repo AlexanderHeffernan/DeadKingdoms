@@ -19,6 +19,11 @@ import type { VisibilityCache } from "./visibility.js";
 import type { BuildingEntity, BuildingSnapshot } from "../buildings/base/index.js";
 import type { AdminLevel } from "./snapshot.js";
 
+export interface PlayerWorkerCounts {
+	idle: number;
+	gathering: Record<ResourceType, number>;
+}
+
 export type ZombieDebugState =
 	| "sound"
 	| "pathing"
@@ -48,6 +53,7 @@ export interface Player {
 	explored: Set<number>;
 	population: number;
 	popCap: number;
+	workerCounts: PlayerWorkerCounts;
 	defeated: boolean;
 	score: number;
 	joinedAt: number;

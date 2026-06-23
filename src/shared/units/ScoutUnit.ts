@@ -27,7 +27,7 @@ export class ScoutUnit extends BaseUnit {
 		super.step(context, unit, dt);
 	}
 
-	public onAttacked(unit: Unit) {
+	public onAttacked(_context: Pick<UnitSimulationContext, "setCommand">, unit: Unit) {
 		unit.hornActive = false;
 	}
 }
