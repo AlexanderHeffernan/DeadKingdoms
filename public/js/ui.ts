@@ -78,7 +78,7 @@ export class UI {
 			restartServer: actions.restartServer,
 		});
 		this.components = [
-			new ResourcePanel(state, mustGet("resources"), hoverCard),
+			new ResourcePanel(state, mustGet("resources"), hoverCard, actions),
 			new TopPanel(
 				state,
 				mustGet("timeOfDay"),

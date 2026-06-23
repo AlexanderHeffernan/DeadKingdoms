@@ -211,6 +211,7 @@ const ui = new UI(state, {
 	setBuildMode(type) {
 		view.buildMode = type;
 	},
+	selectIdleWorkers: () => selectIdleWorkers(),
 		train(buildingId: string, unitType: UnitType) {
 			issue({ type: "train", buildingId, unitType }).then((result) => {
 				if (result.ok) sfx.play("train_queue", { point: state.snapshot?.buildings[buildingId] });

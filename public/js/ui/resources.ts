@@ -1,5 +1,6 @@
 import { unitBehaviorFor } from "../../../src/shared/unitRegistry.js";
 import type { GameState } from "../clientTypes.js";
+import type { UIActions } from "../clientTypes.js";
 import type { ClientSnapshot } from "../clientTypes.js";
 import type { GameUiComponent } from "./component.js";
 import type { HoverCard } from "./hoverCard.js";
@@ -8,11 +9,13 @@ export class ResourcePanel implements GameUiComponent {
 	private readonly state: GameState;
 	private readonly el: HTMLElement;
 	private readonly hoverCard: HoverCard;
+	private readonly actions: UIActions;
 
-	constructor(state: GameState, el: HTMLElement, hoverCard: HoverCard) {
+	constructor(state: GameState, el: HTMLElement, hoverCard: HoverCard, actions: UIActions) {
 		this.state = state;
 		this.el = el;
 		this.hoverCard = hoverCard;
+		this.actions = actions;
 	}
 
 	render(snapshot: ClientSnapshot) {
@@ -20,13 +23,22 @@ export class ResourcePanel implements GameUiComponent {
 		if (!playerId) return;
 		const player = snapshot.players[playerId];
 		if (!player) return;
+		const idleWorkers = idleWorkerCount(snapshot, playerId);
 		this.el.innerHTML = `
 			${resourcePill("wood", Math.floor(player.resources.wood))}
 			${resourcePill("food", Math.floor(player.resources.food))}
 			${resourcePill("ore", Math.floor(player.resources.ore))}
-			${populationPill(player.population, player.popCap, idleWorkerCount(snapshot, playerId))}
+			<span
+				class="population-resource-group resource-pill"
+				data-hover-title="Population"
+				data-hover-detail="${populationDescription(player.population, player.popCap, idleWorkers)}"
+			>
+				${populationPill(player.population, player.popCap)}
+				${idleWorkerButton(idleWorkers)}
+			</span>
 		`;
 		this.attachHovers();
+		this.attachIdleWorkerButton();
 	}
 
 	private attachHovers() {
@@ -35,6 +47,16 @@ export class ResourcePanel implements GameUiComponent {
 			pill.addEventListener("mousemove", () => this.hoverCard.showInfo(pill));
 			pill.addEventListener("mouseleave", () => this.hoverCard.hide());
 		}
+	}
+
+	private attachIdleWorkerButton() {
+		const button = this.el.querySelector<HTMLButtonElement>(".idle-worker-button");
+		if (!button) return;
+		button.addEventListener("pointerdown", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.actions.selectIdleWorkers();
+		});
 	}
 }
 
@@ -46,8 +68,22 @@ function resourcePill(resource: string, amount: number) {
 	return `<span class="resource-pill" data-hover-title="${resourceLabel(resource)}" data-hover-detail="${resourceDescription(resource)}">${resourceIcon(resource)}<strong>${amount}</strong></span>`;
 }
 
-function populationPill(population: number, popCap: number, idleWorkers: number) {
-	return `<span class="resource-pill" data-hover-title="Population" data-hover-detail="${population}/${popCap} used. ${idleWorkers} worker${idleWorkers === 1 ? "" : "s"} not currently working. Press . to cycle idle workers one at a time.">${populationIcon()}<strong>${population}/${popCap}</strong></span>`;
+function populationPill(population: number, popCap: number) {
+	return `<span class="population-pill">${populationIcon()}<strong>${population}/${popCap}</strong></span>`;
+}
+
+function populationDescription(population: number, popCap: number, idleWorkers: number) {
+	return `${population}/${popCap} used. ${idleWorkers} worker${idleWorkers === 1 ? "" : "s"} not currently working. Press . to cycle idle workers one at a time.`;
+}
+
+function idleWorkerButton(idleWorkers: number) {
+	const active = idleWorkers > 0;
+	return `<button
+		class="idle-worker-button ${active ? "active" : ""}"
+		type="button"
+		aria-label="Select idle villager"
+		aria-disabled="${String(!active)}"
+	>${idleWorkers}</button>`;
 }
 
 function resourceLabel(resource: string) {
