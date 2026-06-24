@@ -73,7 +73,6 @@
 	gap: 6px;
 	box-sizing: border-box;
 	width: 250px;
-	height: 40px;
 	padding: 4px;
 	background: rgb(10 10 14 / 0.94);
 	border: 3px solid #5f4a32;
@@ -86,7 +85,8 @@
 }
 
 .banner button {
-	height: 28px;
+	width: 34px;
+	height: 34px;
 	min-height: 0;
 	padding: 0;
 	box-sizing: border-box;
@@ -104,7 +104,7 @@
 }
 
 .banner .leave-button {
-	width: 28px;
+	width: 34px;
 	margin: 0;
 	padding: 0;
 }
@@ -287,12 +287,7 @@
 	color: #f4efe6;
 }
 
-.hover-cost-item .resource-icon {
-	width: 18px;
-	height: 18px;
-}
-
-.hover-cost-item .resource-image-icon {
+.hover-cost-item .resource-image-icon, .hover-cost-item .resource-icon {
 	width: 18px;
 	height: 18px;
 }
@@ -341,13 +336,13 @@
 .population-pill {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
+	gap: 10px;
 }
 
 .population-icon-button {
 	position: relative;
-	width: 26px;
-	height: 26px;
+	width: 34px;
+	height: 34px;
 	min-height: 0;
 	display: grid;
 	place-items: center;
@@ -382,6 +377,11 @@
 	width: 26px;
 	height: 26px;
 	image-rendering: pixelated;
+}
+
+.resources .resource-icon {
+	width: 34px;
+	height: 34px;
 }
 
 .resource-image-icon {

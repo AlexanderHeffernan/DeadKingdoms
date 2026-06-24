@@ -4,11 +4,12 @@
 
 :root {
 	--ui-text-scale: 1;
-	--ui-text-xs: calc(11px * var(--ui-text-scale));
-	--ui-text-sm: calc(12px * var(--ui-text-scale));
-	--ui-text-md: calc(14px * var(--ui-text-scale));
-	--ui-text-lg: calc(16px * var(--ui-text-scale));
-	--ui-text-xl: calc(20px * var(--ui-text-scale));
+	--ui-text-xs: calc(19px * var(--ui-text-scale));
+	--ui-text-sm: calc(21px * var(--ui-text-scale));
+	--ui-text-md: calc(25px * var(--ui-text-scale));
+	--ui-text-lg: calc(28px * var(--ui-text-scale));
+	--ui-text-xl: calc(35px * var(--ui-text-scale));
+	--ui-icon-size: calc(35px * var(--ui-text-scale));
 }
 
 @font-face {
@@ -144,8 +145,8 @@ button:disabled {
 }
 
 .banner-image-icon {
-	width: 24px;
-	height: 24px;
+	width: 34px;
+	height: 34px;
 	object-fit: contain;
 	image-rendering: pixelated;
 	pointer-events: none;
