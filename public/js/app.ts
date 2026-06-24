@@ -1172,8 +1172,9 @@ function applyVolumeSettings() {
 	const master = storedMasterVolume() / 100;
 	const musicVolume = storedMusicVolume() / 100;
 	const sfxVolume = storedSfxVolume() / 100;
-	music.audio.volume = MUSIC_BASE_VOLUME * master * musicVolume;
-	sfx.setVolume(master, sfxVolume);
+	const muted = music.muted;
+	music.audio.volume = muted ? 0 : MUSIC_BASE_VOLUME * master * musicVolume;
+	sfx.setVolume(muted ? 0 : master, sfxVolume);
 }
 
 function updateVolumeControl(inputId: string, valueId: string, volume: number) {
@@ -1357,6 +1358,7 @@ function toggleMusicMute(event?: Event) {
 	music.muted = event?.target instanceof HTMLInputElement ? event.target.checked : !music.muted;
 	localStorage.setItem("rtsMusicMuted", String(music.muted));
 	music.audio.muted = music.muted;
+	applyVolumeSettings();
 	if (music.muted) {
 		music.audio.pause();
 		music.started = false;
@@ -1409,8 +1411,8 @@ function updateMuteButton() {
 	const button = document.getElementById("settingsMuteButton");
 	if (!button) return;
 	if (button instanceof HTMLInputElement) button.checked = music.muted;
-	button.setAttribute("aria-label", music.muted ? "Unmute music" : "Mute music");
-	button.title = music.muted ? "Unmute music" : "Mute music";
+	button.setAttribute("aria-label", music.muted ? "Unmute audio" : "Mute audio");
+	button.title = music.muted ? "Unmute audio" : "Mute audio";
 }
 
 function onDevShortcutKeyDown(event: KeyboardEvent) {
@@ -2134,6 +2136,7 @@ function selectIdleWorkers() {
 	if (idle.length > 0) {
 		state.idleWorkerCycleIndex = (state.idleWorkerCycleIndex + 1) % idle.length;
 		state.selectedIds.add(idle[state.idleWorkerCycleIndex]!.id);
+		sfx.play("ui_select_unit", { point: idle[0] });
 	} else {
 		state.idleWorkerCycleIndex = -1;
 	}
@@ -2394,7 +2397,7 @@ function isVisibleNow(visibility: ClientSnapshot["visibility"], x: number, y: nu
 	return false;
 }
 
-function hitTest(x: number, y: number) {
+function hitTest(x: number, y: number): Unit | Building | ResourceNode | Corpse | null {
 	if (!state.snapshot) return null;
 	const candidates = [
 		...Object.values(state.snapshot.units),
@@ -2405,15 +2408,15 @@ function hitTest(x: number, y: number) {
 	return closestHit(x, y, candidates);
 }
 
-function hitTestForSelection(x: number, y: number) {
+function hitTestForSelection(x: number, y: number): Unit | Building | ResourceNode | Corpse | null {
 	if (!state.snapshot) return null;
 	const unitHit = closestHit(x, y, Object.values(state.snapshot.units));
 	if (unitHit) return unitHit;
 	return hitTest(x, y);
 }
 
-function closestHit<T extends Unit | Building | ResourceNode | Corpse>(x: number, y: number, candidates: T[]) {
-	let best = null;
+function closestHit<T extends Unit | Building | ResourceNode | Corpse>(x: number, y: number, candidates: T[]): T|null {
+	let best: T|null = null;
 	let bestDistance = Infinity;
 	for (const entity of candidates) {
 		const rect = renderedEntityRect(entity);
