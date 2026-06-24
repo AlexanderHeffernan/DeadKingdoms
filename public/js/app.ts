@@ -417,7 +417,7 @@ document.getElementById("leaveButton")?.addEventListener("click", async () => {
 });
 document.getElementById("settingsButton")?.addEventListener("click", openSettingsModal);
 document.getElementById("settingsCloseButton")?.addEventListener("click", closeSettingsModal);
-document.getElementById("settingsMuteButton")?.addEventListener("click", toggleMusicMute);
+document.getElementById("settingsMuteButton")?.addEventListener("change", toggleMusicMute);
 document.getElementById("settingsModal")?.addEventListener("pointerdown", closeSettingsModalOnBackdrop);
 document.getElementById("masterVolumeInput")?.addEventListener("input", (event) => {
 	if (!(event.target instanceof HTMLInputElement)) return;
@@ -1351,10 +1351,10 @@ function songName(track: string) {
 	return file.replace(/\.mp3$/i, "").replace(/-\d+$/i, "");
 }
 
-function toggleMusicMute() {
+function toggleMusicMute(event?: Event) {
 	sfx.unlock();
 	sfx.play("music_toggle");
-	music.muted = !music.muted;
+	music.muted = event?.target instanceof HTMLInputElement ? event.target.checked : !music.muted;
 	localStorage.setItem("rtsMusicMuted", String(music.muted));
 	music.audio.muted = music.muted;
 	if (music.muted) {
@@ -1408,7 +1408,7 @@ function closeSettingsModalOnEscape(event: KeyboardEvent) {
 function updateMuteButton() {
 	const button = document.getElementById("settingsMuteButton");
 	if (!button) return;
-	button.classList.toggle("muted", music.muted);
+	if (button instanceof HTMLInputElement) button.checked = music.muted;
 	button.setAttribute("aria-label", music.muted ? "Unmute music" : "Mute music");
 	button.title = music.muted ? "Unmute music" : "Mute music";
 }

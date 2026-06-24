@@ -117,12 +117,6 @@
 	padding: 0;
 }
 
-.banner .settings-option {
-	width: 100%;
-	padding: 0 8px;
-	justify-content: flex-start;
-}
-
 .bottom-right {
 	bottom: 0;
 	right: 0;
@@ -225,22 +219,6 @@
 	background: #4f8fd8;
 	mask: var(--flag-url) center / contain no-repeat;
 	-webkit-mask: var(--flag-url) center / contain no-repeat;
-}
-.queue {
-	min-width: 170px;
-	height: 48px;
-	display: grid;
-	align-content: center;
-	gap: 2px;
-	padding: 0 10px;
-	color: #e9bd59;
-	border: 1px solid rgb(233 189 89 / 0.35);
-	background: rgb(17 24 19 / 0.8);
-	font-size: var(--ui-text-sm);
-}
-
-.queue span {
-	color: #cfc7b7;
 }
 .action-hover {
 	position: fixed;
@@ -425,12 +403,6 @@
 	font-size: var(--ui-text-xs);
 	font-weight: 900;
 	line-height: 1;
-}
-
-.resource-icon i {
-	position: absolute;
-	width: 3px;
-	height: 3px;
 }
 
 .status {
