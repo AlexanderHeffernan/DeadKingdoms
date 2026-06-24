@@ -59,7 +59,7 @@ export function createHandler(state: ServerState, clients: Set<Client>, globalLe
 			if (req.method === "GET" && url.pathname === "/api/global-leaderboard") return json(res, { entries: await globalLeaderboard.entries() });
 			if (req.method === "GET" && url.pathname.startsWith("/api/global-leaderboard/")) return await globalLeaderboardSnapshot(res, globalLeaderboard, url);
 			const world = state.currentWorld();
-			if (req.method === "GET" && url.pathname === "/api/snapshot") return world ? json(res, makeSnapshot(world)) : worldUnavailable(res);
+			if (req.method === "GET" && url.pathname === "/api/snapshot") return world ? liveSnapshot(res, world, url) : worldUnavailable(res);
 			if (req.method === "GET" && url.pathname === "/events") return world ? streamEvents(req, res, world, clients, globalLeaderboard, url) : worldUnavailable(res);
 			if (req.method === "POST" && url.pathname === "/api/log") return await receiveClientLog(req, res, world);
 			if (req.method === "POST" && !world && url.pathname.startsWith("/api/")) return worldUnavailable(res);
@@ -109,6 +109,15 @@ async function globalLeaderboardSnapshot(res: import("node:http").ServerResponse
 			? { ...snapshot, playerId }
 			: snapshot,
 	});
+}
+
+function liveSnapshot(res: import("node:http").ServerResponse, world: World, url: URL) {
+	const auth = authenticatedPlayer(world, {
+		playerId: url.searchParams.get("playerId"),
+		sessionToken: url.searchParams.get("sessionToken"),
+	});
+	if (!auth) return invalidSession(res);
+	return json(res, makeSnapshot(world, auth.playerId, null, adminViewFromParam(url.searchParams.get("adminView"))));
 }
 
 async function setDevTime(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
