@@ -305,8 +305,8 @@ function isComplete(entity: Building) {
 }
 
 function formatCost(cost: Record<string, number>) {
-	const text = Object.entries(cost).map(([resource, amount]) => `${amount} ${resource}`).join(", ");
-	return text || "free";
+	const items = Object.entries(cost).map(([resource, amount]) => `<span class="hover-cost-item"><span>${amount}</span>${resourceIcon(resource)}</span>`).join("");
+	return items ? `<span class="hover-cost-list">${items}</span>` : "free";
 }
 
 function disabledReason(resources: Record<string, number>, cost: Record<string, number>, forceDisabled: boolean) {

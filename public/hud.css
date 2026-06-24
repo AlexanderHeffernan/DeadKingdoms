@@ -269,6 +269,34 @@
 	color: #cfc7b7;
 }
 
+.hover-cost-line,
+.hover-cost-list,
+.hover-cost-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.hover-cost-list {
+	flex-wrap: wrap;
+	row-gap: 3px;
+	vertical-align: middle;
+}
+
+.hover-cost-item {
+	color: #f4efe6;
+}
+
+.hover-cost-item .resource-icon {
+	width: 18px;
+	height: 18px;
+}
+
+.hover-cost-item .resource-image-icon {
+	width: 18px;
+	height: 18px;
+}
+
 .hover-warning {
 	margin-top: 5px;
 	color: #d8714f;

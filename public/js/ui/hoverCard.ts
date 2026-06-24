@@ -15,7 +15,7 @@ export class HoverCard {
 		this.el.innerHTML = `
 			<div class="hover-title">${escapeHtml(button.dataset.label ?? "")}</div>
 			${button.dataset.description ? `<div class="hover-line">${escapeHtml(button.dataset.description ?? "")}</div>` : ""}
-			<div class="hover-line">Cost: ${escapeHtml(cost)}</div>
+			<div class="hover-line hover-cost-line"><span>Cost:</span> ${cost}</div>
 			${button.dataset.shortcut ? `<div class="hover-line">Shortcut: ${escapeHtml(button.dataset.shortcut ?? "")}</div>` : ""}
 			${disabled ? `<div class="hover-warning">${escapeHtml(disabled ?? "")}</div>` : ""}
 		`;
