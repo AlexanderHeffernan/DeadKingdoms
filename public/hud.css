@@ -333,10 +333,6 @@
 	display: block;
 }
 
-.population-icon-button.active .resource-icon {
-	filter: drop-shadow(0 0 5px rgb(233 189 89 / 0.38));
-}
-
 .population-icon-button:hover,
 .population-icon-button:focus-visible {
 	background: none;
@@ -358,6 +354,34 @@
 	width: 26px;
 	height: 26px;
 	image-rendering: pixelated;
+}
+
+.resource-image-icon {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	image-rendering: pixelated;
+}
+
+.population-icon-base,
+.population-icon-flag {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	image-rendering: pixelated;
+}
+
+.population-icon-base {
+	object-fit: contain;
+}
+
+.population-icon-flag {
+	background: var(--population-flag-color, #4f8fd8);
+	mask: url("/sprites/ui/settings/bannerIcons/population/flag.png") center / contain no-repeat;
+	-webkit-mask: url("/sprites/ui/settings/bannerIcons/population/flag.png") center / contain no-repeat;
 }
 
 .resource-gatherer-badge {

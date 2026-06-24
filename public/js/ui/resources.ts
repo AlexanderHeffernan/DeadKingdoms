@@ -33,7 +33,7 @@ export class ResourcePanel implements GameUiComponent {
 				data-hover-title="Population"
 				data-hover-detail="${populationDescription(player.population, player.popCap, idleWorkers)}"
 			>
-				${populationPill(player.population, player.popCap, idleWorkers)}
+				${populationPill(player.population, player.popCap, idleWorkers, player.color)}
 			</span>
 		`;
 		this.attachHovers();
@@ -63,7 +63,7 @@ function resourcePill(resource: string, amount: number, gatherers: number) {
 	return `<span class="resource-pill" data-hover-title="${resourceLabel(resource)}" data-hover-detail="${resourceDescription(resource)}">${resourceIcon(resource, gatherers)}<strong>${amount}</strong></span>`;
 }
 
-function populationPill(population: number, popCap: number, idleWorkers: number) {
+function populationPill(population: number, popCap: number, idleWorkers: number, playerColor: string) {
 	const active = idleWorkers > 0;
 	return `<span class="population-pill">
 		<button
@@ -71,7 +71,7 @@ function populationPill(population: number, popCap: number, idleWorkers: number)
 			type="button"
 			aria-label="Select idle villager"
 			aria-disabled="${String(!active)}"
-		>${populationIcon(idleWorkers)}</button>
+		>${populationIcon(idleWorkers, playerColor)}</button>
 		<strong>${population}/${popCap}</strong>
 	</span>`;
 }
@@ -94,65 +94,25 @@ function resourceDescription(resource: string) {
 	return descriptions[resource as keyof typeof descriptions] || "Stored resource.";
 }
 
-function populationIcon(idleWorkers: number) {
-	return `<span class="resource-icon" aria-hidden="true">
-<i style="left:9px;top:3px;background:#e0a46a"></i><i style="left:12px;top:3px;background:#e0a46a"></i>
-<i style="left:9px;top:6px;background:#b2824f"></i><i style="left:12px;top:6px;background:#b2824f"></i>
-<i style="left:6px;top:12px;background:#4f8fd8"></i><i style="left:9px;top:12px;background:#4f8fd8"></i><i style="left:12px;top:12px;background:#4f8fd8"></i><i style="left:15px;top:12px;background:#4f8fd8"></i>
-<i style="left:6px;top:15px;background:#2f5d9a"></i><i style="left:9px;top:15px;background:#2f5d9a"></i><i style="left:12px;top:15px;background:#2f5d9a"></i><i style="left:15px;top:15px;background:#2f5d9a"></i>
-<i style="left:9px;top:18px;background:#252321"></i><i style="left:15px;top:18px;background:#252321"></i>
+function populationIcon(idleWorkers: number, playerColor: string) {
+	return `<span class="resource-icon population-icon" style="--population-flag-color:${playerColor}" aria-hidden="true">
+<img class="population-icon-base" src="/sprites/ui/settings/bannerIcons/population/population.png" alt="" />
+<span class="population-icon-flag"></span>
 ${idleWorkerBadge(idleWorkers)}</span>`;
 }
 
 export function resourceIcon(resource: string, gatherers = 0) {
-	const grids = {
-		wood: [
-			"........",
-			".bbWWW..",
-			"bBWWWWb.",
-			".bbWWW..",
-			"...bbWWW",
-			"..bBWWWW",
-			"...bbWWW",
-			"........",
-		],
-		food: [
-			"........",
-			"...MM...",
-			"..MFFM..",
-			".MFRRFM.",
-			".FRRRRF.",
-			"..FRRF..",
-			"...ff...",
-			"........",
-		],
-		ore: [
-			"........",
-			"...QQ...",
-			"..QMMQ..",
-			".QMMMMQ.",
-			"..QMMQ..",
-			".QQ..QQ.",
-			"QMMQQMMQ",
-			"........",
-		],
+	const icon = resourceIconPath(resource);
+	return `<span class="resource-icon" aria-hidden="true"><img class="resource-image-icon" src="${icon}" alt="" />${gathererBadge(gatherers)}</span>`;
+}
+
+function resourceIconPath(resource: string) {
+	const icons = {
+		wood: "/sprites/ui/settings/bannerIcons/wood.png",
+		food: "/sprites/ui/settings/bannerIcons/food.png",
+		ore: "/sprites/ui/settings/bannerIcons/ore.png",
 	};
-	const colors = {
-		".": "transparent",
-		W: "#6a4a32",
-		b: "#8b623e",
-		B: "#b2824f",
-		R: "#9f262f",
-		F: "#d84b3e",
-		f: "#f0a28a",
-		Q: "#c1b77b",
-		M: "#9aa3a0",
-	};
-	const grid = grids[resource as keyof typeof grids] || grids.wood;
-	const pixels = grid.flatMap((row: string, y: number) =>
-		[...row].map((key: string, x: number) => `<i style="left:${x * 3}px;top:${y * 3}px;background:${colors[key as keyof typeof colors]}"></i>`),
-	).join("");
-	return `<span class="resource-icon" aria-hidden="true">${pixels}${gathererBadge(gatherers)}</span>`;
+	return icons[resource as keyof typeof icons] || icons.wood;
 }
 
 function gathererBadge(gatherers: number) {
