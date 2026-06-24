@@ -4,6 +4,7 @@ import { ArcherUnit, ScoutUnit, SoldierUnit } from "../../units/index.js";
 export class Barracks extends ProductionBuilding {
 	static readonly type = "barracks";
 	static readonly label = "Barracks";
+	static readonly description = "Trains soldiers, archers, and scouts.";
 	static readonly sprite = "barracks";
 	static readonly maxHp = 1200;
 	static readonly size = 3;

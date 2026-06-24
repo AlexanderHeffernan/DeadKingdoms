@@ -34,10 +34,10 @@ export class VillagerUnit extends BaseUnit {
 		else super.step(context, unit, dt);
 	}
 
-	public onAttacked(unit: Unit, attacker: Unit) {
+	public onAttacked(context: Pick<UnitSimulationContext, "setCommand">, unit: Unit, attacker: Unit) {
 		if (attacker.ownerId === unit.ownerId || attacker.hp <= 0) return;
 		if (unit.command.type !== "idle" && unit.command.type !== "gather" && unit.command.type !== "build") return;
-		unit.command = { type: "attack", targetId: attacker.id };
+		context.setCommand(unit, { type: "attack", targetId: attacker.id });
 	}
 
 	private stepGather(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "gather" }>, dt: number) {
@@ -53,12 +53,10 @@ export class VillagerUnit extends BaseUnit {
 			}
 			const next = context.findNextResource(unit, command.resourceKind);
 			if (next) {
-				command.targetId = next.id;
-				command.path = null;
-				command.progress = 0;
+				context.setCommand(unit, { type: "gather", targetId: next.id, resourceKind: command.resourceKind, progress: 0, path: null });
 				return;
 			}
-			unit.command = { type: "idle" };
+			context.setCommand(unit, { type: "idle" });
 			return;
 		}
 		const targetPoint = context.isBuilding(resource) ? context.centerOf(resource) : resource;
@@ -123,7 +121,7 @@ export class VillagerUnit extends BaseUnit {
 	private stepBuild(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "build" }>, dt: number) {
 		const building = context.buildingById(command.targetId);
 		if (!building || building.ownerId !== unit.ownerId) {
-			unit.command = { type: "idle" };
+			context.setCommand(unit, { type: "idle" });
 			return;
 		}
 		if (context.isComplete(building) && building.hp >= building.maxHp) {

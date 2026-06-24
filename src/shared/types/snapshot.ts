@@ -227,7 +227,7 @@ export interface AdminSnapshot {
 /** Sanitized player state sent to clients in snapshots. */
 export type SnapshotPlayer = Pick<
 Player,
-"id" | "name" | "color" | "resources" | "autoReplenishFarms" | "population" | "popCap" | "defeated" | "score" | "joinedAt"
+"id" | "name" | "color" | "resources" | "autoReplenishFarms" | "population" | "popCap" | "workerCounts" | "defeated" | "score" | "joinedAt"
 > & {
 	resources: Record<ResourceType, number>;
 };

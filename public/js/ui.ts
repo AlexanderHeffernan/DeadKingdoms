@@ -6,6 +6,7 @@ import type { GameUiComponent } from "./ui/component.js";
 import { mustGet } from "./ui/dom.js";
 import { HoverCard } from "./ui/hoverCard.js";
 import { ResourcePanel } from "./ui/resources.js";
+import { TrainingStatusPanel } from "./ui/trainingStatus.js";
 import { TopPanel } from "./ui/topPanel.js";
 
 export class UI {
@@ -78,11 +79,9 @@ export class UI {
 			restartServer: actions.restartServer,
 		});
 		this.components = [
-			new ResourcePanel(state, mustGet("resources"), hoverCard),
+			new ResourcePanel(state, mustGet("resources"), hoverCard, actions),
 			new TopPanel(
 				state,
-				mustGet("status"),
-				mustGet("timeOfDay"),
 				mustGet("ping"),
 				mustGet("fps"),
 				mustGet("serverPerf"),
@@ -100,6 +99,7 @@ export class UI {
 				players: mustGet("adminPlayers"),
 				events: mustGet("adminEvents"),
 			}, adminDashboard),
+			new TrainingStatusPanel(state, mustGet("trainingStatus"), hoverCard),
 			new BottomPanel(state, actions, mustGet("selection"), mustGet("actions"), hoverCard),
 		];
 		this.toast = mustGet("toast");

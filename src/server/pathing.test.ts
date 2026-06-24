@@ -1342,6 +1342,7 @@ test("moveWithPath uses the real target even when it is unexplored", () => {
 		explored: new Set([4 * MAP_SIZE + 4]),
 		population: 1,
 		popCap: 10,
+		workerCounts: { idle: 0, gathering: { wood: 0, food: 0, ore: 0 } },
 		defeated: false,
 		score: 0,
 		joinedAt: Date.now(),
