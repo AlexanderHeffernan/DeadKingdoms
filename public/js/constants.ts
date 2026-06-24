@@ -9,8 +9,8 @@ export const SCALE = 4;
 export const BUILDINGS = Object.fromEntries(
 	Object.entries(BUILDING_TYPES)
 		.filter(([buildingType]) => buildingType !== "townCenter")
-		.map(([buildingType, building]) => [buildingType, { label: building.label, cost: building.cost }]),
-) as Record<string, { label: string; cost: Record<string, number> }>;
+		.map(([buildingType, building]) => [buildingType, { label: building.label, cost: building.cost, description: building.description }]),
+) as Record<string, { label: string; cost: Record<string, number>; description: string }>;
 
 export const TRAINING = {
 	...Object.fromEntries(

@@ -117,7 +117,7 @@ export interface ServerPerfStats {
 	zombieAiWorker?: ServerPerfWorkerStats;
 }
 
-export type AdminLevel = "observer" | "moderator" | "operator";
+export type AdminLevel = "admin";
 
 export interface ServerPerfPhase {
 	name: string;
@@ -227,7 +227,7 @@ export interface AdminSnapshot {
 /** Sanitized player state sent to clients in snapshots. */
 export type SnapshotPlayer = Pick<
 Player,
-"id" | "name" | "color" | "resources" | "autoReplenishFarms" | "population" | "popCap" | "defeated" | "score" | "joinedAt"
+"id" | "name" | "color" | "resources" | "autoReplenishFarms" | "population" | "popCap" | "workerCounts" | "defeated" | "score" | "joinedAt"
 > & {
 	resources: Record<ResourceType, number>;
 };

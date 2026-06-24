@@ -16,6 +16,7 @@ export type LastSeen = {
 
 export type GameState = {
 	playerId: string | null;
+	sessionToken: string | null;
 	snapshot: ClientSnapshot | null;
 	selectedIds: Set<string>;
 	lastSeen: LastSeen;
@@ -46,6 +47,7 @@ export type ViewState = {
 
 export type UIActions = {
 	setBuildMode: (type: string) => void;
+	selectIdleWorkers: () => void;
 	train: (buildingId: string, unitType: UnitType) => void;
 	blowHorn: (unitIds: string[]) => void;
 	toggleAutoFarm: () => void;

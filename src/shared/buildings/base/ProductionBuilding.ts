@@ -22,7 +22,7 @@ export abstract class ProductionBuilding extends Building {
 	protected serializeExtra(): Partial<BuildingSnapshot> {
 		return {
 			...super.serializeExtra(),
-			queue: this.queue,
+			queue: this.queue.map((item) => ({ ...item })),
 			rallyPoint: this.rallyPoint,
 		};
 	}

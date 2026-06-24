@@ -57,10 +57,14 @@ export function makeSnapshot(
 					id,
 					name: player.name,
 					color: player.color,
-					resources: player.resources,
+					resources: { ...player.resources },
 					autoReplenishFarms: player.autoReplenishFarms,
 					population: player.population,
 					popCap: player.popCap,
+					workerCounts: {
+						idle: player.workerCounts.idle,
+						gathering: { ...player.workerCounts.gathering },
+					},
 					defeated: player.defeated,
 					score: player.score,
 					joinedAt: player.joinedAt,
@@ -111,7 +115,6 @@ function dayNightStateFor(world: World) {
 function buildAdminSnapshot(world: World, level: AdminLevel | undefined, view: AdminView): AdminSnapshot | null {
 	if (!level) return null;
 	if (view === "closed") return { level, view };
-	const canViewIpAddresses = level === "moderator" || level === "operator";
 	const includePerf = view === "popup" || view === "overview" || view === "performance";
 	const includePlayers = view === "popup" || view === "overview" || view === "players";
 	const includeLogs = view === "overview" || view === "logs";
@@ -143,11 +146,11 @@ function buildAdminSnapshot(world: World, level: AdminLevel | undefined, view: A
 			pingMs: player.connection?.pingMs ?? null,
 			...(player.connection?.lastSnapshotBytes !== undefined ? { lastSnapshotBytes: player.connection.lastSnapshotBytes } : {}),
 			...(player.connection?.lastSnapshotKind !== undefined ? { lastSnapshotKind: player.connection.lastSnapshotKind } : {}),
-			...(canViewIpAddresses ? { ipAddress: player.connection?.ipAddress ?? "unknown" } : {}),
+			ipAddress: player.connection?.ipAddress ?? "unknown",
 		})) } : {}),
 		...(includeEvents ? { events: world.notices.slice(-8) } : {}),
 		...(includeLogs ? { logs: world.adminLogs.slice(-200) } : {}),
-		...(view === "bans" && canViewIpAddresses ? { bannedIpAddresses: (world.bannedIpAddresses ?? []).slice() } : {}),
+		...(view === "bans" ? { bannedIpAddresses: (world.bannedIpAddresses ?? []).slice() } : {}),
 	};
 }
 
