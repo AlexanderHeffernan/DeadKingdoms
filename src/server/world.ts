@@ -305,7 +305,7 @@ export function command(world: World, playerId: PlayerId, body: CommandPayload):
 	const player = world.players[playerId];
 	if (!player || player.defeated) return { ok: false, error: "Player unavailable." };
 	rebuildOccupancy(world);
-	const handler = COMMAND_HANDLERS[body.type];
+	const handler = hasOwn(COMMAND_HANDLERS, body.type) ? COMMAND_HANDLERS[body.type] : null;
 	if (!handler) return { ok: false, error: "Unknown command." };
 	return handler(world, playerId, body as never);
 }
@@ -491,6 +491,10 @@ function unitHash(idValue: string): number {
 	let hash = 0;
 	for (let i = 0; i < idValue.length; i += 1) hash = (hash * 31 + idValue.charCodeAt(i)) | 0;
 	return Math.abs(hash);
+}
+
+function hasOwn<T>(record: Record<string, T>, key: string) {
+	return Object.prototype.hasOwnProperty.call(record, key);
 }
 
 type CommandHandler<T extends CommandPayload["type"]> = (

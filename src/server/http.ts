@@ -3,12 +3,14 @@ import { randomBytes } from "node:crypto";
 import { extname, join, normalize } from "node:path";
 import { makeSnapshot } from "../shared/messages.js";
 import { MAX_PLAYERS } from "../shared/config.js";
+import { BUILDING_TYPES } from "../shared/buildings/index.js";
+import { unitBehaviorFor } from "../shared/unitRegistry.js";
 import { addAdminLog, addPlayer, command, emitDevBang, grantPlayerSoldiers, removePlayer, setWorldTimeOfDay, shiftWorldTime, spawnZombieHorde, toggleTownCenterInvincibility } from "./world.js";
 import { Logs } from "../shared/logs.js";
 import type { ChangelogStore } from "./changelog.js";
 import type { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { ServerState } from "./serverState.js";
-import type { AdminView, CommandPayload, Player, PlayerId, Snapshot, SnapshotDelta, World } from "../shared/types.js";
+import type { AdminView, BuildingType, CommandPayload, CommandType, Player, PlayerId, Snapshot, SnapshotDelta, UnitType, World } from "../shared/types.js";
 
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
 const CLIENT_BUILD_DIR = new URL("../../dist/client/public/", import.meta.url);
@@ -28,6 +30,22 @@ const MIME = {
 // the next snapshot to avoid runaway memory and "seconds-behind" lag.
 const BACKPRESSURE_BYTES = 256 * 1024;
 const DISCONNECT_LEAVE_GRACE_MS = 10_000;
+const MAX_JSON_BODY_BYTES = 256 * 1024;
+const MAX_COMMAND_UNIT_IDS = 1000;
+const COMMAND_TYPES: Record<CommandType, true> = {
+	move: true,
+	build: true,
+	instantBuild: true,
+	finishBuild: true,
+	deleteBuilding: true,
+	setRallyPoint: true,
+	train: true,
+	attack: true,
+	gather: true,
+	blowHorn: true,
+	toggleAutoFarm: true,
+	replenishFarm: true,
+};
 
 const disconnectTimers = new WeakMap<World, Map<PlayerId, NodeJS.Timeout>>();
 
@@ -90,6 +108,7 @@ export function createHandler(state: ServerState, clients: Set<Client>, globalLe
 			return await serveStatic(req, res, url);
 		} catch (error) {
 			if (isRequestAbort(error)) return;
+			if (error instanceof JsonBodyError) return json(res, { ok: false, error: error.message }, error.status);
 			console.error(`Request failed: ${errorMessage(error)}`);
 			if (!res.headersSent && !res.destroyed) return json(res, { ok: false, error: "Internal server error." }, 500);
 			res.destroy();
@@ -587,11 +606,106 @@ async function receiveClientPing(req: import("node:http").IncomingMessage, res: 
 }
 
 async function receiveCommand(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as Partial<CommandPayload> & { sessionToken?: unknown };
+	const body = await readJson(req);
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
-	const result = command(world, auth.playerId, { ...body, playerId: auth.playerId } as CommandPayload);
+	const payload = validateCommandPayload(body, auth.playerId);
+	if (!payload.ok) return json(res, { ok: false, error: payload.error }, 400);
+	const result = command(world, auth.playerId, payload.command);
 	json(res, result, result.ok ? 200 : 400);
+}
+
+function validateCommandPayload(body: Record<string, unknown>, playerId: PlayerId): { ok: true; command: CommandPayload } | { ok: false; error: string } {
+	const type = body.type;
+	if (!isCommandType(type)) return { ok: false, error: "Unknown command." };
+	switch (type) {
+		case "move": {
+			const unitIds = validateUnitIds(body.unitIds);
+			if (!unitIds.ok) return unitIds;
+			const point = validatePoint(body);
+			if (!point.ok) return point;
+			return { ok: true, command: { type, playerId, unitIds: unitIds.value, x: point.x, y: point.y } };
+		}
+		case "build": {
+			const unitIds = validateUnitIds(body.unitIds);
+			if (!unitIds.ok) return unitIds;
+			const point = validatePoint(body);
+			if (!point.ok) return point;
+			if (!isBuildingType(body.buildingType)) return { ok: false, error: "Unknown building." };
+			return { ok: true, command: { type, playerId, unitIds: unitIds.value, buildingType: body.buildingType, x: point.x, y: point.y } };
+		}
+		case "instantBuild": {
+			const point = validatePoint(body);
+			if (!point.ok) return point;
+			if (!isBuildingType(body.buildingType)) return { ok: false, error: "Unknown building." };
+			return { ok: true, command: { type, playerId, buildingType: body.buildingType, x: point.x, y: point.y } };
+		}
+		case "finishBuild": {
+			const unitIds = validateUnitIds(body.unitIds);
+			if (!unitIds.ok) return unitIds;
+			if (typeof body.buildingId !== "string") return { ok: false, error: "Invalid building." };
+			return { ok: true, command: { type, playerId, unitIds: unitIds.value, buildingId: body.buildingId } };
+		}
+		case "deleteBuilding": {
+			if (typeof body.buildingId !== "string") return { ok: false, error: "Invalid building." };
+			return { ok: true, command: { type, playerId, buildingId: body.buildingId } };
+		}
+		case "setRallyPoint": {
+			const point = validatePoint(body);
+			if (!point.ok) return point;
+			if (typeof body.buildingId !== "string") return { ok: false, error: "Invalid building." };
+			if (body.targetId !== undefined && typeof body.targetId !== "string") return { ok: false, error: "Invalid rally target." };
+			return { ok: true, command: { type, playerId, buildingId: body.buildingId, x: point.x, y: point.y, targetId: body.targetId } };
+		}
+		case "train": {
+			if (typeof body.buildingId !== "string") return { ok: false, error: "Invalid building." };
+			if (!isUnitType(body.unitType)) return { ok: false, error: "Unknown unit." };
+			return { ok: true, command: { type, playerId, buildingId: body.buildingId, unitType: body.unitType } };
+		}
+		case "attack":
+		case "gather": {
+			const unitIds = validateUnitIds(body.unitIds);
+			if (!unitIds.ok) return unitIds;
+			if (typeof body.targetId !== "string") return { ok: false, error: "Invalid target." };
+			return { ok: true, command: { type, playerId, unitIds: unitIds.value, targetId: body.targetId } };
+		}
+		case "blowHorn": {
+			const unitIds = validateUnitIds(body.unitIds);
+			if (!unitIds.ok) return unitIds;
+			return { ok: true, command: { type, playerId, unitIds: unitIds.value } };
+		}
+		case "toggleAutoFarm":
+			return { ok: true, command: { type, playerId } };
+		case "replenishFarm":
+			if (typeof body.farmId !== "string") return { ok: false, error: "Invalid farm." };
+			return { ok: true, command: { type, playerId, farmId: body.farmId } };
+	}
+}
+
+function validateUnitIds(value: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
+	if (!Array.isArray(value)) return { ok: false, error: "Unit IDs are required." };
+	if (value.length > MAX_COMMAND_UNIT_IDS) return { ok: false, error: "Too many units selected." };
+	if (!value.every((unitId) => typeof unitId === "string")) return { ok: false, error: "Invalid unit ID." };
+	return { ok: true, value };
+}
+
+function validatePoint(body: Record<string, unknown>): { ok: true; x: number; y: number } | { ok: false; error: string } {
+	if (typeof body.x !== "number" || typeof body.y !== "number" || !Number.isFinite(body.x) || !Number.isFinite(body.y)) {
+		return { ok: false, error: "Invalid map position." };
+	}
+	return { ok: true, x: body.x, y: body.y };
+}
+
+function isCommandType(value: unknown): value is CommandType {
+	return typeof value === "string" && hasOwn(COMMAND_TYPES, value);
+}
+
+function isBuildingType(value: unknown): value is BuildingType {
+	return typeof value === "string" && hasOwn(BUILDING_TYPES, value);
+}
+
+function isUnitType(value: unknown): value is UnitType {
+	return typeof value === "string" && !!unitBehaviorFor(value as UnitType);
 }
 
 async function leaveGame(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
@@ -794,10 +908,35 @@ function cacheControl(filePath: string) {
 	return "public, max-age=86400";
 }
 
-async function readJson(req: import("node:http").IncomingMessage): Promise<unknown> {
+async function readJson(req: import("node:http").IncomingMessage): Promise<Record<string, unknown>> {
 	let data = "";
-	for await (const chunk of req) data += chunk;
-	return data ? JSON.parse(data) : {};
+	let bytes = 0;
+	try {
+		for await (const chunk of req) {
+			const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+			bytes += Buffer.byteLength(text);
+			if (bytes > MAX_JSON_BODY_BYTES) throw new JsonBodyError("Request body is too large.", 413);
+			data += text;
+		}
+		if (!data) return {};
+		const parsed = JSON.parse(data) as unknown;
+		if (!isJsonObject(parsed)) throw new JsonBodyError("JSON body must be an object.", 400);
+		return parsed;
+	} catch (error) {
+		if (error instanceof JsonBodyError) throw error;
+		if (isRequestAbort(error)) throw error;
+		throw new JsonBodyError("Malformed JSON body.", 400);
+	}
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+class JsonBodyError extends Error {
+	constructor(message: string, readonly status: number) {
+		super(message);
+	}
 }
 
 function isRequestAbort(error: unknown) {
