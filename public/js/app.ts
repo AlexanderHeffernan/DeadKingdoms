@@ -84,12 +84,17 @@ const DEV_COMMAND_BUFFER_LENGTH = 40;
 const PLAYER_NAME_STORAGE_KEY = "rtsPlayerName";
 const PLAYER_COLOR_STORAGE_KEY = "rtsPlayerColor";
 const TEXT_SCALE_STORAGE_KEY = "rtsTextScale";
+const MASTER_VOLUME_STORAGE_KEY = "rtsMasterVolume";
+const MUSIC_VOLUME_STORAGE_KEY = "rtsMusicVolume";
+const SFX_VOLUME_STORAGE_KEY = "rtsSfxVolume";
 const THROW_PANNING_STORAGE_KEY = "rtsThrowPanning";
 const DRAG_PAN_SENSITIVITY_STORAGE_KEY = "rtsDragPanSensitivity";
 const POINTER_LOCK_PANNING_STORAGE_KEY = "rtsPointerLockPanning";
 const EDGE_SCROLL_STORAGE_KEY = "rtsEdgeScroll";
 const EDGE_SCROLL_SPEED_STORAGE_KEY = "rtsEdgeScrollSpeed";
 const DEFAULT_TEXT_SCALE = 100;
+const DEFAULT_VOLUME = 100;
+const MUSIC_BASE_VOLUME = 0.25;
 const MIN_TEXT_SCALE = 80;
 const MAX_TEXT_SCALE = 150;
 const TEXT_SCALE_SLIDER_THUMB_WIDTH = 14;
@@ -414,6 +419,18 @@ document.getElementById("settingsButton")?.addEventListener("click", openSetting
 document.getElementById("settingsCloseButton")?.addEventListener("click", closeSettingsModal);
 document.getElementById("settingsMuteButton")?.addEventListener("click", toggleMusicMute);
 document.getElementById("settingsModal")?.addEventListener("pointerdown", closeSettingsModalOnBackdrop);
+document.getElementById("masterVolumeInput")?.addEventListener("input", (event) => {
+	if (!(event.target instanceof HTMLInputElement)) return;
+	setMasterVolume(Number(event.target.value));
+});
+document.getElementById("musicVolumeInput")?.addEventListener("input", (event) => {
+	if (!(event.target instanceof HTMLInputElement)) return;
+	setMusicVolume(Number(event.target.value));
+});
+document.getElementById("sfxVolumeInput")?.addEventListener("input", (event) => {
+	if (!(event.target instanceof HTMLInputElement)) return;
+	setSfxVolume(Number(event.target.value));
+});
 document.getElementById("textScaleInput")?.addEventListener("input", (event) => {
 	if (!(event.target instanceof HTMLInputElement)) return;
 	setTextScale(Number(event.target.value));
@@ -497,6 +514,7 @@ minimap.addEventListener("mousedown", onMinimapMouseDown);
 
 renderer.resize();
 initTextScaleSetting();
+initVolumeSettings();
 initThrowPanningSetting();
 initDragPanSensitivitySetting();
 initPointerLockPanningSetting();
@@ -1107,6 +1125,84 @@ function clampTextScale(value: number) {
 	return Math.min(MAX_TEXT_SCALE, Math.max(MIN_TEXT_SCALE, Math.round(value)));
 }
 
+function initVolumeSettings() {
+	applyVolumeSettings();
+	updateVolumeControl("masterVolumeInput", "masterVolumeValue", storedMasterVolume());
+	updateVolumeControl("musicVolumeInput", "musicVolumeValue", storedMusicVolume());
+	updateVolumeControl("sfxVolumeInput", "sfxVolumeValue", storedSfxVolume());
+}
+
+function storedMasterVolume() {
+	return storedVolume(MASTER_VOLUME_STORAGE_KEY);
+}
+
+function storedMusicVolume() {
+	return storedVolume(MUSIC_VOLUME_STORAGE_KEY);
+}
+
+function storedSfxVolume() {
+	return storedVolume(SFX_VOLUME_STORAGE_KEY);
+}
+
+function storedVolume(key: string) {
+	const stored = localStorage.getItem(key);
+	return stored === null ? DEFAULT_VOLUME : clampVolume(Number(stored));
+}
+
+function setMasterVolume(volume: number) {
+	setStoredVolume(MASTER_VOLUME_STORAGE_KEY, volume);
+}
+
+function setMusicVolume(volume: number) {
+	setStoredVolume(MUSIC_VOLUME_STORAGE_KEY, volume);
+}
+
+function setSfxVolume(volume: number) {
+	setStoredVolume(SFX_VOLUME_STORAGE_KEY, volume);
+}
+
+function setStoredVolume(key: string, volume: number) {
+	const clamped = clampVolume(volume);
+	localStorage.setItem(key, String(clamped));
+	applyVolumeSettings();
+	updateVolumeControl(volumeInputId(key), volumeValueId(key), clamped);
+}
+
+function applyVolumeSettings() {
+	const master = storedMasterVolume() / 100;
+	const musicVolume = storedMusicVolume() / 100;
+	const sfxVolume = storedSfxVolume() / 100;
+	music.audio.volume = MUSIC_BASE_VOLUME * master * musicVolume;
+	sfx.setVolume(master, sfxVolume);
+}
+
+function updateVolumeControl(inputId: string, valueId: string, volume: number) {
+	const input = document.getElementById(inputId);
+	const value = document.getElementById(valueId);
+	if (input instanceof HTMLInputElement) {
+		input.value = String(volume);
+		input.style.setProperty("--range-progress", `${volume}%`);
+	}
+	if (value) value.textContent = `${volume}%`;
+}
+
+function volumeInputId(key: string) {
+	if (key === MASTER_VOLUME_STORAGE_KEY) return "masterVolumeInput";
+	if (key === MUSIC_VOLUME_STORAGE_KEY) return "musicVolumeInput";
+	return "sfxVolumeInput";
+}
+
+function volumeValueId(key: string) {
+	if (key === MASTER_VOLUME_STORAGE_KEY) return "masterVolumeValue";
+	if (key === MUSIC_VOLUME_STORAGE_KEY) return "musicVolumeValue";
+	return "sfxVolumeValue";
+}
+
+function clampVolume(value: number) {
+	if (!Number.isFinite(value)) return DEFAULT_VOLUME;
+	return Math.min(100, Math.max(0, Math.round(value)));
+}
+
 function initThrowPanningSetting() {
 	setThrowPanning(storedThrowPanning());
 }
@@ -1212,7 +1308,7 @@ function updateEdgeScrollSpeedControl(speed: number) {
 }
 
 async function initMusic() {
-	music.audio.volume = 0.25;
+	applyVolumeSettings();
 	music.audio.muted = music.muted;
 	music.audio.loop = false;
 	music.audio.preload = "auto";
@@ -1282,6 +1378,7 @@ function openSettingsModal(event?: Event) {
 	if (!modal || !button) return;
 	modal.classList.remove("hidden");
 	button.setAttribute("aria-expanded", "true");
+	initVolumeSettings();
 	updateTextScaleControl(storedTextScale());
 	updateDragPanSensitivityControl(storedDragPanSensitivity());
 	updateEdgeScrollSpeedControl(storedEdgeScrollSpeed());
