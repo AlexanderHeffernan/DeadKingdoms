@@ -1,6 +1,7 @@
 import { banPlayer as requestBanPlayer, disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getChangelog, getGlobalLeaderboard, getGlobalLeaderboardSnapshot, getStatus, ServerStatus, grantSoldiers as requestGrantSoldiers, join, kickPlayer as requestKickPlayer, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible, unbanIp as requestUnbanIp } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
+import { CameraPanThrow } from "./cameraPanThrow.js";
 import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
 import { UI } from "./ui.js";
 import { BUILDINGS, SCALE, TILE_H, TRAINING } from "./constants.js";
@@ -72,6 +73,7 @@ const view: ViewState = {
 	wallDragStartTile: null,
 };
 const sfx = new SoundEffects(view.camera);
+const cameraPanThrow = new CameraPanThrow();
 
 const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const EDGE_PAN_MARGIN = 14;
@@ -79,6 +81,7 @@ const DEV_COMMAND_BUFFER_LENGTH = 40;
 const PLAYER_NAME_STORAGE_KEY = "rtsPlayerName";
 const PLAYER_COLOR_STORAGE_KEY = "rtsPlayerColor";
 const TEXT_SCALE_STORAGE_KEY = "rtsTextScale";
+const THROW_PANNING_STORAGE_KEY = "rtsThrowPanning";
 const DEFAULT_TEXT_SCALE = 100;
 const MIN_TEXT_SCALE = 80;
 const MAX_TEXT_SCALE = 150;
@@ -408,6 +411,10 @@ document.getElementById("textScaleInput")?.addEventListener("input", (event) => 
 	if (!(event.target instanceof HTMLInputElement)) return;
 	setTextScale(Number(event.target.value));
 });
+document.getElementById("throwPanningInput")?.addEventListener("change", (event) => {
+	if (!(event.target instanceof HTMLInputElement)) return;
+	setThrowPanning(event.target.checked);
+});
 document.addEventListener("keydown", closeSettingsModalOnEscape);
 window.addEventListener("resize", () => updateTextScaleControl(storedTextScale()));
 document.getElementById("leaderboardToggle")?.addEventListener("click", () => {
@@ -441,6 +448,7 @@ canvas.addEventListener("mousemove", onMouseMove);
 canvas.addEventListener("mouseup", onMouseUp);
 canvas.addEventListener("wheel", (event) => {
 	event.preventDefault();
+	cameraPanThrow.stop();
 	const before = screenToIso(event.clientX, event.clientY, view.camera);
 	view.camera.zoom = nextZoom(view.camera.zoom!, event.deltaY < 0 ? 1 : -1);
 	const after = isoToScreen(before.x, before.y, view.camera);
@@ -459,6 +467,7 @@ minimap.addEventListener("mousedown", onMinimapMouseDown);
 
 renderer.resize();
 initTextScaleSetting();
+initThrowPanningSetting();
 drawLoop();
 initMusic();
 updateHomeStatus();
@@ -1065,6 +1074,25 @@ function clampTextScale(value: number) {
 	return Math.min(MAX_TEXT_SCALE, Math.max(MIN_TEXT_SCALE, Math.round(value)));
 }
 
+function initThrowPanningSetting() {
+	setThrowPanning(storedThrowPanning());
+}
+
+function storedThrowPanning() {
+	return localStorage.getItem(THROW_PANNING_STORAGE_KEY) === "true";
+}
+
+function setThrowPanning(enabled: boolean) {
+	localStorage.setItem(THROW_PANNING_STORAGE_KEY, String(enabled));
+	cameraPanThrow.setEnabled(enabled);
+	updateThrowPanningControl(enabled);
+}
+
+function updateThrowPanningControl(enabled: boolean) {
+	const input = document.getElementById("throwPanningInput");
+	if (input instanceof HTMLInputElement) input.checked = enabled;
+}
+
 async function initMusic() {
 	music.audio.volume = 0.25;
 	music.audio.muted = music.muted;
@@ -1470,6 +1498,7 @@ function centerOnTown(once = true) {
 
 function drawLoop() {
 	updateFpsStat();
+	stepCameraPanThrow();
 	edgePan();
 	pruneEffects();
 	renderer.draw(state, view);
@@ -1490,13 +1519,23 @@ function updateFpsStat() {
 	if (el) el.textContent = `FPS ${Math.round(smoothedFps)}`;
 }
 
+function stepCameraPanThrow() {
+	const delta = cameraPanThrow.step();
+	if (delta.x === 0 && delta.y === 0) return;
+	view.camera.x += delta.x;
+	view.camera.y += delta.y;
+	clampCamera();
+}
+
 function onMouseDown(event: MouseEvent) {
 	sfx.unlock();
 	if (event.button === 1 || (event.shiftKey && event.button !== 0)) {
+		cameraPanThrow.begin(event.clientX, event.clientY, event.timeStamp);
 		view.panning = true;
 		view.panLast = { x: event.clientX, y: event.clientY };
 		return;
 	}
+	cameraPanThrow.stop();
 	if (event.button === 2) return handleRightClick(event);
 	view.dragging = true;
 	view.dragStart = { x: event.clientX, y: event.clientY };
@@ -1508,8 +1547,9 @@ function onMouseMove(event: MouseEvent) {
 	const iso = screenToIso(event.clientX, event.clientY, view.camera);
 	view.hoverTile = { x: Math.floor(iso.x), y: Math.floor(iso.y) };
 	if (view.panning) {
-		view.camera.x += event.clientX - view.panLast!.x;
-		view.camera.y += event.clientY - view.panLast!.y;
+		const delta = cameraPanThrow.move(event.clientX, event.clientY, event.timeStamp);
+		view.camera.x += delta.x;
+		view.camera.y += delta.y;
 		clampCamera();
 		view.panLast = { x: event.clientX, y: event.clientY };
 	}
@@ -1523,6 +1563,7 @@ function trackMousePosition(event: MouseEvent) {
 function onMouseUp(event: MouseEvent) {
 	if (view.panning) {
 		view.panning = false;
+		cameraPanThrow.release(event.timeStamp);
 		return;
 	}
 	if (!view.dragging || event.button !== 0) return;
@@ -2001,6 +2042,7 @@ function nextZoom(current: number, direction: number) {
 function moveCameraFromMinimap(event: MouseEvent) {
 	if (!state.snapshot) return;
 	if (event.button === 2) return;
+	cameraPanThrow.stop();
 	const rect = (minimap as HTMLCanvasElement).getBoundingClientRect();
 	const point = minimapScreenToIso(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height, state.snapshot.map.size);
 	const x = Math.max(0, Math.min(state.snapshot.map.size - 1, point.x));
