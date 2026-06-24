@@ -95,8 +95,8 @@ export async function enableZombieDebug(credentials: SessionCredentials) {
 	return post("/api/dev/zombie-debug", credentials);
 }
 
-export async function enablePathDebug(credentials: SessionCredentials, secret: string) {
-	return post("/api/dev/path-debug", { ...credentials, secret });
+export async function enablePathDebug(credentials: SessionCredentials) {
+	return post("/api/dev/path-debug", credentials);
 }
 
 export async function spawnZombieHorde(credentials: SessionCredentials, count = 500) {

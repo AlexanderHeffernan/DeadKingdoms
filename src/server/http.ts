@@ -8,7 +8,7 @@ import { Logs } from "../shared/logs.js";
 import type { ChangelogStore } from "./changelog.js";
 import type { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { ServerState } from "./serverState.js";
-import type { AdminLevel, AdminView, CommandPayload, Player, PlayerId, Snapshot, SnapshotDelta, World } from "../shared/types.js";
+import type { AdminView, CommandPayload, Player, PlayerId, Snapshot, SnapshotDelta, World } from "../shared/types.js";
 
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
 const CLIENT_BUILD_DIR = new URL("../../dist/client/public/", import.meta.url);
@@ -122,8 +122,8 @@ function liveSnapshot(res: import("node:http").ServerResponse, world: World, url
 
 async function setDevTime(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
 	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; progress?: unknown };
-	const auth = authenticatedPlayer(world, body);
-	if (!auth) return invalidSession(res);
+	const player = adminPlayer(world, body);
+	if (!player) return adminRequired(res);
 	const progress = typeof body.progress === "number" && Number.isFinite(body.progress) ? body.progress : 0;
 	setWorldTimeOfDay(world, progress);
 	json(res, { ok: true });
@@ -131,8 +131,8 @@ async function setDevTime(req: import("node:http").IncomingMessage, res: import(
 
 async function shiftDevTime(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
 	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; hours?: unknown };
-	const auth = authenticatedPlayer(world, body);
-	if (!auth) return invalidSession(res);
+	const player = adminPlayer(world, body);
+	if (!player) return adminRequired(res);
 	const hours = typeof body.hours === "number" && Number.isFinite(body.hours) ? body.hours : 0;
 	shiftWorldTime(world, hours);
 	json(res, { ok: true });
@@ -392,8 +392,7 @@ async function enableAdminAccess(req: import("node:http").IncomingMessage, res: 
 	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; secret?: unknown };
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
-	const adminLevel = typeof body.secret === "string" ? adminLevelForSecret(body.secret) : null;
-	if (!adminLevel) {
+	if (typeof body.secret !== "string" || !isAdminSecret(body.secret)) {
 		return json(res, { ok: false, error: "Invalid admin secret." }, 403);
 	}
 	const player = auth.player;
@@ -406,8 +405,8 @@ async function enableAdminAccess(req: import("node:http").IncomingMessage, res: 
 		delete player._visCache;
 		return json(res, { ok: true, adminLevel: null, enabled: false });
 	}
-	player.adminLevel = adminLevel;
-	json(res, { ok: true, adminLevel, enabled: true });
+	player.adminLevel = "admin";
+	json(res, { ok: true, adminLevel: player.adminLevel, enabled: true });
 }
 
 async function disableAdminAccess(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
@@ -415,7 +414,7 @@ async function disableAdminAccess(req: import("node:http").IncomingMessage, res:
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
-	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!player.adminLevel) return adminRequired(res);
 	delete player.adminLevel;
 	player.godMode = false;
 	player.soundDebug = false;
@@ -431,7 +430,7 @@ async function enableFullMapVision(req: import("node:http").IncomingMessage, res
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
-	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!player.adminLevel) return adminRequired(res);
 	player.godMode = !player.godMode;
 	delete player._visCache;
 	Logs.log(`${player.name} ${player.godMode ? "enabled" : "disabled"} full-map admin vision.`);
@@ -443,7 +442,7 @@ async function enableSoundDebug(req: import("node:http").IncomingMessage, res: i
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
-	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!player.adminLevel) return adminRequired(res);
 	player.soundDebug = !player.soundDebug;
 	json(res, { ok: true, enabled: player.soundDebug });
 }
@@ -453,7 +452,7 @@ async function enableZombieDebug(req: import("node:http").IncomingMessage, res: 
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
-	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!player.adminLevel) return adminRequired(res);
 	player.zombieDebug = !player.zombieDebug;
 	json(res, { ok: true, enabled: player.zombieDebug });
 }
@@ -461,7 +460,7 @@ async function enableZombieDebug(req: import("node:http").IncomingMessage, res: 
 async function kickPlayer(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
 	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; targetPlayerId?: unknown };
 	const admin = adminPlayer(world, body);
-	if (!admin) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!admin) return adminRequired(res);
 	if (typeof body.targetPlayerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
 	if (!world.players[body.targetPlayerId]) return json(res, { ok: false, error: "Player not found." }, 404);
 	await globalLeaderboard.trackWorldPeaks(world, { playerId: body.targetPlayerId, force: true });
@@ -473,7 +472,7 @@ async function kickPlayer(req: import("node:http").IncomingMessage, res: import(
 async function banPlayer(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
 	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; targetPlayerId?: unknown };
 	const admin = adminPlayer(world, body);
-	if (!admin || admin.adminLevel === "observer") return json(res, { ok: false, error: "Moderator access is required." }, 403);
+	if (!admin) return adminRequired(res);
 	if (typeof body.targetPlayerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
 	const target = world.players[body.targetPlayerId];
 	if (!target) return json(res, { ok: false, error: "Player not found." }, 404);
@@ -490,7 +489,7 @@ async function banPlayer(req: import("node:http").IncomingMessage, res: import("
 async function unbanIp(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
 	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; ipAddress?: unknown };
 	const admin = adminPlayer(world, body);
-	if (!admin || admin.adminLevel === "observer") return json(res, { ok: false, error: "Moderator access is required." }, 403);
+	if (!admin) return adminRequired(res);
 	if (typeof body.ipAddress !== "string") return json(res, { ok: false, error: "IP address is required." }, 400);
 	world.bannedIpAddresses = (world.bannedIpAddresses ?? []).filter((ipAddress) => ipAddress !== body.ipAddress);
 	Logs.log(`${admin.name} unbanned ${body.ipAddress}.`);
@@ -498,14 +497,9 @@ async function unbanIp(req: import("node:http").IncomingMessage, res: import("no
 }
 
 async function enablePathDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const secret = process.env.DEV_PATHFINDING_DEBUG_SECRET || "revealpathfinding";
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; secret?: unknown };
-	const auth = authenticatedPlayer(world, body);
-	if (!auth) return invalidSession(res);
-	if (typeof body.secret !== "string" || !body.secret.endsWith(secret)) {
-		return json(res, { ok: false, error: "Invalid pathfinding debug secret." }, 403);
-	}
-	const player = auth.player;
+	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown };
+	const player = adminPlayer(world, body);
+	if (!player) return adminRequired(res);
 	player.pathDebug = true;
 	json(res, { ok: true });
 }
@@ -515,7 +509,7 @@ async function spawnDevZombies(req: import("node:http").IncomingMessage, res: im
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
-	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!player.adminLevel) return adminRequired(res);
 	const count = typeof body.count === "number" ? body.count : 500;
 	const spawned = spawnZombieHorde(world, auth.playerId, count);
 	Logs.log(`${player.name} deployed a hostile stress horde of ${spawned}.`);
@@ -527,7 +521,7 @@ async function grantDevSoldiers(req: import("node:http").IncomingMessage, res: i
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
-	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!player.adminLevel) return adminRequired(res);
 	const count = typeof body.count === "number" ? body.count : 100;
 	const granted = grantPlayerSoldiers(world, auth.playerId, count);
 	Logs.log(`${player.name} granted ${granted} soldiers.`);
@@ -539,7 +533,7 @@ async function toggleTownCenterInvincible(req: import("node:http").IncomingMessa
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
-	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!player.adminLevel) return adminRequired(res);
 	const invincible = toggleTownCenterInvincibility(world, auth.playerId);
 	if (invincible === null) return json(res, { ok: false, error: "No town center found." }, 404);
 	Logs.log(`${player.name} ${invincible ? "enabled" : "disabled"} town center invincibility.`);
@@ -551,7 +545,7 @@ async function emitDevNoise(req: import("node:http").IncomingMessage, res: impor
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
-	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!player.adminLevel) return adminRequired(res);
 	if (typeof body.x !== "number" || typeof body.y !== "number") return json(res, { ok: false, error: "Noise position is required." }, 400);
 	emitDevBang(world, body.x, body.y);
 	json(res, { ok: true });
@@ -562,7 +556,7 @@ async function restartServer(req: import("node:http").IncomingMessage, res: impo
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
-	if (!player.adminLevel) return json(res, { ok: false, error: "Admin access is required." }, 403);
+	if (!player.adminLevel) return adminRequired(res);
 	await globalLeaderboard.publishWorldPeaks(state.restartNow(player.name));
 	json(res, { ok: true });
 	for (const client of clients) {
@@ -649,17 +643,15 @@ function streamEvents(req: import("node:http").IncomingMessage, res: import("nod
 	});
 }
 
-function adminLevelForSecret(secret: string): AdminLevel | null {
-	const entries: Array<[AdminLevel, string | undefined]> = [
-		["operator", process.env.DEV_OPERATOR_SECRET],
-		["operator", process.env.DEV_GOD_MODE_SECRET],
-		["moderator", process.env.DEV_MODERATOR_SECRET],
-		["observer", process.env.DEV_OBSERVER_MODE_SECRET],
-	];
-	for (const [level, configuredSecret] of entries) {
-		if (configuredSecret && secret.endsWith(configuredSecret)) return level;
-	}
-	return null;
+function isAdminSecret(secret: string) {
+	const configuredSecrets = [
+		process.env.DEV_ADMIN_SECRET,
+		// Backward-compatible aliases for existing deployments that used the old
+		// full-admin/operator secrets before admin roles were collapsed.
+		process.env.DEV_OPERATOR_SECRET,
+		process.env.DEV_GOD_MODE_SECRET,
+	].filter((value): value is string => !!value);
+	return configuredSecrets.some((configuredSecret) => secret.endsWith(configuredSecret));
 }
 
 function adminViewFromParam(value: string | null): AdminView {
@@ -679,6 +671,10 @@ function adminViewFromParam(value: string | null): AdminView {
 function adminPlayer(world: World, credentials: { playerId?: unknown; sessionToken?: unknown }): Player | null {
 	const player = authenticatedPlayer(world, credentials)?.player;
 	return player?.adminLevel ? player : null;
+}
+
+function adminRequired(res: import("node:http").ServerResponse) {
+	return json(res, { ok: false, error: "Admin access is required." }, 403);
 }
 
 function authenticatedPlayer(world: World, credentials: { playerId?: unknown; sessionToken?: unknown }): AuthenticatedPlayer | null {

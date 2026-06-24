@@ -81,7 +81,6 @@ let devCommandInput = "";
 let adminAccessEnabled = false;
 let godModeCheckPending = false;
 let pathDebugEnabled = false;
-let pathDebugCheckPending = false;
 let zombieHordePending = false;
 let lastFrameAt = performance.now();
 let smoothedFps = 60;
@@ -386,11 +385,9 @@ async function maybeEnableAdminAccess() {
 
 async function maybeEnablePathDebug() {
 	const credentials = currentCredentials();
-	if (pathDebugEnabled || pathDebugCheckPending || !credentials || devCommandInput.length < 3) return;
-	const checkedInput = devCommandInput;
-	pathDebugCheckPending = true;
+	if (!adminAccessEnabled || pathDebugEnabled || !credentials || !devCommandInput.endsWith("revealpathfinding")) return;
 	try {
-		const result = await enablePathDebug(credentials, checkedInput);
+		const result = await enablePathDebug(credentials);
 		if (result.ok) {
 			pathDebugEnabled = true;
 			ui.showToast("Pathfinding debug enabled.");
@@ -398,9 +395,6 @@ async function maybeEnablePathDebug() {
 		}
 	} catch {
 		// Keep this shortcut silent unless it succeeds.
-	} finally {
-		pathDebugCheckPending = false;
-		if (!pathDebugEnabled && checkedInput !== devCommandInput) void maybeEnablePathDebug();
 	}
 }
 

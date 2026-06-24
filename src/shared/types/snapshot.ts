@@ -117,7 +117,7 @@ export interface ServerPerfStats {
 	zombieAiWorker?: ServerPerfWorkerStats;
 }
 
-export type AdminLevel = "observer" | "moderator" | "operator";
+export type AdminLevel = "admin";
 
 export interface ServerPerfPhase {
 	name: string;
