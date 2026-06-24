@@ -84,8 +84,7 @@ export class BottomPanel implements GameUiComponent {
 			const item = document.createElement("div");
 			item.className = "multi-selection-icon";
 			item.setAttribute("aria-label", `${label(unitType)} x${count}`);
-			const ownerColor = matchingUnits[0]?.ownerId ? snapshot.players[matchingUnits[0]!.ownerId]?.color : undefined;
-			item.append(icon(unitType, DEFAULT_HUD_ICON_OFFSET, DEFAULT_HUD_ICON_MAX_SIZE, ownerColor || DEFAULT_HUD_ICON_COLOR));
+			item.append(icon(unitType));
 			item.append(multiSelectionHealthBar(matchingUnits));
 			item.append(multiSelectionHealthList(matchingUnits));
 			item.addEventListener("pointerdown", (event) => {
@@ -177,7 +176,6 @@ export class BottomPanel implements GameUiComponent {
 			type: action.kind,
 			spriteName: action.spriteName,
 			iconSpriteName: action.getIconSpriteName(),
-			iconColor: action.getIconColor(player.color),
 			label: action.label,
 			tooltip: action.getTooltip(),
 			detail: action.detail,
@@ -215,7 +213,7 @@ export class BottomPanel implements GameUiComponent {
 		button.dataset.cost = tooltip.cost;
 		button.dataset.shortcut = tooltip.shortcut ?? "";
 		button.dataset.disabledReason = disabled ? disabledReason(player.resources, action.cost, action.forceDisabled) : "";
-		button.append(icon(action.getIconSpriteName(), action.getIconOffset(), action.getIconMaxSize(), action.getIconColor(player.color)));
+		button.append(icon(action.getIconSpriteName(), action.getIconOffset(), action.getIconMaxSize()));
 		button.addEventListener("pointerdown", (event: PointerEvent) => {
 			event.preventDefault();
 			event.stopPropagation();
@@ -325,16 +323,13 @@ type HudIconOffset = {
 
 const DEFAULT_HUD_ICON_OFFSET: HudIconOffset = { x: 0, y: 0 };
 const DEFAULT_HUD_ICON_MAX_SIZE = 28;
-const DEFAULT_HUD_ICON_COLOR = "#4f8fd8";
-
 function icon(
 	spriteName: string,
 	offset: HudIconOffset = DEFAULT_HUD_ICON_OFFSET,
 	maxSize = DEFAULT_HUD_ICON_MAX_SIZE,
-	flagColor: string = DEFAULT_HUD_ICON_COLOR,
 ) {
 	const png = pngSprites[spriteName as SpriteName];
-	if (png) return pngIcon(png, offset, maxSize, flagColor);
+	if (png) return pngIcon(png, offset, maxSize);
 	const canvas = document.createElement("canvas");
 	canvas.className = "action-icon";
 	canvas.width = 56;
@@ -357,7 +352,7 @@ function icon(
 	return canvas;
 }
 
-function pngIcon(png: NonNullable<(typeof pngSprites)[SpriteName]>, offset: HudIconOffset, maxSize: number, flagColor: string) {
+function pngIcon(png: NonNullable<(typeof pngSprites)[SpriteName]>, offset: HudIconOffset, maxSize: number) {
 	const wrapper = document.createElement("span");
 	const scale = Math.min(2, maxSize / png.width, maxSize / png.height);
 	wrapper.className = "action-icon action-icon-png";
@@ -365,7 +360,6 @@ function pngIcon(png: NonNullable<(typeof pngSprites)[SpriteName]>, offset: HudI
 	wrapper.style.setProperty("--icon-height", `${png.height * scale}px`);
 	wrapper.style.setProperty("--icon-offset-x", `${offset.x}px`);
 	wrapper.style.setProperty("--icon-offset-y", `${offset.y}px`);
-	wrapper.style.setProperty("--icon-flag-color", flagColor);
 	if (png.flag && png.flagLayer !== "over") wrapper.append(pngFlagLayer(png.flag));
 	const base = document.createElement("img");
 	base.src = png.base;
@@ -395,7 +389,6 @@ interface TooltipAction {
 	getTooltip(): ActionTooltip;
 	getIconSpriteName(): string;
 	getIconMaxSize(): number;
-	getIconColor(playerColor?: string): string;
 }
 
 type ActionTooltip = {
@@ -465,10 +458,6 @@ class ButtonAction implements TooltipAction {
 	getIconMaxSize(): number {
 		return ButtonAction.iconMaxSizes[this.spriteName as SpriteName] ?? DEFAULT_HUD_ICON_MAX_SIZE;
 	}
-
-	getIconColor(playerColor?: string): string {
-		return playerColor || DEFAULT_HUD_ICON_COLOR;
-	}
 }
 
 class QueueAction implements TooltipAction {
@@ -497,10 +486,6 @@ class QueueAction implements TooltipAction {
 
 	getIconMaxSize(): number {
 		return DEFAULT_HUD_ICON_MAX_SIZE;
-	}
-
-	getIconColor(): string {
-		return DEFAULT_HUD_ICON_COLOR;
 	}
 }
 

@@ -193,7 +193,7 @@
 }
 
 .action-icon-png-flag {
-	background: var(--icon-flag-color, #4f8fd8);
+	background: #4f8fd8;
 	mask: var(--flag-url) center / contain no-repeat;
 	-webkit-mask: var(--flag-url) center / contain no-repeat;
 }

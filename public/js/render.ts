@@ -1258,12 +1258,15 @@ export class Renderer {
 		}
 
 		private drawHealth(x: number, y: number, pct: number) {
-		this.overlayLayer.beginFill(0x1b1715);
-		this.overlayLayer.drawRect(x - 18, y, 36, 5);
-		this.overlayLayer.beginFill(pct > 0.45 ? 0x5fbf64 : 0xd8714f);
-		this.overlayLayer.drawRect(x - 17, y + 1, Math.max(1, 34 * pct), 3);
-		this.overlayLayer.endFill();
-	}
+			const width = 36;
+			const height = 4;
+			this.overlayLayer.lineStyle(0);
+			this.overlayLayer.beginFill(0x8f2f28);
+			this.overlayLayer.drawRect(x - width / 2, y, width, height);
+			this.overlayLayer.beginFill(0x4fa64f);
+			this.overlayLayer.drawRect(x - width / 2, y, Math.max(1, width * pct), height);
+			this.overlayLayer.endFill();
+		}
 
 	private drawSelectionMarker(
 		entity: RenderEntity,
