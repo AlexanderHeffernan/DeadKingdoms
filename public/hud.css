@@ -145,6 +145,65 @@
 		6px 6px 0 rgb(0 0 0 / 0.62);
 	image-rendering: pixelated;
 }
+
+.training-status {
+	position: fixed;
+	right: 194px;
+	bottom: 0;
+	display: flex;
+	flex-direction: row-reverse;
+	gap: 8px;
+	max-width: calc(100vw - 470px);
+	padding: 0 4px 4px 0;
+	box-sizing: border-box;
+}
+
+.training-status.hidden {
+	display: none;
+}
+
+.training-status-item {
+	position: relative;
+	width: 42px;
+	height: 42px;
+	display: grid;
+	place-items: center;
+	border: 3px solid #5f4a32;
+	border-bottom-color: #211914;
+	border-right-color: #211914;
+	background: rgb(10 10 14 / 0.94);
+	padding: 0;
+	box-shadow:
+		0 0 0 2px #080808,
+		4px 4px 0 rgb(0 0 0 / 0.62);
+	cursor: pointer;
+	touch-action: none;
+}
+
+.training-status-item .action-icon {
+	width: 33px;
+	height: 33px;
+}
+
+.training-status-item:hover,
+.training-status-item:focus-visible {
+	background: rgb(31 34 30 / 0.96);
+}
+
+.training-status-progress {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 5px;
+	background: #211914;
+}
+
+.training-status-progress-fill {
+	display: block;
+	height: 100%;
+	background: #e9bd59;
+}
 .top-right h2 {
 	margin: 0 0 8px;
 	font-size: var(--ui-text-lg);
@@ -551,6 +610,56 @@
 	flex-direction: column;
 	gap: 4px;
 
+}
+
+.training-queue {
+	margin-top: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.training-queue-icons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 7px;
+	max-width: 218px;
+}
+
+.training-queue-icon {
+	position: relative;
+	width: 38px;
+	height: 38px;
+	display: grid;
+	place-items: center;
+	border: 3px solid #5f4a32;
+	border-bottom-color: #211914;
+	border-right-color: #211914;
+	background: rgb(10 10 14 / 0.94);
+	box-shadow:
+		0 0 0 2px #080808,
+		4px 4px 0 rgb(0 0 0 / 0.62);
+}
+
+.training-queue-icon .action-icon {
+	width: 32px;
+	height: 32px;
+}
+
+.training-queue-empty {
+	min-height: 38px;
+	display: inline-flex;
+	align-items: center;
+	color: #8e8576;
+	font-size: var(--ui-text-sm);
+}
+
+.training-queue-times {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 10px;
+	color: #e8dcc5;
+	font-size: var(--ui-text-sm);
 }
 
 .selection-carry {

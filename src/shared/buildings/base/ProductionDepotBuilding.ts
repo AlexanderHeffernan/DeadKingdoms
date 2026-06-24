@@ -1,11 +1,11 @@
-import type { EntityId, UnitType } from "../../types.js";
+import type { BuildQueueItem, EntityId, UnitType, Vec2 } from "../../types.js";
 import type { UnitClass } from "../../units/index.js";
 import { DepotBuilding } from "./DepotBuilding.js";
 import type { BuildingSnapshot } from "./types.js";
 
 export abstract class ProductionDepotBuilding extends DepotBuilding {
-	queue = [];
-	rallyPoint = null;
+	queue: BuildQueueItem[] = [];
+	rallyPoint: Vec2 | null = null;
 	rallyTargetId: EntityId | null = null;
 
 	canTrain(unitType: UnitType) {
@@ -23,7 +23,7 @@ export abstract class ProductionDepotBuilding extends DepotBuilding {
 	protected serializeExtra(): Partial<BuildingSnapshot> {
 		return {
 			...super.serializeExtra(),
-			queue: this.queue,
+			queue: this.queue.map((item) => ({ ...item })),
 			rallyPoint: this.rallyPoint,
 			rallyTargetId: this.rallyTargetId,
 		};
