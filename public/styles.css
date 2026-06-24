@@ -167,7 +167,7 @@ button:disabled {
 }
 
 .settings-dialog {
-	width: min(420px, 100%);
+	width: min(820px, 100%);
 	max-height: min(520px, calc(100vh - 48px));
 	display: flex;
 	flex-direction: column;
@@ -212,6 +212,9 @@ button:disabled {
 	gap: 10px;
 	padding: 12px;
 	overflow: auto;
+}
+.settings-body label, .settings-body button {
+	height: 60px;
 }
 
 .settings-option {

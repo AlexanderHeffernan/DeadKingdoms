@@ -1,6 +1,8 @@
 import { banPlayer as requestBanPlayer, disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, getChangelog, getGlobalLeaderboard, getGlobalLeaderboardSnapshot, getStatus, ServerStatus, grantSoldiers as requestGrantSoldiers, join, kickPlayer as requestKickPlayer, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible, unbanIp as requestUnbanIp } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
+import { CameraDragPan, DEFAULT_DRAG_PAN_SENSITIVITY, MAX_DRAG_PAN_SENSITIVITY, MIN_DRAG_PAN_SENSITIVITY, clampDragPanSensitivity } from "./cameraDragPan.js";
+import { CameraEdgeScroll, DEFAULT_EDGE_SCROLL_SPEED, MAX_EDGE_SCROLL_SPEED, MIN_EDGE_SCROLL_SPEED, clampEdgeScrollSpeed } from "./cameraEdgeScroll.js";
 import { CameraPanThrow } from "./cameraPanThrow.js";
 import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
 import { UI } from "./ui.js";
@@ -73,15 +75,20 @@ const view: ViewState = {
 	wallDragStartTile: null,
 };
 const sfx = new SoundEffects(view.camera);
+const cameraDragPan = new CameraDragPan();
+const cameraEdgeScroll = new CameraEdgeScroll();
 const cameraPanThrow = new CameraPanThrow();
 
 const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
-const EDGE_PAN_MARGIN = 14;
 const DEV_COMMAND_BUFFER_LENGTH = 40;
 const PLAYER_NAME_STORAGE_KEY = "rtsPlayerName";
 const PLAYER_COLOR_STORAGE_KEY = "rtsPlayerColor";
 const TEXT_SCALE_STORAGE_KEY = "rtsTextScale";
 const THROW_PANNING_STORAGE_KEY = "rtsThrowPanning";
+const DRAG_PAN_SENSITIVITY_STORAGE_KEY = "rtsDragPanSensitivity";
+const POINTER_LOCK_PANNING_STORAGE_KEY = "rtsPointerLockPanning";
+const EDGE_SCROLL_STORAGE_KEY = "rtsEdgeScroll";
+const EDGE_SCROLL_SPEED_STORAGE_KEY = "rtsEdgeScrollSpeed";
 const DEFAULT_TEXT_SCALE = 100;
 const MIN_TEXT_SCALE = 80;
 const MAX_TEXT_SCALE = 150;
@@ -415,8 +422,28 @@ document.getElementById("throwPanningInput")?.addEventListener("change", (event)
 	if (!(event.target instanceof HTMLInputElement)) return;
 	setThrowPanning(event.target.checked);
 });
+document.getElementById("dragPanSensitivityInput")?.addEventListener("input", (event) => {
+	if (!(event.target instanceof HTMLInputElement)) return;
+	setDragPanSensitivity(Number(event.target.value));
+});
+document.getElementById("pointerLockPanningInput")?.addEventListener("change", (event) => {
+	if (!(event.target instanceof HTMLInputElement)) return;
+	setPointerLockPanning(event.target.checked);
+});
+document.getElementById("edgeScrollInput")?.addEventListener("change", (event) => {
+	if (!(event.target instanceof HTMLInputElement)) return;
+	setEdgeScroll(event.target.checked);
+});
+document.getElementById("edgeScrollSpeedInput")?.addEventListener("input", (event) => {
+	if (!(event.target instanceof HTMLInputElement)) return;
+	setEdgeScrollSpeed(Number(event.target.value));
+});
 document.addEventListener("keydown", closeSettingsModalOnEscape);
-window.addEventListener("resize", () => updateTextScaleControl(storedTextScale()));
+window.addEventListener("resize", () => {
+	updateTextScaleControl(storedTextScale());
+	updateDragPanSensitivityControl(storedDragPanSensitivity());
+	updateEdgeScrollSpeedControl(storedEdgeScrollSpeed());
+});
 document.getElementById("leaderboardToggle")?.addEventListener("click", () => {
 	const container = document.getElementById("leaderboardPanel");
 	const toggle = document.getElementById("leaderboardToggle");
@@ -446,6 +473,9 @@ canvas.addEventListener("dragstart", (event) => event.preventDefault());
 canvas.addEventListener("mousedown", onMouseDown);
 canvas.addEventListener("mousemove", onMouseMove);
 canvas.addEventListener("mouseup", onMouseUp);
+document.addEventListener("mousemove", onPointerLockedPanMove);
+document.addEventListener("mouseup", onPointerLockedPanUp);
+document.addEventListener("pointerlockchange", onPointerLockChange);
 canvas.addEventListener("wheel", (event) => {
 	event.preventDefault();
 	cameraPanThrow.stop();
@@ -468,6 +498,9 @@ minimap.addEventListener("mousedown", onMinimapMouseDown);
 renderer.resize();
 initTextScaleSetting();
 initThrowPanningSetting();
+initDragPanSensitivitySetting();
+initPointerLockPanningSetting();
+initEdgeScrollSettings();
 drawLoop();
 initMusic();
 updateHomeStatus();
@@ -1093,6 +1126,91 @@ function updateThrowPanningControl(enabled: boolean) {
 	if (input instanceof HTMLInputElement) input.checked = enabled;
 }
 
+function initDragPanSensitivitySetting() {
+	setDragPanSensitivity(storedDragPanSensitivity());
+}
+
+function storedDragPanSensitivity() {
+	return clampDragPanSensitivity(Number(localStorage.getItem(DRAG_PAN_SENSITIVITY_STORAGE_KEY)) || DEFAULT_DRAG_PAN_SENSITIVITY);
+}
+
+function setDragPanSensitivity(sensitivity: number) {
+	const clamped = clampDragPanSensitivity(sensitivity);
+	localStorage.setItem(DRAG_PAN_SENSITIVITY_STORAGE_KEY, String(clamped));
+	cameraDragPan.setSensitivity(clamped);
+	updateDragPanSensitivityControl(clamped);
+}
+
+function updateDragPanSensitivityControl(sensitivity: number) {
+	const input = document.getElementById("dragPanSensitivityInput");
+	const value = document.getElementById("dragPanSensitivityValue");
+	if (input instanceof HTMLInputElement) {
+		input.value = String(sensitivity);
+		input.style.setProperty("--range-progress", `${((sensitivity - MIN_DRAG_PAN_SENSITIVITY) / (MAX_DRAG_PAN_SENSITIVITY - MIN_DRAG_PAN_SENSITIVITY)) * 100}%`);
+	}
+	if (value) value.textContent = `${sensitivity.toFixed(1)}x`;
+}
+
+function initPointerLockPanningSetting() {
+	setPointerLockPanning(storedPointerLockPanning());
+}
+
+function storedPointerLockPanning() {
+	return localStorage.getItem(POINTER_LOCK_PANNING_STORAGE_KEY) !== "false";
+}
+
+function setPointerLockPanning(enabled: boolean) {
+	localStorage.setItem(POINTER_LOCK_PANNING_STORAGE_KEY, String(enabled));
+	cameraDragPan.setPointerLockEnabled(enabled);
+	updatePointerLockPanningControl(enabled);
+}
+
+function updatePointerLockPanningControl(enabled: boolean) {
+	const input = document.getElementById("pointerLockPanningInput");
+	if (input instanceof HTMLInputElement) input.checked = enabled;
+}
+
+function initEdgeScrollSettings() {
+	setEdgeScroll(storedEdgeScroll());
+	setEdgeScrollSpeed(storedEdgeScrollSpeed());
+}
+
+function storedEdgeScroll() {
+	return localStorage.getItem(EDGE_SCROLL_STORAGE_KEY) !== "false";
+}
+
+function storedEdgeScrollSpeed() {
+	return clampEdgeScrollSpeed(Number(localStorage.getItem(EDGE_SCROLL_SPEED_STORAGE_KEY)) || DEFAULT_EDGE_SCROLL_SPEED);
+}
+
+function setEdgeScroll(enabled: boolean) {
+	localStorage.setItem(EDGE_SCROLL_STORAGE_KEY, String(enabled));
+	cameraEdgeScroll.setEnabled(enabled);
+	updateEdgeScrollControl(enabled);
+}
+
+function setEdgeScrollSpeed(speed: number) {
+	const clamped = clampEdgeScrollSpeed(speed);
+	localStorage.setItem(EDGE_SCROLL_SPEED_STORAGE_KEY, String(clamped));
+	cameraEdgeScroll.setSpeed(clamped);
+	updateEdgeScrollSpeedControl(clamped);
+}
+
+function updateEdgeScrollControl(enabled: boolean) {
+	const input = document.getElementById("edgeScrollInput");
+	if (input instanceof HTMLInputElement) input.checked = enabled;
+}
+
+function updateEdgeScrollSpeedControl(speed: number) {
+	const input = document.getElementById("edgeScrollSpeedInput");
+	const value = document.getElementById("edgeScrollSpeedValue");
+	if (input instanceof HTMLInputElement) {
+		input.value = String(speed);
+		input.style.setProperty("--range-progress", `${((speed - MIN_EDGE_SCROLL_SPEED) / (MAX_EDGE_SCROLL_SPEED - MIN_EDGE_SCROLL_SPEED)) * 100}%`);
+	}
+	if (value) value.textContent = String(speed);
+}
+
 async function initMusic() {
 	music.audio.volume = 0.25;
 	music.audio.muted = music.muted;
@@ -1165,6 +1283,8 @@ function openSettingsModal(event?: Event) {
 	modal.classList.remove("hidden");
 	button.setAttribute("aria-expanded", "true");
 	updateTextScaleControl(storedTextScale());
+	updateDragPanSensitivityControl(storedDragPanSensitivity());
+	updateEdgeScrollSpeedControl(storedEdgeScrollSpeed());
 }
 
 function closeSettingsModal() {
@@ -1530,6 +1650,9 @@ function stepCameraPanThrow() {
 function onMouseDown(event: MouseEvent) {
 	sfx.unlock();
 	if (event.button === 1 || (event.shiftKey && event.button !== 0)) {
+		if (!canvas) return;
+		event.preventDefault();
+		cameraDragPan.begin(canvas, event.clientX, event.clientY);
 		cameraPanThrow.begin(event.clientX, event.clientY, event.timeStamp);
 		view.panning = true;
 		view.panLast = { x: event.clientX, y: event.clientY };
@@ -1544,16 +1667,38 @@ function onMouseDown(event: MouseEvent) {
 }
 
 function onMouseMove(event: MouseEvent) {
+	if (view.panning && document.pointerLockElement === canvas) return;
 	const iso = screenToIso(event.clientX, event.clientY, view.camera);
 	view.hoverTile = { x: Math.floor(iso.x), y: Math.floor(iso.y) };
-	if (view.panning) {
-		const delta = cameraPanThrow.move(event.clientX, event.clientY, event.timeStamp);
-		view.camera.x += delta.x;
-		view.camera.y += delta.y;
-		clampCamera();
-		view.panLast = { x: event.clientX, y: event.clientY };
-	}
+	if (view.panning) panCameraFromMouseMove(event);
 	if (view.dragging) view.dragCurrent = { x: event.clientX, y: event.clientY };
+}
+
+function onPointerLockedPanMove(event: MouseEvent) {
+	if (!view.panning || document.pointerLockElement !== canvas) return;
+	panCameraFromMouseMove(event);
+}
+
+function onPointerLockedPanUp(event: MouseEvent) {
+	if (!view.panning || document.pointerLockElement !== canvas) return;
+	onMouseUp(event);
+}
+
+function panCameraFromMouseMove(event: MouseEvent) {
+	const delta = cameraDragPan.move(event);
+	cameraPanThrow.recordDelta(delta, event.timeStamp);
+	view.camera.x += delta.x;
+	view.camera.y += delta.y;
+	clampCamera();
+	view.panLast = { x: event.clientX, y: event.clientY };
+}
+
+function onPointerLockChange() {
+	cameraDragPan.cancelPointerLockExit();
+	if (view.panning && document.pointerLockElement !== canvas) {
+		view.panning = false;
+		cameraPanThrow.release();
+	}
 }
 
 function trackMousePosition(event: MouseEvent) {
@@ -1563,6 +1708,7 @@ function trackMousePosition(event: MouseEvent) {
 function onMouseUp(event: MouseEvent) {
 	if (view.panning) {
 		view.panning = false;
+		cameraDragPan.end();
 		cameraPanThrow.release(event.timeStamp);
 		return;
 	}
@@ -2024,12 +2170,7 @@ function pointInFootprint(px: number, py: number, x: number, y: number, footprin
 function edgePan() {
 	const game = document.getElementById("game");
 	if (!game || game.classList.contains("hidden")) return;
-	const speed = 10;
-	if (view.mouse.x <= EDGE_PAN_MARGIN) view.camera.x += speed;
-	if (view.mouse.x >= window.innerWidth - EDGE_PAN_MARGIN) view.camera.x -= speed;
-	if (view.mouse.y <= EDGE_PAN_MARGIN) view.camera.y += speed;
-	if (view.mouse.y >= window.innerHeight - EDGE_PAN_MARGIN) view.camera.y -= speed;
-	clampCamera();
+	if (cameraEdgeScroll.step(view.camera, view.mouse, { x: window.innerWidth, y: window.innerHeight })) clampCamera();
 }
 
 function nextZoom(current: number, direction: number) {

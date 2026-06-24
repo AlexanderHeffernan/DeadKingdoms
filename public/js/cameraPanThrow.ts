@@ -47,6 +47,15 @@ export class CameraPanThrow {
 		return { x: dx, y: dy };
 	}
 
+	recordDelta(delta: PanDelta, at = performance.now()) {
+		if (!this.lastPoint) {
+			this.lastPoint = { x: 0, y: 0, at };
+			return;
+		}
+		this.recordVelocity(delta.x, delta.y, at - this.lastPoint.at);
+		this.lastPoint = { x: 0, y: 0, at };
+	}
+
 	release(at = performance.now()) {
 		this.lastPoint = null;
 		if (!this.enabled || this.speed() < CameraPanThrow.MIN_THROW_SPEED) {

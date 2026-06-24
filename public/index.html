@@ -186,6 +186,16 @@
 						</button>
 					</header>
 					<div class="settings-body">
+						<button
+							id="settingsMuteButton"
+							class="settings-option mute-button"
+							type="button"
+							aria-label="Mute music"
+							title="Mute music"
+						>
+							<span class="mute-icon" aria-hidden="true"></span>
+							<span>Mute</span>
+						</button>
 						<label class="settings-range-option" for="textScaleInput">
 							<span>Text size</span>
 							<input
@@ -198,6 +208,7 @@
 							/>
 							<strong id="textScaleValue">100%</strong>
 						</label>
+						<h3>Panning</h3>
 						<label class="settings-toggle-option" for="throwPanningInput">
 							<span>Throw panning</span>
 							<input
@@ -206,16 +217,46 @@
 							/>
 							<span class="settings-toggle-track" aria-hidden="true"></span>
 						</label>
-						<button
-							id="settingsMuteButton"
-							class="settings-option mute-button"
-							type="button"
-							aria-label="Mute music"
-							title="Mute music"
-						>
-							<span class="mute-icon" aria-hidden="true"></span>
-							<span>Mute</span>
-						</button>
+						<label class="settings-range-option" for="dragPanSensitivityInput">
+							<span>Middle mouse sensitivity</span>
+							<input
+								id="dragPanSensitivityInput"
+								type="range"
+								min="0.5"
+								max="3"
+								step="0.1"
+								value="1"
+							/>
+							<strong id="dragPanSensitivityValue">1.0x</strong>
+						</label>
+						<label class="settings-toggle-option" for="pointerLockPanningInput">
+							<span>Lock cursor while panning</span>
+							<input
+								id="pointerLockPanningInput"
+								type="checkbox"
+							/>
+							<span class="settings-toggle-track" aria-hidden="true"></span>
+						</label>
+						<label class="settings-toggle-option" for="edgeScrollInput">
+							<span>Edge scrolling</span>
+							<input
+								id="edgeScrollInput"
+								type="checkbox"
+							/>
+							<span class="settings-toggle-track" aria-hidden="true"></span>
+						</label>
+						<label class="settings-range-option" for="edgeScrollSpeedInput">
+							<span>Edge scroll speed</span>
+							<input
+								id="edgeScrollSpeedInput"
+								type="range"
+								min="4"
+								max="20"
+								step="1"
+								value="10"
+							/>
+							<strong id="edgeScrollSpeedValue">10</strong>
+						</label>
 					</div>
 				</div>
 			</div>
