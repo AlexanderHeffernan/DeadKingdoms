@@ -7,7 +7,7 @@ import { broadcast, createHandler } from "./http.js";
 import { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { Client } from "./http.js";
 import { ServerState } from "./serverState.js";
-import { recordServerPerfPhase, stepWorld } from "./world.js";
+import { addNotice, recordServerPerfPhase, stepWorld } from "./world.js";
 
 loadEnvFile();
 
@@ -25,6 +25,11 @@ const clients = new Set<Client>();
 await changelog.load();
 const server = http.createServer(createHandler(state, clients, globalLeaderboard, changelog));
 let shuttingDown = false;
+let lowTpsSince: number | null = null;
+let terminatingUnsafeWorld = false;
+
+const LOW_TPS_THRESHOLD = 5;
+const LOW_TPS_TERMINATE_MS = 10_000;
 
 server.listen(port, "0.0.0.0", () => {
 	console.log(`RTS arena running at http://127.0.0.1:${port}`);
@@ -36,11 +41,64 @@ setInterval(() => {
 	if (world) {
 		stepWorld(world, TICK_MS / 1000);
 		void globalLeaderboard.trackWorldPeaks(world);
+		if (shouldTerminateForLowTps(world)) {
+			void terminateUnsafeWorld(world);
+			return;
+		}
 		broadcast(world, clients);
 	}
 	const resetWorld = state.stepIdleReset(hasActivePlayers(world));
 	if (resetWorld) void globalLeaderboard.publishWorldPeaks(resetWorld);
 }, TICK_MS);
+
+function shouldTerminateForLowTps(world: NonNullable<ReturnType<ServerState["currentWorld"]>>) {
+	const now = Date.now();
+	if (world.serverPerf.tps >= LOW_TPS_THRESHOLD) {
+		lowTpsSince = null;
+		return false;
+	}
+	lowTpsSince ??= now;
+	return now - lowTpsSince >= LOW_TPS_TERMINATE_MS;
+}
+
+async function terminateUnsafeWorld(world: NonNullable<ReturnType<ServerState["currentWorld"]>>) {
+	if (terminatingUnsafeWorld || state.currentWorld() !== world) return;
+	terminatingUnsafeWorld = true;
+	lowTpsSince = null;
+	const diagnostics = worldSafetyDiagnostics(world);
+	const message = "World terminated because server TPS stayed below the safety threshold. Join again to start a fresh map.";
+	console.error(`World safety termination: ${JSON.stringify(diagnostics)}`);
+	Logs.log(`World safety termination: TPS ${diagnostics.tps}, tick ${diagnostics.tick}, units ${diagnostics.units}, zombies ${diagnostics.zombies}.`);
+	addNotice(world, message);
+	broadcast(world, clients);
+	try {
+		await globalLeaderboard.publishWorldPeaks(state.restartNow("safety monitor"));
+		await globalLeaderboard.flush();
+	} catch (error) {
+		console.error(`Could not save leaderboard data after safety termination: ${(error as Error).message}`);
+	} finally {
+		for (const client of clients) client.res.end();
+		clients.clear();
+		terminatingUnsafeWorld = false;
+	}
+}
+
+function worldSafetyDiagnostics(world: NonNullable<ReturnType<ServerState["currentWorld"]>>) {
+	const units = Object.values(world.units);
+	return {
+		tick: world.tick,
+		tps: Number(world.serverPerf.tps.toFixed(2)),
+		tickMs: Number(world.serverPerf.tickMs.toFixed(2)),
+		players: Object.values(world.players).length,
+		activePlayers: Object.values(world.players).filter((player) => !player.defeated).length,
+		units: units.length,
+		zombies: units.filter((unit) => unit.type === "zombie").length,
+		buildings: Object.values(world.buildings).length,
+		resources: Object.values(world.resources).length,
+		pathRequestsThisTick: world._pathing?.pathRequestsThisTick ?? 0,
+		phases: world.serverPerf.phases?.map((phase) => ({ name: phase.name, ms: Number(phase.ms.toFixed(2)) })) ?? [],
+	};
+}
 
 async function shutdown(signal: NodeJS.Signals) {
 	if (shuttingDown) return;

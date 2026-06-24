@@ -317,7 +317,7 @@ export function command(world: World, playerId: PlayerId, body: CommandPayload):
 export function stepWorld(world: World, dt: number) {
 	const tickStartedAt = performance.now();
 	const profiling = hasAdminViewer(world);
-	if (profiling) updateServerTps(world, tickStartedAt);
+	updateServerTps(world, tickStartedAt);
 	const profiler = new TickProfiler();
 	try {
 		world.tick += 1;
@@ -341,7 +341,7 @@ export function stepWorld(world: World, dt: number) {
 			updateLeaderboard(world);
 		});
 	} finally {
-		if (profiling) updateServerTickDuration(world, performance.now() - tickStartedAt, profiler.phases());
+		updateServerTickDuration(world, performance.now() - tickStartedAt, profiler.phases());
 	}
 }
 
@@ -2042,8 +2042,12 @@ function commitFirstPlaceDuration(world: World, now = Date.now()) {
 	world.firstPlaceDurations[world.firstPlacePlayerId] = (world.firstPlaceDurations[world.firstPlacePlayerId] ?? 0) + elapsed;
 }
 
-function notice(world: World, text: string) {
+export function addNotice(world: World, text: string) {
 	world.notices.push({ id: id("n"), text, at: Date.now() });
+}
+
+function notice(world: World, text: string) {
+	addNotice(world, text);
 }
 
 function normalizeColor(value: unknown): string | null {

@@ -32,6 +32,14 @@ const BACKPRESSURE_BYTES = 256 * 1024;
 const DISCONNECT_LEAVE_GRACE_MS = 10_000;
 const MAX_JSON_BODY_BYTES = 256 * 1024;
 const MAX_COMMAND_UNIT_IDS = 1000;
+const MAX_EVENT_STREAMS_PER_IP = 6;
+const RATE_LIMITS: Record<string, { windowMs: number; max: number }> = {
+	join: { windowMs: 60_000, max: 12 },
+	command: { windowMs: 1_000, max: 30 },
+	log: { windowMs: 60_000, max: 30 },
+	admin: { windowMs: 60_000, max: 20 },
+	events: { windowMs: 60_000, max: 30 },
+};
 const COMMAND_TYPES: Record<CommandType, true> = {
 	move: true,
 	build: true,
@@ -58,8 +66,10 @@ export type Client = {
 	lastSnapshot: Snapshot | null;
 	lastSeq: number;
 	replaced?: boolean;
+	ipAddress: string | null;
 };
 let nextSnapshotSeq = 1;
+const rateLimitBuckets = new Map<string, { resetAt: number; count: number }>();
 
 type AuthenticatedPlayer = {
 	playerId: PlayerId;
@@ -71,6 +81,8 @@ export function createHandler(state: ServerState, clients: Set<Client>, globalLe
 		try {
 			const host = req.headers.host || "localhost";
 			const url = new URL(req.url ?? "/", `http://${host}`);
+			const rateLimit = rateLimitFor(req, url);
+			if (rateLimit && !consumeRateLimit(clientIp(req), rateLimit)) return json(res, { ok: false, error: "Too many requests. Try again shortly." }, 429);
 			if (req.method === "POST" && url.pathname === "/api/join") return await joinGame(req, res, state.ensureWorld());
 			if (req.method === "GET" && url.pathname === "/api/status") return await serverStatus(res, state, globalLeaderboard);
 			if (req.method === "GET" && url.pathname === "/api/changelog") return json(res, changelog.current());
@@ -213,7 +225,7 @@ async function listSoundtrack(res: import("node:http").ServerResponse) {
 async function serveSoundtrack(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, url: URL) {
 	const name = decodeURIComponent(url.pathname.replace("/assets/soundtrack/", ""));
 	if (!name || name.includes("/") || name.includes("\\")) {
-		res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+		res.writeHead(404, { ...securityHeaders(), "Content-Type": "text/plain; charset=utf-8" });
 		res.end("Not found");
 		return;
 	}
@@ -225,6 +237,7 @@ async function serveSoundtrack(req: import("node:http").IncomingMessage, res: im
 		const range = parseRange(req.headers.range, stat.size);
 		if (range === false) {
 			res.writeHead(416, {
+				...securityHeaders(),
 				"Content-Type": "text/plain; charset=utf-8",
 				"Content-Range": `bytes */${stat.size}`,
 				"Accept-Ranges": "bytes",
@@ -234,6 +247,7 @@ async function serveSoundtrack(req: import("node:http").IncomingMessage, res: im
 		}
 		if (range) {
 			res.writeHead(206, {
+				...securityHeaders(),
 				"Content-Type": type,
 				"Content-Length": range.end - range.start + 1,
 				"Content-Range": `bytes ${range.start}-${range.end}/${stat.size}`,
@@ -243,13 +257,14 @@ async function serveSoundtrack(req: import("node:http").IncomingMessage, res: im
 			return;
 		}
 		res.writeHead(200, {
+			...securityHeaders(),
 			"Content-Type": type,
 			"Content-Length": stat.size,
 			"Accept-Ranges": "bytes",
 		});
 		createReadStream(filePath).pipe(res);
 	} catch {
-		res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+		res.writeHead(404, { ...securityHeaders(), "Content-Type": "text/plain; charset=utf-8" });
 		res.end("Not found");
 	}
 }
@@ -743,12 +758,17 @@ function streamEvents(req: import("node:http").IncomingMessage, res: import("nod
 	const sessionToken = url.searchParams.get("sessionToken");
 	const auth = authenticatedPlayer(world, { playerId: playerIdParam, sessionToken });
 	if (!auth) return invalidSession(res);
+	const ipAddress = clientIp(req);
+	if (activeStreamCountForIp(clients, ipAddress) >= MAX_EVENT_STREAMS_PER_IP) {
+		return json(res, { ok: false, error: "Too many live connections from this IP address." }, 429);
+	}
 	const playerId = auth.playerId;
 	const adminView = adminViewFromParam(url.searchParams.get("adminView"));
 	cancelDisconnectLeave(world, playerId);
 	closeExistingClientStreams(clients, world, playerId);
-	recordPlayerConnection(auth.player, clientIp(req), true);
+	recordPlayerConnection(auth.player, ipAddress, true);
 	res.writeHead(200, {
+		...securityHeaders(),
 		"Content-Type": "text/event-stream",
 		"Cache-Control": "no-cache",
 		Connection: "keep-alive",
@@ -756,7 +776,7 @@ function streamEvents(req: import("node:http").IncomingMessage, res: import("nod
 	// sentExplored is null for the first snapshot (server then sends the full
 	// explored set). After that we populate the Set so subsequent snapshots
 	// only carry the new tiles in `exploredDelta`.
-	const client: Client = { playerId, sessionToken, res, sentExplored: null, adminView, lastSnapshot: null, lastSeq: 0 };
+	const client: Client = { playerId, sessionToken, res, sentExplored: null, adminView, lastSnapshot: null, lastSeq: 0, ipAddress };
 	clients.add(client);
 	const initialSnapshot = makeSnapshot(world, playerId, null, adminView);
 	const initialMessage = snapshotMessageForClient(client, initialSnapshot);
@@ -877,6 +897,47 @@ function activeStreamCount(clients: Set<Client>, playerId: PlayerId) {
 	return count;
 }
 
+function activeStreamCountForIp(clients: Set<Client>, ipAddress: string | null) {
+	if (!ipAddress) return 0;
+	let count = 0;
+	for (const client of clients) {
+		if (client.ipAddress === ipAddress) count += 1;
+	}
+	return count;
+}
+
+function rateLimitFor(req: import("node:http").IncomingMessage, url: URL) {
+	if (req.method === "POST" && url.pathname === "/api/join") return "join";
+	if (req.method === "POST" && url.pathname === "/api/command") return "command";
+	if (req.method === "POST" && url.pathname === "/api/log") return "log";
+	if (req.method === "POST" && url.pathname.startsWith("/api/dev/")) return "admin";
+	if (req.method === "GET" && url.pathname === "/events") return "events";
+	return null;
+}
+
+function consumeRateLimit(ipAddress: string | null, name: string) {
+	const limit = RATE_LIMITS[name];
+	if (!limit) return true;
+	const now = Date.now();
+	const key = `${name}:${ipAddress ?? "unknown"}`;
+	const bucket = rateLimitBuckets.get(key);
+	if (!bucket || now >= bucket.resetAt) {
+		rateLimitBuckets.set(key, { resetAt: now + limit.windowMs, count: 1 });
+		pruneRateLimitBuckets(now);
+		return true;
+	}
+	if (bucket.count >= limit.max) return false;
+	bucket.count += 1;
+	return true;
+}
+
+function pruneRateLimitBuckets(now: number) {
+	if (rateLimitBuckets.size < 1000) return;
+	for (const [key, bucket] of rateLimitBuckets) {
+		if (now >= bucket.resetAt) rateLimitBuckets.delete(key);
+	}
+}
+
 function recordPlayerConnection(player: Player | null | undefined, ipAddress: string | null, openedStream: boolean) {
 	if (!player) return;
 	const now = Date.now();
@@ -895,9 +956,16 @@ function recordPlayerConnection(player: Player | null | undefined, ipAddress: st
 }
 
 function clientIp(req: import("node:http").IncomingMessage): string | null {
+	const cloudflareIp = req.headers["cf-connecting-ip"];
+	const cloudflareAddress = Array.isArray(cloudflareIp) ? cloudflareIp[0] : cloudflareIp;
+	if (cloudflareAddress?.trim()) return normalizeIp(cloudflareAddress.trim());
 	const forwardedFor = req.headers["x-forwarded-for"];
 	const forwardedIp = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
 	const ipAddress = forwardedIp?.split(",")[0]?.trim() || req.socket.remoteAddress || null;
+	return normalizeIp(ipAddress);
+}
+
+function normalizeIp(ipAddress: string | null | undefined): string | null {
 	if (!ipAddress) return null;
 	return ipAddress.startsWith("::ffff:") ? ipAddress.slice(7) : ipAddress;
 }
@@ -911,12 +979,13 @@ async function serveStatic(req: import("node:http").IncomingMessage, res: import
 		const stat = await fs.stat(filePath);
 		if (!stat.isFile()) throw new Error("Not a file");
 		res.writeHead(200, {
+			...securityHeaders(),
 			"Content-Type": MIME[extname(filePath) as keyof typeof MIME] || "application/octet-stream",
 			"Cache-Control": cacheControl(filePath),
 		});
 		createReadStream(filePath).pipe(res);
 	} catch {
-		res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+		res.writeHead(404, { ...securityHeaders(), "Content-Type": "text/plain; charset=utf-8" });
 		res.end("Not found");
 	}
 }
@@ -966,7 +1035,16 @@ function errorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
 
+function securityHeaders() {
+	return {
+		"X-Content-Type-Options": "nosniff",
+		"Referrer-Policy": "strict-origin-when-cross-origin",
+		"Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+		"Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+	};
+}
+
 function json(res: import("node:http").ServerResponse, payload: unknown, status = 200) {
-	res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+	res.writeHead(status, { ...securityHeaders(), "Content-Type": "application/json; charset=utf-8" });
 	res.end(JSON.stringify(payload));
 }
