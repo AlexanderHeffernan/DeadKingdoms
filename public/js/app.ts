@@ -81,7 +81,8 @@ const PLAYER_COLOR_STORAGE_KEY = "rtsPlayerColor";
 const TEXT_SCALE_STORAGE_KEY = "rtsTextScale";
 const DEFAULT_TEXT_SCALE = 100;
 const MIN_TEXT_SCALE = 80;
-const MAX_TEXT_SCALE = 175;
+const MAX_TEXT_SCALE = 150;
+const TEXT_SCALE_SLIDER_THUMB_WIDTH = 14;
 const GITHUB_REPOSITORY_URL = "https://github.com/AlexanderHeffernan/DeadKingdoms";
 const DEFAULT_PLAYER_COLORS = [
 	"#ff2b1a",
@@ -408,6 +409,7 @@ document.getElementById("textScaleInput")?.addEventListener("input", (event) => 
 	setTextScale(Number(event.target.value));
 });
 document.addEventListener("keydown", closeSettingsModalOnEscape);
+window.addEventListener("resize", () => updateTextScaleControl(storedTextScale()));
 document.getElementById("leaderboardToggle")?.addEventListener("click", () => {
 	const container = document.getElementById("leaderboardPanel");
 	const toggle = document.getElementById("leaderboardToggle");
@@ -1046,9 +1048,16 @@ function updateTextScaleControl(scale: number) {
 	const value = document.getElementById("textScaleValue");
 	if (input instanceof HTMLInputElement) {
 		input.value = String(scale);
-		input.style.setProperty("--range-progress", `${((scale - MIN_TEXT_SCALE) / (MAX_TEXT_SCALE - MIN_TEXT_SCALE)) * 100}%`);
+		input.style.setProperty("--range-progress", textScaleSliderProgress(input, scale));
 	}
 	if (value) value.textContent = `${scale}%`;
+}
+
+function textScaleSliderProgress(input: HTMLInputElement, scale: number) {
+	const progress = (scale - MIN_TEXT_SCALE) / (MAX_TEXT_SCALE - MIN_TEXT_SCALE);
+	const width = input.getBoundingClientRect().width;
+	if (width <= 0) return `${progress * 100}%`;
+	return `${TEXT_SCALE_SLIDER_THUMB_WIDTH / 2 + progress * (width - TEXT_SCALE_SLIDER_THUMB_WIDTH)}px`;
 }
 
 function clampTextScale(value: number) {
@@ -1127,6 +1136,7 @@ function openSettingsModal(event?: Event) {
 	if (!modal || !button) return;
 	modal.classList.remove("hidden");
 	button.setAttribute("aria-expanded", "true");
+	updateTextScaleControl(storedTextScale());
 }
 
 function closeSettingsModal() {

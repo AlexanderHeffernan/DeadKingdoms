@@ -145,8 +145,8 @@ button:disabled {
 }
 
 .banner-image-icon {
-	width: 34px;
-	height: 34px;
+	width: var(--ui-icon-size);
+	height: var(--ui-icon-size);
 	object-fit: contain;
 	image-rendering: pixelated;
 	pointer-events: none;
@@ -198,10 +198,12 @@ button:disabled {
 }
 
 .settings-close-button span {
-	display: block;
-	transform: translateY(-1px);
+	display: grid;
+	place-items: center;
+	width: 100%;
+	height: 100%;
 	color: #e9bd59;
-	font-size: var(--ui-text-lg);
+	font-size: 16px;
 	line-height: 1;
 }
 
@@ -249,7 +251,7 @@ button:disabled {
 	padding: 0;
 	border: none;
 	background:
-		linear-gradient(#e9bd59 0 0) 0 50% / var(--range-progress, 33.333%) 8px no-repeat,
+		linear-gradient(#e9bd59 0 0) 0 50% / var(--range-progress, 28.571%) 8px no-repeat,
 		linear-gradient(#211914 0 0) 0 50% / 100% 8px no-repeat;
 	appearance: none;
 	-webkit-appearance: none;

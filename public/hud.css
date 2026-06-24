@@ -43,6 +43,14 @@
 		6px 6px 0 rgb(0 0 0 / 0.62);
 }
 
+#leaderboard {
+	font-size: var(--ui-text-sm);
+}
+
+#leaderboard li {
+	font-size: inherit;
+}
+
 .leaderboard-container.collapsed {
 	display: none;
 }
@@ -85,8 +93,8 @@
 }
 
 .banner button {
-	width: 34px;
-	height: 34px;
+	width: var(--ui-icon-size);
+	height: var(--ui-icon-size);
 	min-height: 0;
 	padding: 0;
 	box-sizing: border-box;
@@ -104,7 +112,7 @@
 }
 
 .banner .leave-button {
-	width: 34px;
+	width: var(--ui-icon-size);
 	margin: 0;
 	padding: 0;
 }
@@ -147,13 +155,6 @@
 	margin: 0 0 8px;
 	font-size: var(--ui-text-lg);
 	font-weight: 700;
-}
-
-.leaderboard-subtitle {
-	margin: -4px 34px 8px 0;
-	color: #cfc7b7;
-	font-size: var(--ui-text-md);
-	line-height: 1.25;
 }
 
 .top-right ol {
@@ -341,8 +342,8 @@
 
 .population-icon-button {
 	position: relative;
-	width: 34px;
-	height: 34px;
+	width: var(--ui-icon-size);
+	height: var(--ui-icon-size);
 	min-height: 0;
 	display: grid;
 	place-items: center;
@@ -380,8 +381,8 @@
 }
 
 .resources .resource-icon {
-	width: 34px;
-	height: 34px;
+	width: var(--ui-icon-size);
+	height: var(--ui-icon-size);
 }
 
 .resource-image-icon {
@@ -412,40 +413,16 @@
 	-webkit-mask: url("/sprites/ui/settings/bannerIcons/population/flag.png") center / contain no-repeat;
 }
 
-.resource-gatherer-badge {
+.badge {
 	position: absolute;
 	right: -5px;
 	bottom: -3px;
-	min-width: 13px;
-	height: 13px;
 	box-sizing: border-box;
 	padding: 0 3px;
 	display: grid;
 	place-items: center;
-	border: 1px solid rgb(17 24 19 / 0.95);
-	border-radius: 7px;
-	background: #e9bd59;
-	color: #111813;
-	font-size: 12px;
-	font-weight: 900;
-	line-height: 1;
-}
-
-.population-idle-badge {
-	position: absolute;
-	right: -5px;
-	bottom: -3px;
-	min-width: 13px;
-	height: 13px;
-	box-sizing: border-box;
-	padding: 0 3px;
-	display: grid;
-	place-items: center;
-	border: 1px solid rgb(17 24 19 / 0.95);
-	border-radius: 7px;
-	background: #e9bd59;
-	color: #111813;
-	font-size: 12px;
+	color: white;
+	font-size: var(--ui-text-xs);
 	font-weight: 900;
 	line-height: 1;
 }

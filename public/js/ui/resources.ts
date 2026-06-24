@@ -116,9 +116,9 @@ function resourceIconPath(resource: string) {
 }
 
 function gathererBadge(gatherers: number) {
-	return gatherers > 0 ? `<span class="resource-gatherer-badge">${gatherers}</span>` : "";
+	return gatherers > 0 ? `<span class="resource-gatherer-badge badge">${gatherers}</span>` : "";
 }
 
 function idleWorkerBadge(idleWorkers: number) {
-	return idleWorkers > 0 ? `<span class="population-idle-badge">${idleWorkers}</span>` : "";
+	return idleWorkers > 0 ? `<span class="population-idle-badge badge">${idleWorkers}</span>` : "";
 }
