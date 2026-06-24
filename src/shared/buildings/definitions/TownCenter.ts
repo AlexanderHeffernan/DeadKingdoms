@@ -4,6 +4,7 @@ import { VillagerUnit } from "../../units/index.js";
 export class TownCenter extends ProductionDepotBuilding {
 	static readonly type = "townCenter";
 	static readonly label = "Town Center";
+	static readonly description = "Central base, resource drop-off, and villager training building.";
 	static readonly sprite = "townCenter";
 	static readonly maxHp = 2400;
 	static readonly size = 4;

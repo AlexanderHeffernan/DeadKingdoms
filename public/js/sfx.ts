@@ -121,8 +121,15 @@ export class SoundEffects {
 	private underAttackActive = false;
 	private lastOwnedDamageAt = -Infinity;
 	private ready = false;
+	private masterVolume = 1;
+	private sfxVolume = 1;
 
 	constructor(private readonly camera: CameraState) {}
+
+	setVolume(masterVolume: number, sfxVolume: number) {
+		this.masterVolume = clamp(masterVolume, 0, 1);
+		this.sfxVolume = clamp(sfxVolume, 0, 1);
+	}
 
 	unlock() {
 		this.ready = true;
@@ -320,7 +327,7 @@ export class SoundEffects {
 		const base = def.volume * (options.volume ?? 1) * master;
 		const position = def.space === "world" && options.point ? this.positionVolume(options.point, options.hearingRadius, name) : 1;
 		const maxVolume = name === "scout_horn" ? 2 : 1;
-		return clamp(base * position, 0, maxVolume);
+		return clamp(base * position * this.masterVolume * this.sfxVolume, 0, maxVolume);
 	}
 
 	private positionVolume(point: Vec2, hearingRadius = SCREEN_HEARING_RADIUS, name?: SoundEffectName) {

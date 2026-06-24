@@ -41,6 +41,9 @@ export type UnitCombatTarget = Unit | Building | Corpse;
 export type UnitSimulationContext = {
 	readonly world: World;
 
+	/** Assigns a command and updates any world-level bookkeeping owned by command state. */
+	setCommand(unit: Unit, command: UnitCommand): void;
+
 	/** Moves a unit along a stored move-command path, recalculating path state as needed. */
 	moveWithPath(unit: Unit, command: Extract<UnitCommand, { type: "move" }>, maxStep: number): boolean;
 
@@ -191,7 +194,7 @@ export interface UnitBehavior {
 	step(context: UnitSimulationContext, unit: Unit, dt: number): void;
 
 	/** Gives this unit a chance to react after taking damage from another unit. */
-	onAttacked(unit: Unit, attacker: Unit): void;
+	onAttacked(context: Pick<UnitSimulationContext, "setCommand">, unit: Unit, attacker: Unit): void;
 
 	readonly canGather: boolean;
 	readonly canBuild: boolean;
@@ -271,11 +274,11 @@ export abstract class BaseUnit implements UnitBehavior {
 		if (command.type === "idle") this.stepIdle(context, unit);
 			else if (command.type === "move") this.stepMove(context, unit, command, dt);
 				else if (command.type === "attack") this.stepAttack(context, unit, command, dt);
-					else unit.command = { type: "idle" };
+					else context.setCommand(unit, { type: "idle" });
 	}
 
 	/** Gives this unit a chance to react after taking damage from another unit. */
-	public onAttacked(_unit: Unit, _attacker: Unit) {}
+	public onAttacked(_context: Pick<UnitSimulationContext, "setCommand">, _unit: Unit, _attacker: Unit) {}
 
 	protected updateTimers(unit: Unit, dt: number) {
 		unit.cooldown = Math.max(0, unit.cooldown - dt);
@@ -286,12 +289,12 @@ export abstract class BaseUnit implements UnitBehavior {
 	protected stepIdle(context: UnitSimulationContext, unit: Unit) {
 		if (!this.canAutoAcquireTargets) return;
 		const target = context.nearestEnemy(unit, 5.5);
-		if (target) unit.command = { type: "attack", targetId: target.id };
+		if (target) context.setCommand(unit, { type: "attack", targetId: target.id });
 	}
 
 	protected stepMove(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, dt: number) {
 		unit.facing = command.x < unit.x ? "left" : "right";
-		if (context.moveWithPath(unit, command, this.speed * dt)) unit.command = { type: "idle" };
+		if (context.moveWithPath(unit, command, this.speed * dt)) context.setCommand(unit, { type: "idle" });
 	}
 
 	protected stepAttack(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "attack" }>, dt: number) {
@@ -299,7 +302,7 @@ export abstract class BaseUnit implements UnitBehavior {
 		const explicitTarget = target && (target.kind === "corpse" || target.ownerId !== unit.ownerId) ? target : null;
 		if (!explicitTarget) {
 			const nextTarget = context.nearestEnemy(unit, 5.5);
-			unit.command = nextTarget ? { type: "attack", targetId: nextTarget.id } : { type: "idle" };
+			context.setCommand(unit, nextTarget ? { type: "attack", targetId: nextTarget.id } : { type: "idle" });
 			return;
 		}
 		const targetPoint = context.centerOf(explicitTarget);
@@ -316,7 +319,7 @@ export abstract class BaseUnit implements UnitBehavior {
 			unit.attackFlash = 0.22;
 			const nextTarget = context.nearestEnemy(unit, 5.5);
 			if (nextTarget && !context.targetById(command.targetId)) {
-				unit.command = { type: "attack", targetId: nextTarget.id };
+				context.setCommand(unit, { type: "attack", targetId: nextTarget.id });
 			}
 		}
 	}

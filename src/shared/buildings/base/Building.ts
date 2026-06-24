@@ -26,6 +26,7 @@ export abstract class Building implements BuildingEntity {
 
 	get type() { return this.definition.type; }
 	get label() { return this.definition.label; }
+	get description() { return this.definition.description; }
 	get sprite() { return this.definition.sprite; }
 	get maxHp() { return this.definition.maxHp; }
 	get size() { return this.definition.size; }

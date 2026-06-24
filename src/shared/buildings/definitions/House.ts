@@ -3,6 +3,7 @@ import { Building } from "../base/index.js";
 export class House extends Building {
 	static readonly type = "house";
 	static readonly label = "House";
+	static readonly description = "Raises your population capacity.";
 	static readonly sprite = "house";
 	static readonly maxHp = 550;
 	static readonly size = 2;

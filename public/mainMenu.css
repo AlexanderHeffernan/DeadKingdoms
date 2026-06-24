@@ -446,6 +446,9 @@
 #onlinePlayers,
 #resetStatus {
 	min-width: 1px;
+	color: #8aa67f;
+	font-size: 30px;
+	text-shadow: 2px 2px 0 #0b140e;
 }
 
 .global-leaderboard-modal,

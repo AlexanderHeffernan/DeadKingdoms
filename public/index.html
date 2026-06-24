@@ -6,6 +6,9 @@
 		<title>Dead Kingdoms</title>
 		<link rel="stylesheet" href="/styles.css?v=3" />
 		<link rel="stylesheet" href="/mainMenu.css?v=3" />
+		<link rel="stylesheet" href="/hud.css?v=3" />
+		<link rel="stylesheet" href="/admin.css?v=3" />
+		<link rel="stylesheet" href="/settings.css?v=3" />
 	</head>
 	<body>
 		<div id="mobile-not-supported" class="mobile-not-supported">
@@ -127,26 +130,48 @@
 			></canvas>
 			<section class="hud top-left">
 				<div id="resources" class="resources"></div>
-				<div id="status" class="status"></div>
-				<button id="leaveButton" class="leave-button" type="button">
-					Leave game
-				</button>
 			</section>
 			<section class="hud top-right">
-				<h2>Leaderboard</h2>
-				<p class="leaderboard-subtitle">Build the strongest settlement and hold #1.</p>
-				<div id="timeOfDay" class="time-of-day">Day --:--</div>
-				<div id="ping" class="ping" hidden>Ping --ms</div>
-				<div id="fps" class="ping" hidden>FPS --</div>
-				<div id="serverPerf" class="ping" hidden>TPS -- Tick --ms</div>
-				<ol id="leaderboard"></ol>
-				<button
-					id="muteButton"
-					class="mute-button"
-					type="button"
-					aria-label="Mute music"
-					title="Mute music"
-				></button>
+				<div class="banner">
+					<button
+						id="leaderboardToggle"
+						class="icon-button leaderboard-toggle"
+						type="button"
+						aria-label="Hide leaderboard"
+						aria-expanded="true"
+						aria-controls="leaderboardPanel"
+						title="Hide leaderboard"
+					>
+						<img class="banner-image-icon" src="/sprites/ui/settings/bannerIcons/podium.png" alt="" aria-hidden="true" />
+					</button>
+					<button
+						id="settingsButton"
+						class="icon-button settings-button"
+						type="button"
+						aria-label="Open settings"
+						aria-expanded="false"
+						aria-controls="settingsModal"
+						title="Settings"
+					>
+						<img class="banner-image-icon" src="/sprites/ui/settings/settings.png" alt="" aria-hidden="true" />
+					</button>
+					<button id="leaveButton" class="icon-button leave-button" type="button" aria-label="Leave game" title="Leave game">
+						<img class="banner-image-icon" src="/sprites/ui/settings/bannerIcons/exit.png" alt="" aria-hidden="true" />
+					</button>
+				</div>
+				<div id="leaderboardPanel" class="leaderboard-container">
+					<div class="leaderboard-heading">
+						<h2>Leaderboard</h2>
+					</div>
+					<div id="leaderboardBody" class="leaderboard-body">
+						<div id="ping" class="ping" hidden>Ping --ms</div>
+						<div id="fps" class="ping" hidden>FPS --</div>
+						<div id="serverPerf" class="ping" hidden>TPS -- Tick --ms</div>
+						<ol id="leaderboard"></ol>
+					</div>
+				</div>
+			</section>
+			<section class="hud bottom-right">
 				<canvas
 					id="minimap"
 					width="180"
@@ -154,6 +179,125 @@
 					aria-label="Minimap"
 				></canvas>
 			</section>
+			<div id="settingsModal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+				<div class="settings-dialog">
+					<header class="settings-header">
+						<h2 id="settingsTitle">Settings</h2>
+						<button id="settingsCloseButton" class="icon-button settings-close-button" type="button" aria-label="Close settings" title="Close settings">
+							<span aria-hidden="true">x</span>
+						</button>
+					</header>
+					<div class="settings-body">
+						<h3>Audio</h3>
+						<label class="settings-toggle-option" for="settingsMuteButton">
+							<span>Mute audio</span>
+							<input
+								id="settingsMuteButton"
+								type="checkbox"
+							/>
+							<span class="settings-toggle-track" aria-hidden="true"></span>
+						</label>
+						<label class="settings-range-option" for="masterVolumeInput">
+							<span>Master volume</span>
+							<input
+								id="masterVolumeInput"
+								type="range"
+								min="0"
+								max="100"
+								step="5"
+								value="100"
+							/>
+							<strong id="masterVolumeValue">100%</strong>
+						</label>
+						<label class="settings-range-option" for="musicVolumeInput">
+							<span>Music volume</span>
+							<input
+								id="musicVolumeInput"
+								type="range"
+								min="0"
+								max="100"
+								step="5"
+								value="100"
+							/>
+							<strong id="musicVolumeValue">100%</strong>
+						</label>
+						<label class="settings-range-option" for="sfxVolumeInput">
+							<span>Sound effects</span>
+							<input
+								id="sfxVolumeInput"
+								type="range"
+								min="0"
+								max="100"
+								step="5"
+								value="100"
+							/>
+							<strong id="sfxVolumeValue">100%</strong>
+						</label>
+						<h3>Display</h3>
+						<label class="settings-range-option" for="textScaleInput">
+							<span>Text size</span>
+							<input
+								id="textScaleInput"
+								type="range"
+								min="80"
+								max="150"
+								step="5"
+								value="100"
+							/>
+							<strong id="textScaleValue">100%</strong>
+						</label>
+						<h3>Panning</h3>
+						<label class="settings-toggle-option" for="throwPanningInput">
+							<span>Throw panning</span>
+							<input
+								id="throwPanningInput"
+								type="checkbox"
+							/>
+							<span class="settings-toggle-track" aria-hidden="true"></span>
+						</label>
+						<label class="settings-range-option" for="dragPanSensitivityInput">
+							<span>Middle mouse sensitivity</span>
+							<input
+								id="dragPanSensitivityInput"
+								type="range"
+								min="0.5"
+								max="3"
+								step="0.1"
+								value="1"
+							/>
+							<strong id="dragPanSensitivityValue">1.0x</strong>
+						</label>
+						<label class="settings-toggle-option" for="pointerLockPanningInput">
+							<span>Lock cursor while panning</span>
+							<input
+								id="pointerLockPanningInput"
+								type="checkbox"
+							/>
+							<span class="settings-toggle-track" aria-hidden="true"></span>
+						</label>
+						<label class="settings-toggle-option" for="edgeScrollInput">
+							<span>Edge scrolling</span>
+							<input
+								id="edgeScrollInput"
+								type="checkbox"
+							/>
+							<span class="settings-toggle-track" aria-hidden="true"></span>
+						</label>
+						<label class="settings-range-option" for="edgeScrollSpeedInput">
+							<span>Edge scroll speed</span>
+							<input
+								id="edgeScrollSpeedInput"
+								type="range"
+								min="4"
+								max="20"
+								step="1"
+								value="10"
+							/>
+							<strong id="edgeScrollSpeedValue">10</strong>
+						</label>
+					</div>
+				</div>
+			</div>
 			<section id="adminPanel" class="hud admin-panel hidden">
 				<div id="adminHeading" class="admin-heading">
 					<h2>Admin</h2>
@@ -372,9 +516,10 @@
 				Admin
 			</button>
 			<section class="hud bottom">
-				<div id="selection" class="selection"></div>
 				<div id="actions" class="actions"></div>
+				<div id="selection" class="selection"></div>
 			</section>
+			<section id="trainingStatus" class="training-status hidden" aria-label="Current training"></section>
 			<section id="toast" class="toast"></section>
 		</main>
 
