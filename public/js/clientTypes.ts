@@ -16,6 +16,7 @@ export type LastSeen = {
 
 export type GameState = {
 	playerId: string | null;
+	sessionToken: string | null;
 	snapshot: ClientSnapshot | null;
 	selectedIds: Set<string>;
 	lastSeen: LastSeen;

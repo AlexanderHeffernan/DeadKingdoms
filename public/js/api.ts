@@ -1,5 +1,10 @@
 import type { CommandPayload, CommandResult, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId } from "../../src/shared/types.js";
 
+export type SessionCredentials = {
+	playerId: PlayerId;
+	sessionToken: string;
+};
+
 export type ServerStatus = {
 	activePlayers: number;
 	maxPlayers: number;
@@ -46,88 +51,88 @@ export async function getChangelog(): Promise<Changelog> {
 	return res.json();
 }
 
-export async function join(name: string, color: string) {
+export async function join(name: string, color: string): Promise<{ ok: boolean; playerId?: PlayerId; sessionToken?: string; error?: string }> {
 	return post("/api/join", { name, color });
 }
 
-export async function sendCommand(payload: CommandPayload): Promise<CommandResult> {
-	return post("/api/command", payload as unknown as Record<string, unknown>) as Promise<CommandResult>;
+export async function sendCommand(payload: CommandPayload, sessionToken: string): Promise<CommandResult> {
+	return post("/api/command", { ...payload, sessionToken } as unknown as Record<string, unknown>) as Promise<CommandResult>;
 }
 
-export async function leave(playerId: PlayerId) {
-	return post("/api/leave", { playerId });
+export async function leave(credentials: SessionCredentials) {
+	return post("/api/leave", credentials);
 }
 
-export async function enableAdminAccess(playerId: PlayerId, secret: string) {
-	return post("/api/dev/admin-access", { playerId, secret });
+export async function enableAdminAccess(credentials: SessionCredentials, secret: string) {
+	return post("/api/dev/admin-access", { ...credentials, secret });
 }
 
-export async function disableAdminMode(playerId: PlayerId) {
-	return post("/api/dev/disable-admin", { playerId });
+export async function disableAdminMode(credentials: SessionCredentials) {
+	return post("/api/dev/disable-admin", credentials);
 }
 
-export async function enableFullMapVision(playerId: PlayerId) {
-	return post("/api/dev/full-map-vision", { playerId });
+export async function enableFullMapVision(credentials: SessionCredentials) {
+	return post("/api/dev/full-map-vision", credentials);
 }
 
-export async function kickPlayer(playerId: PlayerId, targetPlayerId: PlayerId) {
-	return post("/api/dev/kick-player", { playerId, targetPlayerId });
+export async function kickPlayer(credentials: SessionCredentials, targetPlayerId: PlayerId) {
+	return post("/api/dev/kick-player", { ...credentials, targetPlayerId });
 }
 
-export async function banPlayer(playerId: PlayerId, targetPlayerId: PlayerId) {
-	return post("/api/dev/ban-player", { playerId, targetPlayerId });
+export async function banPlayer(credentials: SessionCredentials, targetPlayerId: PlayerId) {
+	return post("/api/dev/ban-player", { ...credentials, targetPlayerId });
 }
 
-export async function unbanIp(playerId: PlayerId, ipAddress: string) {
-	return post("/api/dev/unban-ip", { playerId, ipAddress });
+export async function unbanIp(credentials: SessionCredentials, ipAddress: string) {
+	return post("/api/dev/unban-ip", { ...credentials, ipAddress });
 }
 
-export async function enableSoundDebug(playerId: PlayerId) {
-	return post("/api/dev/sound-debug", { playerId });
+export async function enableSoundDebug(credentials: SessionCredentials) {
+	return post("/api/dev/sound-debug", credentials);
 }
 
-export async function enableZombieDebug(playerId: PlayerId) {
-	return post("/api/dev/zombie-debug", { playerId });
+export async function enableZombieDebug(credentials: SessionCredentials) {
+	return post("/api/dev/zombie-debug", credentials);
 }
 
-export async function enablePathDebug(playerId: PlayerId, secret: string) {
-	return post("/api/dev/path-debug", { playerId, secret });
+export async function enablePathDebug(credentials: SessionCredentials, secret: string) {
+	return post("/api/dev/path-debug", { ...credentials, secret });
 }
 
-export async function spawnZombieHorde(playerId: PlayerId, count = 500) {
-	return post("/api/dev/spawn-zombies", { playerId, count });
+export async function spawnZombieHorde(credentials: SessionCredentials, count = 500) {
+	return post("/api/dev/spawn-zombies", { ...credentials, count });
 }
 
-export async function logClientMessage(playerId: PlayerId | null, message: string) {
-	return post("/api/log", { playerId, message });
+export async function logClientMessage(credentials: SessionCredentials | null, message: string) {
+	return post("/api/log", { ...credentials, message });
 }
 
-export async function reportPing(playerId: PlayerId, pingMs: number) {
-	return post("/api/ping", { playerId, pingMs });
+export async function reportPing(credentials: SessionCredentials, pingMs: number) {
+	return post("/api/ping", { ...credentials, pingMs });
 }
 
-export async function grantSoldiers(playerId: PlayerId, count = 100) {
-	return post("/api/dev/grant-soldiers", { playerId, count });
+export async function grantSoldiers(credentials: SessionCredentials, count = 100) {
+	return post("/api/dev/grant-soldiers", { ...credentials, count });
 }
 
-export async function toggleTownCenterInvincible(playerId: PlayerId) {
-	return post("/api/dev/town-center-invincible", { playerId });
+export async function toggleTownCenterInvincible(credentials: SessionCredentials) {
+	return post("/api/dev/town-center-invincible", credentials);
 }
 
-export async function emitNoise(playerId: PlayerId, x: number, y: number) {
-	return post("/api/dev/emit-noise", { playerId, x, y });
+export async function emitNoise(credentials: SessionCredentials, x: number, y: number) {
+	return post("/api/dev/emit-noise", { ...credentials, x, y });
 }
 
-export async function restartServer(playerId: PlayerId) {
-	return post("/api/dev/restart-server", { playerId });
+export async function restartServer(credentials: SessionCredentials) {
+	return post("/api/dev/restart-server", credentials);
 }
 
-export async function shiftTimeOfDay(playerId: PlayerId, hours: number) {
-	return post("/api/dev/time-shift", { playerId, hours });
+export async function shiftTimeOfDay(credentials: SessionCredentials, hours: number) {
+	return post("/api/dev/time-shift", { ...credentials, hours });
 }
 
-export async function setTimeOfDay(playerId: PlayerId, progress: number) {
-	return post("/api/dev/time-set", { playerId, progress });
+export async function setTimeOfDay(credentials: SessionCredentials, progress: number) {
+	return post("/api/dev/time-set", { ...credentials, progress });
 }
 
 async function post(url: string, payload: Record<string, unknown>) {

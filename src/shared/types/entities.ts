@@ -51,6 +51,7 @@ export interface Player {
 	defeated: boolean;
 	score: number;
 	joinedAt: number;
+	sessionToken?: string;
 	godMode?: boolean;
 	adminLevel?: AdminLevel;
 	soundDebug?: boolean;

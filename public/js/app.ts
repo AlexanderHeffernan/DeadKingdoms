@@ -22,11 +22,12 @@ import pillarFlagUrl from "./sprites/pillar_flag.png";
 import soldierBaseUrl from "./sprites/soldier_base.png";
 import soldierFlagUrl from "./sprites/soldier_flag.png";
 import type { Building, BuildingType, CommandPayload, Corpse, EntityId, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId, ResourceNode, ResourceType, Ruin, Snapshot, SnapshotDelta, SnapshotMessage, Unit, UnitType } from "../../src/shared/types.js";
-import type { ChangelogEntry } from "./api.js";
+import type { ChangelogEntry, SessionCredentials } from "./api.js";
 import type { ClientCommand, ClientSnapshot, GameState, ViewState } from "./clientTypes.js";
 
 const state: GameState = {
-	playerId: localStorage.getItem("rtsPlayerId") || null,
+	playerId: null,
+	sessionToken: null,
 	snapshot: null,
 	selectedIds: new Set(),
 	lastSeen: { buildings: {}, resources: {}, ruins: {} },
@@ -40,7 +41,7 @@ const state: GameState = {
 
 Logs.setSource("client");
 Logs.setSink((entry) => {
-	void logClientMessage(state.playerId, entry.message);
+	void logClientMessage(currentCredentials(), entry.message);
 });
 
 const music: {
@@ -108,6 +109,18 @@ const CONTRIBUTORS: ContributorCredit[] = [
 		contribution: "In-Game Sprite Artist.",
 	},
 ];
+
+function currentCredentials(): SessionCredentials | null {
+	return state.playerId && state.sessionToken
+		? { playerId: state.playerId, sessionToken: state.sessionToken }
+		: null;
+}
+
+function requireCredentials(): SessionCredentials | null {
+	const credentials = currentCredentials();
+	if (!credentials) ui.showToast("No active player session.");
+	return credentials;
+}
 
 const HOW_TO_PLAY_ITEMS: HowToPlayItem[] = [
 	{
@@ -238,14 +251,15 @@ const ui = new UI(state, {
 		sfx.play("ui_command_move", { point: state.snapshot?.buildings[buildingId] });
 	},
 	async respawn() {
-		if (!state.playerId) return;
-		await leave(state.playerId);
-		localStorage.removeItem("rtsPlayerId");
+		const credentials = requireCredentials();
+		if (!credentials) return;
+		await leave(credentials);
 		window.location.reload();
 	},
 	async disableAdminMode() {
-		if (!state.playerId) return "No active player.";
-		const result = await requestDisableAdminMode(state.playerId);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestDisableAdminMode(credentials);
 		if (!result.ok) return result.error || "Could not disable admin mode.";
 		state.exploredSet.clear();
 		view.noiseMode = false;
@@ -256,8 +270,9 @@ const ui = new UI(state, {
 		return "Admin mode disabled.";
 	},
 	async enableFullMapVision() {
-		if (!state.playerId) return "No active player.";
-		const result = await requestFullMapVision(state.playerId);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestFullMapVision(credentials);
 		if (!result.ok) return result.error || "Could not enable full-map admin vision.";
 		state.exploredSet.clear();
 		connectEvents();
@@ -266,8 +281,9 @@ const ui = new UI(state, {
 		return message;
 	},
 	async enableSoundDebug() {
-		if (!state.playerId) return "No active player.";
-		const result = await requestSoundDebug(state.playerId);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestSoundDebug(credentials);
 		if (!result.ok) return result.error || "Could not enable sound field overlay.";
 		connectEvents();
 		const message = result.enabled ? "Sound field overlay enabled." : "Sound field overlay disabled.";
@@ -275,13 +291,14 @@ const ui = new UI(state, {
 		return message;
 	},
 	async setTimeOfDay(progress, label) {
-		if (!state.playerId) return "No active player.";
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
 		const currentProgress = state.snapshot?.dayNight.cycleProgress ?? 0;
 		state.timeOffsetSeconds += (progress - currentProgress) * DAY_NIGHT_CYCLE_SECONDS;
 		if (state.snapshot) state.snapshot.dayNight = offsetDayNight(state.snapshot.dayNight, state.timeOffsetSeconds);
 		let message = `Set time to ${label}.`;
 		try {
-			const result = await requestSetTimeOfDay(state.playerId, progress);
+			const result = await requestSetTimeOfDay(credentials, progress);
 			if (result.ok) state.timeOffsetSeconds = 0;
 			else message = `${message} (client preview only: ${result.error || "server rejected it"})`;
 		} catch {
@@ -292,8 +309,9 @@ const ui = new UI(state, {
 		return message;
 	},
 	async enableZombieDebug() {
-		if (!state.playerId) return "No active player.";
-		const result = await requestZombieDebug(state.playerId);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestZombieDebug(credentials);
 		if (!result.ok) return result.error || "Could not enable zombie state overlay.";
 		connectEvents();
 		const message = result.enabled ? "Zombie state overlay enabled." : "Zombie state overlay disabled.";
@@ -301,40 +319,46 @@ const ui = new UI(state, {
 		return message;
 	},
 	async kickPlayer(targetPlayerId) {
-		if (!state.playerId) return "No active player.";
-		const result = await requestKickPlayer(state.playerId, targetPlayerId);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestKickPlayer(credentials, targetPlayerId);
 		if (!result.ok) return result.error || "Could not kick player.";
 		return "Player kicked.";
 	},
 	async banPlayer(targetPlayerId) {
-		if (!state.playerId) return "No active player.";
-		const result = await requestBanPlayer(state.playerId, targetPlayerId);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestBanPlayer(credentials, targetPlayerId);
 		if (!result.ok) return result.error || "Could not ban player.";
 		return `Banned ${result.ipAddress ?? "player IP"}.`;
 	},
 	async unbanIp(ipAddress) {
-		if (!state.playerId) return "No active player.";
-		const result = await requestUnbanIp(state.playerId, ipAddress);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestUnbanIp(credentials, ipAddress);
 		if (!result.ok) return result.error || "Could not unban IP.";
 		return "IP unbanned.";
 	},
 	async spawnHostileHorde() {
-		if (!state.playerId) return "No active player.";
-		const result = await spawnZombieHorde(state.playerId, 500);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await spawnZombieHorde(credentials, 500);
 		if (!result.ok) return result.error || "Could not spawn hostile horde.";
 		ui.showToast(`Spawned ${result.spawned ?? 500} hostile units.`);
 		return `Spawned ${result.spawned ?? 500} hostile units.`;
 	},
 	async grantSoldiers() {
-		if (!state.playerId) return "No active player.";
-		const result = await requestGrantSoldiers(state.playerId, 100);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestGrantSoldiers(credentials, 100);
 		if (!result.ok) return result.error || "Could not grant soldiers.";
 		ui.showToast(`Granted ${result.granted ?? 100} soldiers.`);
 		return `Granted ${result.granted ?? 100} soldiers.`;
 	},
 	async toggleTownCenterInvincible() {
-		if (!state.playerId) return "No active player.";
-		const result = await requestTownCenterInvincible(state.playerId);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestTownCenterInvincible(credentials);
 		if (!result.ok) return result.error || "Could not toggle town center invincibility.";
 		const message = result.invincible ? "Town center is now invincible." : "Town center invincibility disabled.";
 		ui.showToast(message);
@@ -357,8 +381,9 @@ const ui = new UI(state, {
 		return message;
 	},
 	async restartServer() {
-		if (!state.playerId) return "No active player.";
-		const result = await requestRestartServer(state.playerId);
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestRestartServer(credentials);
 		if (!result.ok) return result.error || "Could not restart server.";
 		resetToJoin("Server restarted. Join again to start a fresh map.");
 		return "Server restarted.";
@@ -376,15 +401,15 @@ joinForm?.addEventListener("submit", async (event) => {
 	const name = nameInput?.value.trim() || "Player";
 	const color = colorInput?.value || "";
 	const result = await join(name, color);
-	if (!result.ok) {
+	if (!result.ok || !result.playerId || !result.sessionToken) {
 		showJoinNotice(result.error || "Could not join.");
 		return;
 	}
 	showJoinNotice("");
 	state.playerId = result.playerId;
+	state.sessionToken = result.sessionToken;
 	localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
 	localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, color);
-	localStorage.setItem("rtsPlayerId", result.playerId);
 	enterGame();
 });
 
@@ -403,7 +428,8 @@ window.addEventListener("admin-subscription", (event) => {
 
 window.addEventListener("resize", () => renderer.resize());
 window.addEventListener("beforeunload", () => {
-	if (state.playerId) leave(state.playerId);
+	const credentials = currentCredentials();
+	if (credentials) void leave(credentials);
 });
 
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -436,7 +462,6 @@ initMusic();
 updateHomeStatus();
 setInterval(updateHomeStatus, 2000);
 setInterval(renderHomeStatus, 1000);
-if (state.playerId) enterGame();
 
 function enterGame() {
 	document.getElementById("join")!.classList.add("hidden");
@@ -490,6 +515,7 @@ function renderHomeCredits() {
 
 const previewState: GameState = {
 	playerId: null,
+	sessionToken: null,
 	snapshot: null,
 	selectedIds: new Set(),
 	lastSeen: { buildings: {}, resources: {}, ruins: {} },
@@ -1074,7 +1100,7 @@ function updateMuteButton() {
 }
 
 function onDevShortcutKeyDown(event: KeyboardEvent) {
-	if (!state.playerId) return;
+	if (!currentCredentials()) return;
 	if (event.key.length !== 1) return;
 	devCommandInput = `${devCommandInput}${event.key}`.slice(-DEV_COMMAND_BUFFER_LENGTH);
 	void maybeEnableAdminAccess();
@@ -1083,11 +1109,12 @@ function onDevShortcutKeyDown(event: KeyboardEvent) {
 }
 
 async function maybeEnableAdminAccess() {
-	if (godModeCheckPending || !state.playerId || devCommandInput.length < 3) return;
+	const credentials = currentCredentials();
+	if (godModeCheckPending || !credentials || devCommandInput.length < 3) return;
 	const checkedInput = devCommandInput;
 	godModeCheckPending = true;
 	try {
-		const result = await enableAdminAccess(state.playerId, checkedInput);
+		const result = await enableAdminAccess(credentials, checkedInput);
 		if (result.ok) {
 			adminAccessEnabled = result.enabled !== false;
 			adminView = adminAccessEnabled ? "popup" : "closed";
@@ -1103,11 +1130,12 @@ async function maybeEnableAdminAccess() {
 }
 
 async function maybeEnablePathDebug() {
-	if (pathDebugEnabled || pathDebugCheckPending || !state.playerId || devCommandInput.length < 3) return;
+	const credentials = currentCredentials();
+	if (pathDebugEnabled || pathDebugCheckPending || !credentials || devCommandInput.length < 3) return;
 	const checkedInput = devCommandInput;
 	pathDebugCheckPending = true;
 	try {
-		const result = await enablePathDebug(state.playerId, checkedInput);
+		const result = await enablePathDebug(credentials, checkedInput);
 		if (result.ok) {
 			pathDebugEnabled = true;
 			ui.showToast("Pathfinding debug enabled.");
@@ -1122,10 +1150,11 @@ async function maybeEnablePathDebug() {
 }
 
 async function maybeSpawnZombieHorde() {
-	if (!adminAccessEnabled || zombieHordePending || !state.playerId || !devCommandInput.endsWith("zombiehorde")) return;
+	const credentials = currentCredentials();
+	if (!adminAccessEnabled || zombieHordePending || !credentials || !devCommandInput.endsWith("zombiehorde")) return;
 	zombieHordePending = true;
 	try {
-		const result = await spawnZombieHorde(state.playerId, 500);
+		const result = await spawnZombieHorde(credentials, 500);
 		if (result.ok) ui.showToast(`Spawned ${result.spawned ?? 500} zombies.`);
 	} catch {
 		// Keep this shortcut silent unless it succeeds.
@@ -1136,8 +1165,9 @@ async function maybeSpawnZombieHorde() {
 
 function connectEvents() {
 	if (eventStream) eventStream.close();
-	if (!state.playerId) return;
-	eventStream = new EventSource(`/events?playerId=${encodeURIComponent(state.playerId)}&adminView=${encodeURIComponent(adminView)}`);
+	const credentials = currentCredentials();
+	if (!credentials) return;
+	eventStream = new EventSource(`/events?playerId=${encodeURIComponent(credentials.playerId)}&sessionToken=${encodeURIComponent(credentials.sessionToken)}&adminView=${encodeURIComponent(adminView)}`);
 	eventStream.onmessage = (event) => {
 		const snap = snapshotFromMessage(JSON.parse(event.data) as SnapshotMessage);
 		if (!snap) {
@@ -1174,13 +1204,15 @@ function snapshotFromMessage(message: SnapshotMessage): ClientSnapshot | null {
 }
 
 function maybeReportPing(pingMs: number) {
-	if (!state.playerId || Date.now() - lastPingReportAt < 2000) return;
+	const credentials = currentCredentials();
+	if (!credentials || Date.now() - lastPingReportAt < 2000) return;
 	lastPingReportAt = Date.now();
-	void reportPing(state.playerId, pingMs);
+	void reportPing(credentials, pingMs);
 }
 
 async function leaveCurrentGame(message: string) {
-	if (state.playerId) await leave(state.playerId);
+	const credentials = currentCredentials();
+	if (credentials) await leave(credentials);
 	resetToJoin(message);
 }
 
@@ -1192,8 +1224,8 @@ function resetToJoin(message: string) {
 	if (eventStream) eventStream.close();
 	eventStream = null;
 	lastSnapshotSeq = 0;
-	localStorage.removeItem("rtsPlayerId");
 	state.playerId = null;
+	state.sessionToken = null;
 	state.snapshot = null;
 	adminDiagnosticsVisible = false;
 	adminAccessEnabled = false;
@@ -1503,9 +1535,10 @@ function isAttackClickTarget(target: Unit | Building | ResourceNode | Corpse | n
 }
 
 function emitNoiseFromScreen(x: number, y: number) {
-	if (!state.playerId) return;
+	const credentials = currentCredentials();
+	if (!credentials) return;
 	const iso = screenToIso(x, y, view.camera);
-	void requestEmitNoise(state.playerId, iso.x, iso.y);
+	void requestEmitNoise(credentials, iso.x, iso.y);
 	addMoveCross(iso.x, iso.y);
 }
 
@@ -1578,8 +1611,9 @@ async function placeWallLine() {
 }
 
 async function issue(payload: ClientCommand, options: { silent?: boolean } = {}) {
-	if (!state.playerId) return { ok: false };
-	const result = await sendCommand({ ...payload, playerId: state.playerId } as unknown as CommandPayload);
+	const credentials = currentCredentials();
+	if (!credentials) return { ok: false };
+	const result = await sendCommand({ ...payload, playerId: credentials.playerId } as unknown as CommandPayload, credentials.sessionToken);
 	if (!result.ok && !options.silent) {
 		ui.showToast(result.error || "Command failed.");
 		sfx.play(result.error?.includes("Population") ? "population_blocked" : "ui_error");
