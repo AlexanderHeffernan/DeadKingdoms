@@ -316,36 +316,40 @@
 	gap: 7px;
 }
 
-.idle-worker-button {
-	min-width: 30px;
+.population-icon-button {
+	position: relative;
+	width: 26px;
 	height: 26px;
 	min-height: 0;
-	padding: 0 8px;
-	border: 3px solid #5f4a32;
-	border-bottom-color: #211914;
-	border-right-color: #211914;
-	background: rgb(10 10 14 / 0.94);
-	color: #cfc7b7;
-	font-weight: 800;
+	display: grid;
+	place-items: center;
+	padding: 0;
+	border: 0;
+	background: none;
 	cursor: pointer;
-	box-shadow:
-		0 0 0 2px #080808,
-		4px 4px 0 rgb(0 0 0 / 0.62);
 }
 
-.idle-worker-button.active {
-	border-color: rgb(233 189 89 / 0.5);
-	background: #4f3d18;
-	color: #e9bd59;
-	text-shadow: 0 0 8px rgb(233 189 89 / 0.28);
+.population-icon-button .resource-icon {
+	display: block;
 }
 
-.idle-worker-button:hover {
-	background: #242019;
+.population-icon-button.active .resource-icon {
+	filter: drop-shadow(0 0 5px rgb(233 189 89 / 0.38));
 }
 
-.idle-worker-button.active:hover {
-	background: #654d1c;
+.population-icon-button:hover,
+.population-icon-button:focus-visible {
+	background: none;
+	opacity: 0.8;
+}
+
+.population-icon-button:active {
+	opacity: 0.6;
+}
+
+.population-icon-button:focus-visible {
+	outline: 2px solid #e9bd59;
+	outline-offset: 3px;
 }
 
 .resource-icon {
@@ -357,6 +361,25 @@
 }
 
 .resource-gatherer-badge {
+	position: absolute;
+	right: -5px;
+	bottom: -3px;
+	min-width: 13px;
+	height: 13px;
+	box-sizing: border-box;
+	padding: 0 3px;
+	display: grid;
+	place-items: center;
+	border: 1px solid rgb(17 24 19 / 0.95);
+	border-radius: 7px;
+	background: #e9bd59;
+	color: #111813;
+	font-size: 12px;
+	font-weight: 900;
+	line-height: 1;
+}
+
+.population-idle-badge {
 	position: absolute;
 	right: -5px;
 	bottom: -3px;

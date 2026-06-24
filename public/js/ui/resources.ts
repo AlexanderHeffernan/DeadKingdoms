@@ -33,12 +33,11 @@ export class ResourcePanel implements GameUiComponent {
 				data-hover-title="Population"
 				data-hover-detail="${populationDescription(player.population, player.popCap, idleWorkers)}"
 			>
-				${populationPill(player.population, player.popCap)}
-				${idleWorkerButton(idleWorkers)}
+				${populationPill(player.population, player.popCap, idleWorkers)}
 			</span>
 		`;
 		this.attachHovers();
-		this.attachIdleWorkerButton();
+		this.attachPopulationButton();
 	}
 
 	private attachHovers() {
@@ -49,8 +48,8 @@ export class ResourcePanel implements GameUiComponent {
 		}
 	}
 
-	private attachIdleWorkerButton() {
-		const button = this.el.querySelector<HTMLButtonElement>(".idle-worker-button");
+	private attachPopulationButton() {
+		const button = this.el.querySelector<HTMLButtonElement>(".population-icon-button");
 		if (!button) return;
 		button.addEventListener("pointerdown", (event) => {
 			event.preventDefault();
@@ -64,22 +63,22 @@ function resourcePill(resource: string, amount: number, gatherers: number) {
 	return `<span class="resource-pill" data-hover-title="${resourceLabel(resource)}" data-hover-detail="${resourceDescription(resource)}">${resourceIcon(resource, gatherers)}<strong>${amount}</strong></span>`;
 }
 
-function populationPill(population: number, popCap: number) {
-	return `<span class="population-pill">${populationIcon()}<strong>${population}/${popCap}</strong></span>`;
+function populationPill(population: number, popCap: number, idleWorkers: number) {
+	const active = idleWorkers > 0;
+	return `<span class="population-pill">
+		<button
+			class="population-icon-button ${active ? "active" : ""}"
+			type="button"
+			aria-label="Select idle villager"
+			aria-disabled="${String(!active)}"
+		>${populationIcon(idleWorkers)}</button>
+		<strong>${population}/${popCap}</strong>
+	</span>`;
 }
 
 function populationDescription(population: number, popCap: number, idleWorkers: number) {
-	return `${population}/${popCap} used. ${idleWorkers} worker${idleWorkers === 1 ? "" : "s"} not currently working. Press . to cycle idle workers one at a time.`;
-}
-
-function idleWorkerButton(idleWorkers: number) {
-	const active = idleWorkers > 0;
-	return `<button
-		class="idle-worker-button ${active ? "active" : ""}"
-		type="button"
-		aria-label="Select idle villager"
-		aria-disabled="${String(!active)}"
-	>${idleWorkers}</button>`;
+	const idleText = idleWorkers === 1 ? "1 worker is" : `${idleWorkers} workers are`;
+	return `${population}/${popCap} used. ${idleText} not currently working. Click the population icon or press . to cycle idle workers one at a time.`;
 }
 
 function resourceLabel(resource: string) {
@@ -95,14 +94,14 @@ function resourceDescription(resource: string) {
 	return descriptions[resource as keyof typeof descriptions] || "Stored resource.";
 }
 
-function populationIcon() {
+function populationIcon(idleWorkers: number) {
 	return `<span class="resource-icon" aria-hidden="true">
 <i style="left:9px;top:3px;background:#e0a46a"></i><i style="left:12px;top:3px;background:#e0a46a"></i>
 <i style="left:9px;top:6px;background:#b2824f"></i><i style="left:12px;top:6px;background:#b2824f"></i>
 <i style="left:6px;top:12px;background:#4f8fd8"></i><i style="left:9px;top:12px;background:#4f8fd8"></i><i style="left:12px;top:12px;background:#4f8fd8"></i><i style="left:15px;top:12px;background:#4f8fd8"></i>
 <i style="left:6px;top:15px;background:#2f5d9a"></i><i style="left:9px;top:15px;background:#2f5d9a"></i><i style="left:12px;top:15px;background:#2f5d9a"></i><i style="left:15px;top:15px;background:#2f5d9a"></i>
 <i style="left:9px;top:18px;background:#252321"></i><i style="left:15px;top:18px;background:#252321"></i>
-</span>`;
+${idleWorkerBadge(idleWorkers)}</span>`;
 }
 
 export function resourceIcon(resource: string, gatherers = 0) {
@@ -158,4 +157,8 @@ export function resourceIcon(resource: string, gatherers = 0) {
 
 function gathererBadge(gatherers: number) {
 	return gatherers > 0 ? `<span class="resource-gatherer-badge">${gatherers}</span>` : "";
+}
+
+function idleWorkerBadge(idleWorkers: number) {
+	return idleWorkers > 0 ? `<span class="population-idle-badge">${idleWorkers}</span>` : "";
 }
