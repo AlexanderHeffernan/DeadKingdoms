@@ -40,8 +40,8 @@ export class BottomPanel implements GameUiComponent {
 
 	render(snapshot: ClientSnapshot) {
 		const selected = [...this.state.selectedIds]
-		.map((id) => snapshot.units[id] || snapshot.buildings[id] || snapshot.resources[id])
-		.filter((item): item is SelectionEntity => Boolean(item));
+			.map((id) => snapshot.units[id] || snapshot.buildings[id] || snapshot.resources[id])
+			.filter((item): item is SelectionEntity => Boolean(item));
 		if (selected.length === 0) {
 			const defeated = this.state.playerId ? snapshot.players[this.state.playerId]?.defeated : undefined;
 			this.selection.classList.remove("multi-selection");

@@ -78,6 +78,10 @@ const EDGE_PAN_MARGIN = 14;
 const DEV_COMMAND_BUFFER_LENGTH = 40;
 const PLAYER_NAME_STORAGE_KEY = "rtsPlayerName";
 const PLAYER_COLOR_STORAGE_KEY = "rtsPlayerColor";
+const TEXT_SCALE_STORAGE_KEY = "rtsTextScale";
+const DEFAULT_TEXT_SCALE = 100;
+const MIN_TEXT_SCALE = 80;
+const MAX_TEXT_SCALE = 175;
 const GITHUB_REPOSITORY_URL = "https://github.com/AlexanderHeffernan/DeadKingdoms";
 const DEFAULT_PLAYER_COLORS = [
 	"#ff2b1a",
@@ -395,19 +399,24 @@ document.getElementById("leaveButton")?.addEventListener("click", async () => {
 	await leaveCurrentGame("You left the game.");
 	void updateHomeStatus({ force: true });
 });
-document.getElementById("muteButton")?.addEventListener("click", toggleMusicMute);
+document.getElementById("settingsButton")?.addEventListener("click", openSettingsModal);
+document.getElementById("settingsCloseButton")?.addEventListener("click", closeSettingsModal);
+document.getElementById("settingsMuteButton")?.addEventListener("click", toggleMusicMute);
+document.getElementById("settingsModal")?.addEventListener("pointerdown", closeSettingsModalOnBackdrop);
+document.getElementById("textScaleInput")?.addEventListener("input", (event) => {
+	if (!(event.target instanceof HTMLInputElement)) return;
+	setTextScale(Number(event.target.value));
+});
+document.addEventListener("keydown", closeSettingsModalOnEscape);
 document.getElementById("leaderboardToggle")?.addEventListener("click", () => {
-	const container = document.querySelector<HTMLElement>(".leaderboard-container");
-	const body = document.getElementById("leaderboardBody");
+	const container = document.getElementById("leaderboardPanel");
 	const toggle = document.getElementById("leaderboardToggle");
-	if (!container || !body || !toggle) return;
+	if (!container || !toggle) return;
 	const collapsed = !container.classList.contains("collapsed");
 	container.classList.toggle("collapsed", collapsed);
-	body.classList.toggle("hidden", collapsed);
-	toggle.textContent = collapsed ? "+" : "-";
 	toggle.setAttribute("aria-expanded", String(!collapsed));
-	toggle.setAttribute("aria-label", collapsed ? "Expand leaderboard" : "Collapse leaderboard");
-	toggle.title = collapsed ? "Expand leaderboard" : "Collapse leaderboard";
+	toggle.setAttribute("aria-label", collapsed ? "Show leaderboard" : "Hide leaderboard");
+	toggle.title = collapsed ? "Show leaderboard" : "Hide leaderboard";
 });
 window.addEventListener("admin-subscription", (event) => {
 	const viewName = event instanceof CustomEvent && typeof event.detail?.view === "string" ? event.detail.view : "popup";
@@ -447,6 +456,7 @@ minimap.addEventListener("contextmenu", (event) => event.preventDefault());
 minimap.addEventListener("mousedown", onMinimapMouseDown);
 
 renderer.resize();
+initTextScaleSetting();
 drawLoop();
 initMusic();
 updateHomeStatus();
@@ -1016,6 +1026,36 @@ function formatDuration(ms: number) {
 	return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
 }
 
+function initTextScaleSetting() {
+	setTextScale(storedTextScale());
+}
+
+function storedTextScale() {
+	return clampTextScale(Number(localStorage.getItem(TEXT_SCALE_STORAGE_KEY)) || DEFAULT_TEXT_SCALE);
+}
+
+function setTextScale(value: number) {
+	const scale = clampTextScale(value);
+	document.documentElement.style.setProperty("--ui-text-scale", String(scale / 100));
+	localStorage.setItem(TEXT_SCALE_STORAGE_KEY, String(scale));
+	updateTextScaleControl(scale);
+}
+
+function updateTextScaleControl(scale: number) {
+	const input = document.getElementById("textScaleInput");
+	const value = document.getElementById("textScaleValue");
+	if (input instanceof HTMLInputElement) {
+		input.value = String(scale);
+		input.style.setProperty("--range-progress", `${((scale - MIN_TEXT_SCALE) / (MAX_TEXT_SCALE - MIN_TEXT_SCALE)) * 100}%`);
+	}
+	if (value) value.textContent = `${scale}%`;
+}
+
+function clampTextScale(value: number) {
+	if (!Number.isFinite(value)) return DEFAULT_TEXT_SCALE;
+	return Math.min(MAX_TEXT_SCALE, Math.max(MIN_TEXT_SCALE, Math.round(value)));
+}
+
 async function initMusic() {
 	music.audio.volume = 0.25;
 	music.audio.muted = music.muted;
@@ -1080,10 +1120,39 @@ function toggleMusicMute() {
 	updateMuteButton();
 }
 
+function openSettingsModal(event?: Event) {
+	event?.stopPropagation();
+	const modal = document.getElementById("settingsModal");
+	const button = document.getElementById("settingsButton");
+	if (!modal || !button) return;
+	modal.classList.remove("hidden");
+	button.setAttribute("aria-expanded", "true");
+}
+
+function closeSettingsModal() {
+	const modal = document.getElementById("settingsModal");
+	const button = document.getElementById("settingsButton");
+	if (!modal || !button) return;
+	modal.classList.add("hidden");
+	button.setAttribute("aria-expanded", "false");
+}
+
+function closeSettingsModalOnBackdrop(event: PointerEvent) {
+	const modal = document.getElementById("settingsModal");
+	if (!modal || modal.classList.contains("hidden")) return;
+	const target = event.target;
+	if (target === modal) closeSettingsModal();
+}
+
+function closeSettingsModalOnEscape(event: KeyboardEvent) {
+	const modal = document.getElementById("settingsModal");
+	if (event.key !== "Escape" || !modal || modal.classList.contains("hidden")) return;
+	closeSettingsModal();
+}
+
 function updateMuteButton() {
-	const button = document.getElementById("muteButton");
+	const button = document.getElementById("settingsMuteButton");
 	if (!button) return;
-	button.textContent = "";
 	button.classList.toggle("muted", music.muted);
 	button.setAttribute("aria-label", music.muted ? "Unmute music" : "Mute music");
 	button.title = music.muted ? "Unmute music" : "Mute music";

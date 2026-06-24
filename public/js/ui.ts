@@ -81,7 +81,6 @@ export class UI {
 			new ResourcePanel(state, mustGet("resources"), hoverCard, actions),
 			new TopPanel(
 				state,
-				mustGet("timeOfDay"),
 				mustGet("ping"),
 				mustGet("fps"),
 				mustGet("serverPerf"),

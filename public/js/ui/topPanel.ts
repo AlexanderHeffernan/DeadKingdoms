@@ -5,7 +5,6 @@ import { aliveTime, escapeHtml } from "./dom.js";
 
 export class TopPanel implements GameUiComponent {
 	private readonly state: GameState;
-	private readonly timeOfDay: HTMLElement;
 	private readonly ping: HTMLElement;
 	private readonly fps: HTMLElement;
 	private readonly serverPerf: HTMLElement;
@@ -14,14 +13,12 @@ export class TopPanel implements GameUiComponent {
 
 	constructor(
 		state: GameState,
-		timeOfDay: HTMLElement,
 		ping: HTMLElement,
 		fps: HTMLElement,
 		serverPerf: HTMLElement,
 		leaderboard: HTMLElement,
 	) {
 		this.state = state;
-		this.timeOfDay = timeOfDay;
 		this.ping = ping;
 		this.fps = fps;
 		this.serverPerf = serverPerf;
@@ -31,7 +28,6 @@ export class TopPanel implements GameUiComponent {
 	render(snapshot: ClientSnapshot) {
 		const player = this.state.playerId ? snapshot.players[this.state.playerId] : undefined;
 		if (!player) return;
-		this.timeOfDay.textContent = `${snapshot.dayNight.label} - vision ${Math.round(snapshot.dayNight.visionMultiplier * 100)}%`;
 		const serverPerf = snapshot.serverPerf;
 		const showAdminDiagnostics = snapshot.admin !== null && serverPerf !== null;
 		this.ping.hidden = !showAdminDiagnostics;

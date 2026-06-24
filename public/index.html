@@ -131,30 +131,35 @@
 			</section>
 			<section class="hud top-right">
 				<div class="banner">
-					<div id="timeOfDay" class="time-of-day">Day --:--</div>
 					<button
-						id="muteButton"
-						class="mute-button"
+						id="leaderboardToggle"
+						class="icon-button leaderboard-toggle"
 						type="button"
-						aria-label="Mute music"
-						title="Mute music"
-					></button>
-					<button id="leaveButton" class="leave-button" type="button">
-						Leave
+						aria-label="Hide leaderboard"
+						aria-expanded="true"
+						aria-controls="leaderboardPanel"
+						title="Hide leaderboard"
+					>
+						<img class="banner-image-icon" src="/sprites/ui/settings/bannerIcons/podium.png" alt="" aria-hidden="true" />
+					</button>
+					<button
+						id="settingsButton"
+						class="icon-button settings-button"
+						type="button"
+						aria-label="Open settings"
+						aria-expanded="false"
+						aria-controls="settingsModal"
+						title="Settings"
+					>
+						<img class="banner-image-icon" src="/sprites/ui/settings/settings.png" alt="" aria-hidden="true" />
+					</button>
+					<button id="leaveButton" class="icon-button leave-button" type="button" aria-label="Leave game" title="Leave game">
+						<img class="banner-image-icon" src="/sprites/ui/settings/bannerIcons/exit.png" alt="" aria-hidden="true" />
 					</button>
 				</div>
-				<div class="leaderboard-container">
+				<div id="leaderboardPanel" class="leaderboard-container">
 					<div class="leaderboard-heading">
 						<h2>Leaderboard</h2>
-						<button
-							id="leaderboardToggle"
-							class="leaderboard-toggle"
-							type="button"
-							aria-label="Collapse leaderboard"
-							aria-expanded="true"
-							aria-controls="leaderboardBody"
-							title="Collapse leaderboard"
-						>-</button>
 					</div>
 					<div id="leaderboardBody" class="leaderboard-body">
 						<p class="leaderboard-subtitle">Build the strongest settlement and hold #1.</p>
@@ -173,6 +178,40 @@
 					aria-label="Minimap"
 				></canvas>
 			</section>
+			<div id="settingsModal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+				<div class="settings-dialog">
+					<header class="settings-header">
+						<h2 id="settingsTitle">Settings</h2>
+						<button id="settingsCloseButton" class="icon-button settings-close-button" type="button" aria-label="Close settings" title="Close settings">
+							<span aria-hidden="true">x</span>
+						</button>
+					</header>
+					<div class="settings-body">
+						<label class="settings-range-option" for="textScaleInput">
+							<span>Text size</span>
+							<input
+								id="textScaleInput"
+								type="range"
+								min="80"
+								max="175"
+								step="5"
+								value="100"
+							/>
+							<strong id="textScaleValue">100%</strong>
+						</label>
+						<button
+							id="settingsMuteButton"
+							class="settings-option mute-button"
+							type="button"
+							aria-label="Mute music"
+							title="Mute music"
+						>
+							<span class="mute-icon" aria-hidden="true"></span>
+							<span>Mute</span>
+						</button>
+					</div>
+				</div>
+			</div>
 			<section id="adminPanel" class="hud admin-panel hidden">
 				<div id="adminHeading" class="admin-heading">
 					<h2>Admin</h2>
