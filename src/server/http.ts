@@ -373,8 +373,12 @@ function hasOwn<T>(record: Record<string, T>, key: string) {
 	return Object.prototype.hasOwnProperty.call(record, key);
 }
 
+function getOwn<T>(record: Record<string, T>, key: string): T | undefined {
+	return hasOwn(record, key) ? record[key] : undefined;
+}
+
 function recordSnapshotBytes(world: World, playerId: PlayerId | null, bytes: number, kind: "full" | "delta") {
-	const player = playerId ? world.players[playerId] : null;
+	const player = playerId ? getOwn(world.players, playerId) : null;
 	if (!player?.connection) return;
 	player.connection.lastSnapshotBytes = bytes;
 	player.connection.lastSnapshotKind = kind;
@@ -393,8 +397,9 @@ async function joinGame(req: import("node:http").IncomingMessage, res: import("n
 	const color = typeof body.color === "string" ? body.color : null;
 	const playerId = addPlayer(world, name, color);
 	const sessionToken = newSessionToken();
-	world.players[playerId]!.sessionToken = sessionToken;
-	recordPlayerConnection(world.players[playerId], ipAddress, false);
+	const player = getOwn(world.players, playerId)!;
+	player.sessionToken = sessionToken;
+	recordPlayerConnection(player, ipAddress, false);
 	json(res, { ok: true, playerId, sessionToken });
 }
 
@@ -480,8 +485,8 @@ async function kickPlayer(req: import("node:http").IncomingMessage, res: import(
 	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; targetPlayerId?: unknown };
 	const admin = adminPlayer(world, body);
 	if (!admin) return adminRequired(res);
-	if (typeof body.targetPlayerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
-	if (!world.players[body.targetPlayerId]) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!isSafeId(body.targetPlayerId)) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!getOwn(world.players, body.targetPlayerId)) return json(res, { ok: false, error: "Player not found." }, 404);
 	await globalLeaderboard.trackWorldPeaks(world, { playerId: body.targetPlayerId, force: true });
 	removePlayer(world, body.targetPlayerId);
 	Logs.log(`${admin.name} kicked a player.`);
@@ -492,8 +497,8 @@ async function banPlayer(req: import("node:http").IncomingMessage, res: import("
 	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; targetPlayerId?: unknown };
 	const admin = adminPlayer(world, body);
 	if (!admin) return adminRequired(res);
-	if (typeof body.targetPlayerId !== "string") return json(res, { ok: false, error: "Player not found." }, 404);
-	const target = world.players[body.targetPlayerId];
+	if (!isSafeId(body.targetPlayerId)) return json(res, { ok: false, error: "Player not found." }, 404);
+	const target = getOwn(world.players, body.targetPlayerId);
 	if (!target) return json(res, { ok: false, error: "Player not found." }, 404);
 	const ipAddress = target.connection?.ipAddress;
 	if (!ipAddress) return json(res, { ok: false, error: "No IP address recorded for that player." }, 400);
@@ -643,31 +648,36 @@ function validateCommandPayload(body: Record<string, unknown>, playerId: PlayerI
 		case "finishBuild": {
 			const unitIds = validateUnitIds(body.unitIds);
 			if (!unitIds.ok) return unitIds;
-			if (typeof body.buildingId !== "string") return { ok: false, error: "Invalid building." };
-			return { ok: true, command: { type, playerId, unitIds: unitIds.value, buildingId: body.buildingId } };
+			const buildingId = validateId(body.buildingId, "Invalid building.");
+			if (!buildingId.ok) return buildingId;
+			return { ok: true, command: { type, playerId, unitIds: unitIds.value, buildingId: buildingId.value } };
 		}
 		case "deleteBuilding": {
-			if (typeof body.buildingId !== "string") return { ok: false, error: "Invalid building." };
-			return { ok: true, command: { type, playerId, buildingId: body.buildingId } };
+			const buildingId = validateId(body.buildingId, "Invalid building.");
+			if (!buildingId.ok) return buildingId;
+			return { ok: true, command: { type, playerId, buildingId: buildingId.value } };
 		}
 		case "setRallyPoint": {
 			const point = validatePoint(body);
 			if (!point.ok) return point;
-			if (typeof body.buildingId !== "string") return { ok: false, error: "Invalid building." };
-			if (body.targetId !== undefined && typeof body.targetId !== "string") return { ok: false, error: "Invalid rally target." };
-			return { ok: true, command: { type, playerId, buildingId: body.buildingId, x: point.x, y: point.y, targetId: body.targetId } };
+			const buildingId = validateId(body.buildingId, "Invalid building.");
+			if (!buildingId.ok) return buildingId;
+			if (body.targetId !== undefined && !isSafeId(body.targetId)) return { ok: false, error: "Invalid rally target." };
+			return { ok: true, command: { type, playerId, buildingId: buildingId.value, x: point.x, y: point.y, targetId: body.targetId } };
 		}
 		case "train": {
-			if (typeof body.buildingId !== "string") return { ok: false, error: "Invalid building." };
+			const buildingId = validateId(body.buildingId, "Invalid building.");
+			if (!buildingId.ok) return buildingId;
 			if (!isUnitType(body.unitType)) return { ok: false, error: "Unknown unit." };
-			return { ok: true, command: { type, playerId, buildingId: body.buildingId, unitType: body.unitType } };
+			return { ok: true, command: { type, playerId, buildingId: buildingId.value, unitType: body.unitType } };
 		}
 		case "attack":
 		case "gather": {
 			const unitIds = validateUnitIds(body.unitIds);
 			if (!unitIds.ok) return unitIds;
-			if (typeof body.targetId !== "string") return { ok: false, error: "Invalid target." };
-			return { ok: true, command: { type, playerId, unitIds: unitIds.value, targetId: body.targetId } };
+			const targetId = validateId(body.targetId, "Invalid target.");
+			if (!targetId.ok) return targetId;
+			return { ok: true, command: { type, playerId, unitIds: unitIds.value, targetId: targetId.value } };
 		}
 		case "blowHorn": {
 			const unitIds = validateUnitIds(body.unitIds);
@@ -677,16 +687,25 @@ function validateCommandPayload(body: Record<string, unknown>, playerId: PlayerI
 		case "toggleAutoFarm":
 			return { ok: true, command: { type, playerId } };
 		case "replenishFarm":
-			if (typeof body.farmId !== "string") return { ok: false, error: "Invalid farm." };
-			return { ok: true, command: { type, playerId, farmId: body.farmId } };
+			const farmId = validateId(body.farmId, "Invalid farm.");
+			if (!farmId.ok) return farmId;
+			return { ok: true, command: { type, playerId, farmId: farmId.value } };
 	}
 }
 
 function validateUnitIds(value: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
 	if (!Array.isArray(value)) return { ok: false, error: "Unit IDs are required." };
 	if (value.length > MAX_COMMAND_UNIT_IDS) return { ok: false, error: "Too many units selected." };
-	if (!value.every((unitId) => typeof unitId === "string")) return { ok: false, error: "Invalid unit ID." };
+	if (!value.every(isSafeId)) return { ok: false, error: "Invalid unit ID." };
 	return { ok: true, value };
+}
+
+function validateId(value: unknown, error: string): { ok: true; value: string } | { ok: false; error: string } {
+	return isSafeId(value) ? { ok: true, value } : { ok: false, error };
+}
+
+function isSafeId(value: unknown): value is string {
+	return typeof value === "string" && value !== "__proto__" && value !== "prototype" && value !== "constructor";
 }
 
 function validatePoint(body: Record<string, unknown>): { ok: true; x: number; y: number } | { ok: false; error: string } {
@@ -746,7 +765,7 @@ function streamEvents(req: import("node:http").IncomingMessage, res: import("nod
 	client.sentExplored = new Set(auth.player.explored || []);
 	req.on("close", () => {
 		clients.delete(client);
-		const currentPlayer = world.players[playerId];
+		const currentPlayer = getOwn(world.players, playerId);
 		if (currentPlayer?.connection) {
 			currentPlayer.connection.streamCount = activeStreamCount(clients, playerId);
 			currentPlayer.connection.lastSeenAt = Date.now();
@@ -792,8 +811,8 @@ function adminRequired(res: import("node:http").ServerResponse) {
 }
 
 function authenticatedPlayer(world: World, credentials: { playerId?: unknown; sessionToken?: unknown }): AuthenticatedPlayer | null {
-	if (typeof credentials.playerId !== "string" || typeof credentials.sessionToken !== "string") return null;
-	const player = world.players[credentials.playerId];
+	if (!isSafeId(credentials.playerId) || typeof credentials.sessionToken !== "string") return null;
+	const player = getOwn(world.players, credentials.playerId);
 	if (!player || player.sessionToken !== credentials.sessionToken) return null;
 	return { playerId: credentials.playerId, player };
 }
@@ -813,7 +832,7 @@ function closeExistingClientStreams(clients: Set<Client>, world: World, playerId
 		clients.delete(client);
 		client.res.end();
 	}
-	const player = world.players[playerId];
+	const player = getOwn(world.players, playerId);
 	if (player?.connection) player.connection.streamCount = activeStreamCount(clients, playerId);
 }
 
@@ -842,7 +861,7 @@ function scheduleDisconnectLeave(world: World, clients: Set<Client>, globalLeade
 
 async function removeDisconnectedPlayer(world: World, clients: Set<Client>, globalLeaderboard: GlobalLeaderboardStore, playerId: PlayerId, sessionToken: string | null) {
 	disconnectTimers.get(world)?.delete(playerId);
-	const player = world.players[playerId];
+	const player = getOwn(world.players, playerId);
 	if (!player || player.sessionToken !== sessionToken || activeStreamCount(clients, playerId) > 0) return;
 	Logs.log(`${player.name} lost connection and left the world.`);
 	await globalLeaderboard.trackWorldPeaks(world, { playerId, force: true });

@@ -96,12 +96,12 @@ export function createWorld(): World {
 	const startedAt = Date.now();
 	const world: World = {
 		map: { size: MAP_SIZE },
-		players: {},
-		units: {},
-		buildings: {},
-		resources: {},
-		ruins: {},
-		corpses: {},
+		players: createRecord(),
+		units: createRecord(),
+		buildings: createRecord(),
+		resources: createRecord(),
+		ruins: createRecord(),
+		corpses: createRecord(),
 		notices: [],
 		adminLogs: [],
 		bannedIpAddresses: [],
@@ -116,6 +116,10 @@ export function createWorld(): World {
 	seedResources(world);
 	rebuildOccupancy(world);
 	return world;
+}
+
+function createRecord<T>(): Record<string, T> {
+	return Object.create(null) as Record<string, T>;
 }
 
 export function shiftWorldTime(world: World, hours: number) {
@@ -302,7 +306,7 @@ function randomZombieHordePoint(world: World): { x: number; y: number } {
 }
 
 export function command(world: World, playerId: PlayerId, body: CommandPayload): CommandResult {
-	const player = world.players[playerId];
+	const player = getOwn(world.players, playerId);
 	if (!player || player.defeated) return { ok: false, error: "Player unavailable." };
 	rebuildOccupancy(world);
 	const handler = hasOwn(COMMAND_HANDLERS, body.type) ? COMMAND_HANDLERS[body.type] : null;
@@ -495,6 +499,10 @@ function unitHash(idValue: string): number {
 
 function hasOwn<T>(record: Record<string, T>, key: string) {
 	return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function getOwn<T>(record: Record<string, T>, key: string): T | undefined {
+	return hasOwn(record, key) ? record[key] : undefined;
 }
 
 type CommandHandler<T extends CommandPayload["type"]> = (
@@ -1121,7 +1129,7 @@ function moveGroupIdFor(playerId: PlayerId, tick: number, cluster: Unit[], targe
 }
 
 function commandAttack(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "attack" }>): CommandResult {
-	const target = world.units[body.targetId] || world.buildings[body.targetId] || world.corpses[body.targetId as keyof typeof world.corpses];
+	const target = getOwn(world.units, body.targetId) || getOwn(world.buildings, body.targetId) || getOwn(world.corpses, body.targetId);
 	if (!target || (target.kind !== "corpse" && target.ownerId === playerId)) return { ok: false, error: "Invalid target." };
 	let assigned = false;
 	forOwnUnitClusters(world, playerId, body.unitIds, (unit, cluster) => {
@@ -1133,10 +1141,10 @@ function commandAttack(world: World, playerId: PlayerId, body: Extract<CommandPa
 }
 
 function commandGather(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "gather" }>): CommandResult {
-	const targetBuilding = world.buildings[body.targetId];
+	const targetBuilding = getOwn(world.buildings, body.targetId);
 	const depotResource = targetBuilding?.ownerId === playerId && isComplete(targetBuilding) ? targetBuilding.depotGatherKind() : null;
 	const depotGatherTarget = targetBuilding && depotResource ? findNextResourceNear(world, centerOf(targetBuilding), depotResource, playerId) : null;
-	const resource = world.resources[body.targetId] || gatherableBuilding(targetBuilding, playerId) || depotGatherTarget;
+	const resource = getOwn(world.resources, body.targetId) || gatherableBuilding(targetBuilding, playerId) || depotGatherTarget;
 	if (!resource) return { ok: false, error: "Invalid resource." };
 	let assigned = false;
 	forOwnUnits(world, playerId, body.unitIds, (unit) => {
@@ -1173,14 +1181,14 @@ function commandBlowHorn(world: World, playerId: PlayerId, body: Extract<Command
 }
 
 function commandToggleAutoFarm(world: World, playerId: PlayerId): CommandResult {
-	const player = world.players[playerId];
+	const player = getOwn(world.players, playerId);
 	if (!player) return { ok: false, error: "Player not found." };
 	player.autoReplenishFarms = !player.autoReplenishFarms;
 	return { ok: true, autoReplenishFarms: player.autoReplenishFarms };
 }
 
 function commandReplenishFarm(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "replenishFarm" }>): CommandResult {
-	const farm = world.buildings[body.farmId];
+	const farm = getOwn(world.buildings, body.farmId);
 	if (!farm || farm.ownerId !== playerId || !farm.canBeGatheredBy(playerId)) return { ok: false, error: "Select one of your completed farms." };
 	return replenishFarm(world, farm) ? { ok: true } : { ok: false, error: "Not enough wood to reseed farm." };
 }
@@ -1207,7 +1215,7 @@ function commandBuild(world: World, playerId: PlayerId, body: Extract<CommandPay
 }
 
 function commandInstantBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "instantBuild" }>): CommandResult {
-	const player = world.players[playerId];
+	const player = getOwn(world.players, playerId);
 	if (!player?.adminLevel) return { ok: false, error: "Admin access is required." };
 	const def = BUILDING_TYPES[body.buildingType];
 	if (!def) return { ok: false, error: "Unknown building." };
@@ -1238,7 +1246,7 @@ function buildPlacement(buildingType: BuildingType, rawX: number, rawY: number) 
 }
 
 function replaceWallWithGate(world: World, playerId: PlayerId, wall: Building, builders: Unit[]): CommandResult {
-	const player = world.players[playerId];
+	const player = getOwn(world.players, playerId);
 	if (!player) return { ok: false, error: "Player not found." };
 	const refund = wall.isComplete() ? {} : wall.cost;
 	const cost = netCost(BUILDING_TYPES.gate.cost, refund);
@@ -1262,7 +1270,7 @@ function ownWallAt(world: World, playerId: PlayerId, x: number, y: number) {
 }
 
 function commandFinishBuild(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "finishBuild" }>): CommandResult {
-	const building = world.buildings[body.buildingId];
+	const building = getOwn(world.buildings, body.buildingId);
 	if (!building || building.ownerId !== playerId) return { ok: false, error: "Invalid building." };
 	if (isComplete(building) && building.hp >= building.maxHp) return { ok: false, error: "Building is already fully repaired." };
 	const builders = Object.values(world.units).filter(
@@ -1270,7 +1278,7 @@ function commandFinishBuild(world: World, playerId: PlayerId, body: Extract<Comm
 	);
 	if (builders.length === 0) return { ok: false, error: "Select build-capable units." };
 	if (isComplete(building)) {
-		const player = world.players[playerId];
+		const player = getOwn(world.players, playerId);
 		if (!player) return { ok: false, error: "Player not found." };
 		const cost = repairCost(building);
 		if (!spend(player, cost)) return { ok: false, error: "Not enough resources to repair." };
@@ -1283,7 +1291,7 @@ function commandFinishBuild(world: World, playerId: PlayerId, body: Extract<Comm
 }
 
 function commandDeleteBuilding(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "deleteBuilding" }>): CommandResult {
-	const building = world.buildings[body.buildingId];
+	const building = getOwn(world.buildings, body.buildingId);
 	if (!building || building.ownerId !== playerId) return { ok: false, error: "Select one of your buildings." };
 	createRuin(world, building);
 	delete world.buildings[building.id];
@@ -1294,9 +1302,9 @@ function commandDeleteBuilding(world: World, playerId: PlayerId, body: Extract<C
 }
 
 function commandSetRallyPoint(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "setRallyPoint" }>): CommandResult {
-	const building = world.buildings[body.buildingId];
+	const building = getOwn(world.buildings, body.buildingId);
 	if (!building || building.ownerId !== playerId || building.trainableUnits().length === 0) return { ok: false, error: "Select a production building." };
-	const target = body.targetId ? world.buildings[body.targetId as BuildingId] : null;
+	const target = body.targetId ? getOwn(world.buildings, body.targetId) : null;
 	building.rallyPoint = target ? centerOf(target) : {
 		x: clamp(Number(body.x), 0, MAP_SIZE - 1),
 		y: clamp(Number(body.y), 0, MAP_SIZE - 1),
@@ -1306,7 +1314,7 @@ function commandSetRallyPoint(world: World, playerId: PlayerId, body: Extract<Co
 }
 
 function commandTrain(world: World, playerId: PlayerId, body: Extract<CommandPayload, { type: "train" }>): CommandResult {
-	const building = world.buildings[body.buildingId];
+	const building = getOwn(world.buildings, body.buildingId);
 	const unitDef = unitBehaviorFor(body.unitType);
 	if (!building || building.ownerId !== playerId || !isComplete(building) || !unitDef) {
 		return { ok: false, error: "Cannot train there." };
@@ -1314,7 +1322,7 @@ function commandTrain(world: World, playerId: PlayerId, body: Extract<CommandPay
 	if (!building.canTrain(body.unitType)) {
 		return { ok: false, error: "Cannot train there." };
 	}
-	const player = world.players[playerId];
+	const player = getOwn(world.players, playerId);
 	if (!player) return { ok: false, error: "Player not found." };
 	if (player.population >= player.popCap) return { ok: false, error: "Population cap reached." };
 	if (!building.queue) return { ok: false, error: "Selected building cannot train units." };
@@ -1327,7 +1335,7 @@ function commandTrain(world: World, playerId: PlayerId, body: Extract<CommandPay
 function forOwnUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined, fn: (unit: Unit, index: number) => void) {
 	if (!Array.isArray(unitIds)) return;
 	unitIds.forEach((unitId, index) => {
-		const unit = world.units[unitId];
+		const unit = getOwn(world.units, unitId);
 		if (unit?.ownerId === playerId) fn(unit, index);
 	});
 }
@@ -1410,7 +1418,7 @@ function reserveFormationPoint(x: number, y: number, reserved?: Set<string>) {
 function ownUnits(world: World, playerId: PlayerId, unitIds: UnitId[] | undefined): Unit[] {
 	if (!Array.isArray(unitIds)) return [];
 	return unitIds
-		.map((unitId) => world.units[unitId])
+		.map((unitId) => getOwn(world.units, unitId))
 		.filter((unit): unit is Unit => unit?.ownerId === playerId);
 }
 
