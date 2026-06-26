@@ -5,12 +5,35 @@ import { makeSnapshot } from "../shared/messages.js";
 import { MAX_PLAYERS } from "../shared/config.js";
 import { BUILDING_TYPES } from "../shared/buildings/index.js";
 import { unitBehaviorFor } from "../shared/unitRegistry.js";
-import { addAdminLog, addPlayer, command, emitDevBang, grantPlayerSoldiers, removePlayer, setWorldTimeOfDay, shiftWorldTime, spawnZombieHorde, toggleTownCenterInvincibility } from "./world.js";
+import {
+	addAdminLog,
+	addPlayer,
+	command,
+	emitDevBang,
+	grantPlayerSoldiers,
+	removePlayer,
+	setWorldTimeOfDay,
+	shiftWorldTime,
+	spawnZombieHorde,
+	toggleTownCenterInvincibility,
+} from "./world.js";
 import { Logs } from "../shared/logs.js";
+import { validatePlayerName } from "./utils/nameValidator.js";
 import type { ChangelogStore } from "./changelog.js";
 import type { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { ServerState } from "./serverState.js";
-import type { AdminView, BuildingType, CommandPayload, CommandType, Player, PlayerId, Snapshot, SnapshotDelta, UnitType, World } from "../shared/types.js";
+import type {
+	AdminView,
+	BuildingType,
+	CommandPayload,
+	CommandType,
+	Player,
+	PlayerId,
+	Snapshot,
+	SnapshotDelta,
+	UnitType,
+	World,
+} from "../shared/types.js";
 
 const PUBLIC_DIR = new URL("../../public/", import.meta.url);
 const CLIENT_BUILD_DIR = new URL("../../dist/client/public/", import.meta.url);
@@ -76,102 +99,244 @@ type AuthenticatedPlayer = {
 	player: Player;
 };
 
-export function createHandler(state: ServerState, clients: Set<Client>, globalLeaderboard: GlobalLeaderboardStore, changelog: ChangelogStore) {
-	return async function handler(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) {
+export function createHandler(
+	state: ServerState,
+	clients: Set<Client>,
+	globalLeaderboard: GlobalLeaderboardStore,
+	changelog: ChangelogStore,
+) {
+	return async function handler(
+		req: import("node:http").IncomingMessage,
+		res: import("node:http").ServerResponse,
+	) {
 		try {
 			const host = req.headers.host || "localhost";
 			const url = new URL(req.url ?? "/", `http://${host}`);
 			const rateLimit = rateLimitFor(req, url);
-			if (rateLimit && !consumeRateLimit(clientIp(req), rateLimit)) return json(res, { ok: false, error: "Too many requests. Try again shortly." }, 429);
-			if (req.method === "POST" && url.pathname === "/api/join") return await joinGame(req, res, state.ensureWorld());
-			if (req.method === "GET" && url.pathname === "/api/status") return await serverStatus(res, state, globalLeaderboard);
-			if (req.method === "GET" && url.pathname === "/api/changelog") return json(res, changelog.current());
-			if (req.method === "GET" && url.pathname === "/api/global-leaderboard") return json(res, { entries: await globalLeaderboard.entries() });
-			if (req.method === "GET" && url.pathname.startsWith("/api/global-leaderboard/")) return await globalLeaderboardSnapshot(res, globalLeaderboard, url);
+			if (rateLimit && !consumeRateLimit(clientIp(req), rateLimit))
+				return json(
+					res,
+					{
+						ok: false,
+						error: "Too many requests. Try again shortly.",
+					},
+					429,
+				);
+			if (req.method === "POST" && url.pathname === "/api/join")
+				return await joinGame(req, res, state.ensureWorld());
+			if (req.method === "GET" && url.pathname === "/api/status")
+				return await serverStatus(res, state, globalLeaderboard);
+			if (req.method === "GET" && url.pathname === "/api/changelog")
+				return json(res, changelog.current());
+			if (
+				req.method === "GET" &&
+				url.pathname === "/api/global-leaderboard"
+			)
+				return json(res, {
+					entries: await globalLeaderboard.entries(),
+				});
+			if (
+				req.method === "GET" &&
+				url.pathname.startsWith("/api/global-leaderboard/")
+			)
+				return await globalLeaderboardSnapshot(
+					res,
+					globalLeaderboard,
+					url,
+				);
 			const world = state.currentWorld();
-			if (req.method === "GET" && url.pathname === "/api/snapshot") return world ? liveSnapshot(res, world, url) : worldUnavailable(res);
-			if (req.method === "GET" && url.pathname === "/events") return world ? streamEvents(req, res, world, clients, globalLeaderboard, url) : worldUnavailable(res);
-			if (req.method === "POST" && url.pathname === "/api/log") return await receiveClientLog(req, res, world);
-			if (req.method === "POST" && !world && url.pathname.startsWith("/api/")) return worldUnavailable(res);
+			if (req.method === "GET" && url.pathname === "/api/snapshot")
+				return world
+					? liveSnapshot(res, world, url)
+					: worldUnavailable(res);
+			if (req.method === "GET" && url.pathname === "/events")
+				return world
+					? streamEvents(
+							req,
+							res,
+							world,
+							clients,
+							globalLeaderboard,
+							url,
+						)
+					: worldUnavailable(res);
+			if (req.method === "POST" && url.pathname === "/api/log")
+				return await receiveClientLog(req, res, world);
+			if (
+				req.method === "POST" &&
+				!world &&
+				url.pathname.startsWith("/api/")
+			)
+				return worldUnavailable(res);
 			if (req.method === "POST" && url.pathname.startsWith("/api/")) {
 				if (!world) return worldUnavailable(res);
-				if (url.pathname === "/api/dev/admin-access") return await enableAdminAccess(req, res, world);
-				if (url.pathname === "/api/dev/disable-admin") return await disableAdminAccess(req, res, world);
-				if (url.pathname === "/api/dev/kick-player") return await kickPlayer(req, res, world, globalLeaderboard);
-				if (url.pathname === "/api/dev/ban-player") return await banPlayer(req, res, world, globalLeaderboard);
-				if (url.pathname === "/api/dev/unban-ip") return await unbanIp(req, res, world);
-				if (url.pathname === "/api/dev/full-map-vision") return await enableFullMapVision(req, res, world);
-				if (url.pathname === "/api/dev/sound-debug") return await enableSoundDebug(req, res, world);
-				if (url.pathname === "/api/dev/zombie-debug") return await enableZombieDebug(req, res, world);
-				if (url.pathname === "/api/dev/path-debug") return await enablePathDebug(req, res, world);
-				if (url.pathname === "/api/dev/spawn-zombies") return await spawnDevZombies(req, res, world);
-				if (url.pathname === "/api/dev/grant-soldiers") return await grantDevSoldiers(req, res, world);
-				if (url.pathname === "/api/dev/town-center-invincible") return await toggleTownCenterInvincible(req, res, world);
-				if (url.pathname === "/api/dev/emit-noise") return await emitDevNoise(req, res, world);
-				if (url.pathname === "/api/dev/time-shift") return await shiftDevTime(req, res, world);
-				if (url.pathname === "/api/dev/time-set") return await setDevTime(req, res, world);
-				if (url.pathname === "/api/dev/restart-server") return await restartServer(req, res, state, clients, world, globalLeaderboard);
-				if (url.pathname === "/api/ping") return await receiveClientPing(req, res, world);
-				if (url.pathname === "/api/command") return await receiveCommand(req, res, world);
-				if (url.pathname === "/api/leave") return await leaveGame(req, res, world, globalLeaderboard);
+				if (url.pathname === "/api/dev/admin-access")
+					return await enableAdminAccess(req, res, world);
+				if (url.pathname === "/api/dev/disable-admin")
+					return await disableAdminAccess(req, res, world);
+				if (url.pathname === "/api/dev/kick-player")
+					return await kickPlayer(req, res, world, globalLeaderboard);
+				if (url.pathname === "/api/dev/ban-player")
+					return await banPlayer(req, res, world, globalLeaderboard);
+				if (url.pathname === "/api/dev/unban-ip")
+					return await unbanIp(req, res, world);
+				if (url.pathname === "/api/dev/full-map-vision")
+					return await enableFullMapVision(req, res, world);
+				if (url.pathname === "/api/dev/sound-debug")
+					return await enableSoundDebug(req, res, world);
+				if (url.pathname === "/api/dev/zombie-debug")
+					return await enableZombieDebug(req, res, world);
+				if (url.pathname === "/api/dev/path-debug")
+					return await enablePathDebug(req, res, world);
+				if (url.pathname === "/api/dev/spawn-zombies")
+					return await spawnDevZombies(req, res, world);
+				if (url.pathname === "/api/dev/grant-soldiers")
+					return await grantDevSoldiers(req, res, world);
+				if (url.pathname === "/api/dev/town-center-invincible")
+					return await toggleTownCenterInvincible(req, res, world);
+				if (url.pathname === "/api/dev/emit-noise")
+					return await emitDevNoise(req, res, world);
+				if (url.pathname === "/api/dev/time-shift")
+					return await shiftDevTime(req, res, world);
+				if (url.pathname === "/api/dev/time-set")
+					return await setDevTime(req, res, world);
+				if (url.pathname === "/api/dev/restart-server")
+					return await restartServer(
+						req,
+						res,
+						state,
+						clients,
+						world,
+						globalLeaderboard,
+					);
+				if (url.pathname === "/api/ping")
+					return await receiveClientPing(req, res, world);
+				if (url.pathname === "/api/command")
+					return await receiveCommand(req, res, world);
+				if (url.pathname === "/api/leave")
+					return await leaveGame(req, res, world, globalLeaderboard);
 			}
-			if (req.method === "GET" && url.pathname === "/api/soundtrack") return await listSoundtrack(res);
-			if (req.method === "GET" && url.pathname.startsWith("/assets/soundtrack/")) return await serveSoundtrack(req, res, url);
+			if (req.method === "GET" && url.pathname === "/api/soundtrack")
+				return await listSoundtrack(res);
+			if (
+				req.method === "GET" &&
+				url.pathname.startsWith("/assets/soundtrack/")
+			)
+				return await serveSoundtrack(req, res, url);
 			return await serveStatic(req, res, url);
 		} catch (error) {
 			if (isRequestAbort(error)) return;
-			if (error instanceof JsonBodyError) return json(res, { ok: false, error: error.message }, error.status);
+			if (error instanceof JsonBodyError)
+				return json(
+					res,
+					{ ok: false, error: error.message },
+					error.status,
+				);
 			console.error(`Request failed: ${errorMessage(error)}`);
-			if (!res.headersSent && !res.destroyed) return json(res, { ok: false, error: "Internal server error." }, 500);
+			if (!res.headersSent && !res.destroyed)
+				return json(
+					res,
+					{ ok: false, error: "Internal server error." },
+					500,
+				);
 			res.destroy();
 		}
 	};
 }
 
-async function globalLeaderboardSnapshot(res: import("node:http").ServerResponse, globalLeaderboard: GlobalLeaderboardStore, url: URL) {
-	const id = decodeURIComponent(url.pathname.replace("/api/global-leaderboard/", ""));
+async function globalLeaderboardSnapshot(
+	res: import("node:http").ServerResponse,
+	globalLeaderboard: GlobalLeaderboardStore,
+	url: URL,
+) {
+	const id = decodeURIComponent(
+		url.pathname.replace("/api/global-leaderboard/", ""),
+	);
 	if (!id) return json(res, { ok: false, error: "Snapshot not found." }, 404);
 	const snapshot = await globalLeaderboard.snapshot(id);
-	if (!snapshot) return json(res, { ok: false, error: "Snapshot not found." }, 404);
+	if (!snapshot)
+		return json(res, { ok: false, error: "Snapshot not found." }, 404);
 	const playerId = url.searchParams.get("playerId");
 	return json(res, {
 		ok: true,
-		snapshot: playerId && snapshot.players[playerId]
-			? { ...snapshot, playerId }
-			: snapshot,
+		snapshot:
+			playerId && snapshot.players[playerId]
+				? { ...snapshot, playerId }
+				: snapshot,
 	});
 }
 
-function liveSnapshot(res: import("node:http").ServerResponse, world: World, url: URL) {
+function liveSnapshot(
+	res: import("node:http").ServerResponse,
+	world: World,
+	url: URL,
+) {
 	const auth = authenticatedPlayer(world, {
 		playerId: url.searchParams.get("playerId"),
 		sessionToken: url.searchParams.get("sessionToken"),
 	});
 	if (!auth) return invalidSession(res);
-	return json(res, makeSnapshot(world, auth.playerId, null, adminViewFromParam(url.searchParams.get("adminView"))));
+	return json(
+		res,
+		makeSnapshot(
+			world,
+			auth.playerId,
+			null,
+			adminViewFromParam(url.searchParams.get("adminView")),
+		),
+	);
 }
 
-async function setDevTime(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; progress?: unknown };
+async function setDevTime(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		progress?: unknown;
+	};
 	const player = adminPlayer(world, body);
 	if (!player) return adminRequired(res);
-	const progress = typeof body.progress === "number" && Number.isFinite(body.progress) ? body.progress : 0;
+	const progress =
+		typeof body.progress === "number" && Number.isFinite(body.progress)
+			? body.progress
+			: 0;
 	setWorldTimeOfDay(world, progress);
 	json(res, { ok: true });
 }
 
-async function shiftDevTime(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; hours?: unknown };
+async function shiftDevTime(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		hours?: unknown;
+	};
 	const player = adminPlayer(world, body);
 	if (!player) return adminRequired(res);
-	const hours = typeof body.hours === "number" && Number.isFinite(body.hours) ? body.hours : 0;
+	const hours =
+		typeof body.hours === "number" && Number.isFinite(body.hours)
+			? body.hours
+			: 0;
 	shiftWorldTime(world, hours);
 	json(res, { ok: true });
 }
 
-async function serverStatus(res: import("node:http").ServerResponse, state: ServerState, globalLeaderboard: GlobalLeaderboardStore) {
+async function serverStatus(
+	res: import("node:http").ServerResponse,
+	state: ServerState,
+	globalLeaderboard: GlobalLeaderboardStore,
+) {
 	const world = state.currentWorld();
-	const activePlayers = world ? Object.values(world.players).filter((player) => !player.defeated).length : 0;
+	const activePlayers = world
+		? Object.values(world.players).filter((player) => !player.defeated)
+				.length
+		: 0;
 	json(res, {
 		activePlayers,
 		maxPlayers: MAX_PLAYERS,
@@ -182,17 +347,30 @@ async function serverStatus(res: import("node:http").ServerResponse, state: Serv
 }
 
 function worldUnavailable(res: import("node:http").ServerResponse) {
-	return json(res, { ok: false, error: "No active world. Join to start a new map." }, 404);
+	return json(
+		res,
+		{ ok: false, error: "No active world. Join to start a new map." },
+		404,
+	);
 }
 
 async function lastUpdateTime(): Promise<string | null> {
-	const envStamp = process.env.LAST_UPDATE || process.env.BUILD_DATE || process.env.SOURCE_DATE_EPOCH;
+	const envStamp =
+		process.env.LAST_UPDATE ||
+		process.env.BUILD_DATE ||
+		process.env.SOURCE_DATE_EPOCH;
 	if (envStamp) {
-		const date = /^\d+$/.test(envStamp) ? new Date(Number(envStamp) * 1000) : new Date(envStamp);
+		const date = /^\d+$/.test(envStamp)
+			? new Date(Number(envStamp) * 1000)
+			: new Date(envStamp);
 		if (!Number.isNaN(date.getTime())) return date.toISOString();
 	}
 
-	const roots = [PUBLIC_DIR, CLIENT_BUILD_DIR, new URL("package.json", PROJECT_DIR)];
+	const roots = [
+		PUBLIC_DIR,
+		CLIENT_BUILD_DIR,
+		new URL("package.json", PROJECT_DIR),
+	];
 	let latest = 0;
 	for (const root of roots) {
 		latest = Math.max(latest, await newestMtime(root.pathname));
@@ -206,7 +384,9 @@ async function newestMtime(pathname: string): Promise<number> {
 		if (stat.isFile()) return stat.mtimeMs;
 		if (!stat.isDirectory()) return 0;
 		const entries = await fs.readdir(pathname, { withFileTypes: true });
-		const times = await Promise.all(entries.map((entry) => newestMtime(join(pathname, entry.name))));
+		const times = await Promise.all(
+			entries.map((entry) => newestMtime(join(pathname, entry.name))),
+		);
 		return Math.max(stat.mtimeMs, ...times);
 	} catch {
 		return 0;
@@ -215,17 +395,32 @@ async function newestMtime(pathname: string): Promise<number> {
 
 async function listSoundtrack(res: import("node:http").ServerResponse) {
 	try {
-		const files = (await fs.readdir(SOUNDTRACK_DIR)).filter((file) => file.toLowerCase().endsWith(".mp3"));
-		json(res, { tracks: files.map((file) => `/assets/soundtrack/${encodeURIComponent(file)}`) });
+		const files = (await fs.readdir(SOUNDTRACK_DIR)).filter((file) =>
+			file.toLowerCase().endsWith(".mp3"),
+		);
+		json(res, {
+			tracks: files.map(
+				(file) => `/assets/soundtrack/${encodeURIComponent(file)}`,
+			),
+		});
 	} catch {
 		json(res, { tracks: [] });
 	}
 }
 
-async function serveSoundtrack(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, url: URL) {
-	const name = decodeURIComponent(url.pathname.replace("/assets/soundtrack/", ""));
+async function serveSoundtrack(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	url: URL,
+) {
+	const name = decodeURIComponent(
+		url.pathname.replace("/assets/soundtrack/", ""),
+	);
 	if (!name || name.includes("/") || name.includes("\\")) {
-		res.writeHead(404, { ...securityHeaders(), "Content-Type": "text/plain; charset=utf-8" });
+		res.writeHead(404, {
+			...securityHeaders(),
+			"Content-Type": "text/plain; charset=utf-8",
+		});
 		res.end("Not found");
 		return;
 	}
@@ -233,7 +428,9 @@ async function serveSoundtrack(req: import("node:http").IncomingMessage, res: im
 	try {
 		const stat = await fs.stat(filePath);
 		if (!stat.isFile()) throw new Error("Not a file");
-		const type = MIME[extname(filePath) as keyof typeof MIME] || "application/octet-stream";
+		const type =
+			MIME[extname(filePath) as keyof typeof MIME] ||
+			"application/octet-stream";
 		const range = parseRange(req.headers.range, stat.size);
 		if (range === false) {
 			res.writeHead(416, {
@@ -264,12 +461,18 @@ async function serveSoundtrack(req: import("node:http").IncomingMessage, res: im
 		});
 		createReadStream(filePath).pipe(res);
 	} catch {
-		res.writeHead(404, { ...securityHeaders(), "Content-Type": "text/plain; charset=utf-8" });
+		res.writeHead(404, {
+			...securityHeaders(),
+			"Content-Type": "text/plain; charset=utf-8",
+		});
 		res.end("Not found");
 	}
 }
 
-function parseRange(header: string | undefined, size: number): { start: number; end: number } | null | false {
+function parseRange(
+	header: string | undefined,
+	size: number,
+): { start: number; end: number } | null | false {
 	if (!header) return null;
 	const match = /^bytes=(\d*)-(\d*)$/.exec(header);
 	if (!match) return false;
@@ -284,7 +487,13 @@ function parseRange(header: string | undefined, size: number): { start: number; 
 		start = Number(match[1]);
 		end = match[2] === "" ? size - 1 : Number(match[2]);
 	}
-	if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || start >= size) {
+	if (
+		!Number.isInteger(start) ||
+		!Number.isInteger(end) ||
+		start < 0 ||
+		end < start ||
+		start >= size
+	) {
 		return false;
 	}
 	return { start, end: Math.min(end, size - 1) };
@@ -298,14 +507,27 @@ export function broadcast(world: World, clients: Set<Client>) {
 			// once their kernel buffer drains.
 			continue;
 		}
-		const snapshot = makeSnapshot(world, client.playerId, client.sentExplored, client.adminView);
+		const snapshot = makeSnapshot(
+			world,
+			client.playerId,
+			client.sentExplored,
+			client.adminView,
+		);
 		const message = snapshotMessageForClient(client, snapshot);
-		const payload = serializeSnapshotMessage(world, client.playerId, message);
+		const payload = serializeSnapshotMessage(
+			world,
+			client.playerId,
+			message,
+		);
 		client.res.write(`data: ${payload}\n\n`);
 	}
 }
 
-function serializeSnapshotMessage(world: World, playerId: PlayerId | null, message: Snapshot | SnapshotDelta) {
+function serializeSnapshotMessage(
+	world: World,
+	playerId: PlayerId | null,
+	message: Snapshot | SnapshotDelta,
+) {
 	const kind = message.type === "snapshot" ? "full" : "delta";
 	const firstPayload = JSON.stringify(message);
 	recordSnapshotBytes(world, playerId, firstPayload.length, kind);
@@ -315,7 +537,12 @@ function serializeSnapshotMessage(world: World, playerId: PlayerId | null, messa
 	return payload;
 }
 
-function annotateAdminPlayerSnapshot(message: Snapshot | SnapshotDelta, playerId: PlayerId | null, bytes: number, kind: "full" | "delta") {
+function annotateAdminPlayerSnapshot(
+	message: Snapshot | SnapshotDelta,
+	playerId: PlayerId | null,
+	bytes: number,
+	kind: "full" | "delta",
+) {
 	if (!playerId || !message.admin?.players) return;
 	const player = message.admin.players.find((entry) => entry.id === playerId);
 	if (!player) return;
@@ -323,7 +550,10 @@ function annotateAdminPlayerSnapshot(message: Snapshot | SnapshotDelta, playerId
 	player.lastSnapshotKind = kind;
 }
 
-function snapshotMessageForClient(client: Client, snapshot: Snapshot): Snapshot | SnapshotDelta {
+function snapshotMessageForClient(
+	client: Client,
+	snapshot: Snapshot,
+): Snapshot | SnapshotDelta {
 	const seq = nextSnapshotSeq++;
 	// Snapshots contain nested arrays/objects copied from live world entities
 	// (building queues, unit commands, resources, etc.). Store a JSON-detached
@@ -337,7 +567,12 @@ function snapshotMessageForClient(client: Client, snapshot: Snapshot): Snapshot 
 		client.lastSeq = seq;
 		return snapshot;
 	}
-	const delta = makeSnapshotDelta(client.lastSnapshot, stableSnapshot, client.lastSeq, seq);
+	const delta = makeSnapshotDelta(
+		client.lastSnapshot,
+		stableSnapshot,
+		client.lastSeq,
+		seq,
+	);
 	client.lastSnapshot = stableSnapshot;
 	client.lastSeq = seq;
 	return delta;
@@ -347,7 +582,12 @@ function stableSnapshotForDiff(snapshot: Snapshot): Snapshot {
 	return JSON.parse(JSON.stringify(snapshot)) as Snapshot;
 }
 
-export function makeSnapshotDelta(previous: Snapshot, current: Snapshot, baseSeq: number, seq: number): SnapshotDelta {
+export function makeSnapshotDelta(
+	previous: Snapshot,
+	current: Snapshot,
+	baseSeq: number,
+	seq: number,
+): SnapshotDelta {
 	return {
 		type: "snapshot-delta",
 		baseSeq,
@@ -372,11 +612,18 @@ export function makeSnapshotDelta(previous: Snapshot, current: Snapshot, baseSeq
 	};
 }
 
-function diffRecord<T>(previous: Record<string, T>, current: Record<string, T>) {
+function diffRecord<T>(
+	previous: Record<string, T>,
+	current: Record<string, T>,
+) {
 	const updated: Record<string, T> = {};
 	const removed: string[] = [];
 	for (const [id, value] of Object.entries(current)) {
-		if (!hasOwn(previous, id) || JSON.stringify(previous[id]) !== JSON.stringify(value)) updated[id] = value;
+		if (
+			!hasOwn(previous, id) ||
+			JSON.stringify(previous[id]) !== JSON.stringify(value)
+		)
+			updated[id] = value;
 	}
 	for (const id of Object.keys(previous)) {
 		if (!hasOwn(current, id)) removed.push(id);
@@ -392,23 +639,49 @@ function getOwn<T>(record: Record<string, T>, key: string): T | undefined {
 	return hasOwn(record, key) ? record[key] : undefined;
 }
 
-function recordSnapshotBytes(world: World, playerId: PlayerId | null, bytes: number, kind: "full" | "delta") {
+function recordSnapshotBytes(
+	world: World,
+	playerId: PlayerId | null,
+	bytes: number,
+	kind: "full" | "delta",
+) {
 	const player = playerId ? getOwn(world.players, playerId) : null;
 	if (!player?.connection) return;
 	player.connection.lastSnapshotBytes = bytes;
 	player.connection.lastSnapshotKind = kind;
 }
 
-async function joinGame(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+async function joinGame(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
 	const ipAddress = clientIp(req);
-	if (ipAddress && (world.bannedIpAddresses ?? []).includes(ipAddress)) return json(res, { ok: false, error: "This IP address is banned from this game." }, 403);
-	const active = Object.values(world.players).filter((player) => !player.defeated).length;
-	if (active >= MAX_PLAYERS) return json(res, { ok: false, error: "Server is full." }, 403);
+	if (ipAddress && (world.bannedIpAddresses ?? []).includes(ipAddress))
+		return json(
+			res,
+			{ ok: false, error: "This IP address is banned from this game." },
+			403,
+		);
+	const active = Object.values(world.players).filter(
+		(player) => !player.defeated,
+	).length;
+	if (active >= MAX_PLAYERS)
+	return json(res, { ok: false, error: "Server is full." }, 403);
 	const body = (await readJson(req)) as { name?: unknown; color?: unknown };
-	const name = playerDisplayName(typeof body.name === "string" ? body.name : "Player");
+
+	const nameResult = validatePlayerName(body.name);
+
+	if (!nameResult.ok) {
+		return json(res, { ok: false, error: nameResult.reason }, 400);
+	}
+
+	const name = nameResult.name;
+
 	if (isPlayerNameInUse(world, name)) {
 		return json(res, { ok: false, error: "Username already in use" }, 409);
 	}
+
 	const color = typeof body.color === "string" ? body.color : null;
 	const playerId = addPlayer(world, name, color);
 	const sessionToken = newSessionToken();
@@ -418,17 +691,24 @@ async function joinGame(req: import("node:http").IncomingMessage, res: import("n
 	json(res, { ok: true, playerId, sessionToken });
 }
 
-function playerDisplayName(name: string) {
-	return name.trim().slice(0, 18) || "Player";
-}
-
 function isPlayerNameInUse(world: World, name: string) {
 	const normalized = name.toLocaleLowerCase();
-	return Object.values(world.players).some((player) => !player.defeated && player.name.toLocaleLowerCase() === normalized);
+	return Object.values(world.players).some(
+		(player) =>
+			!player.defeated && player.name.toLocaleLowerCase() === normalized,
+	);
 }
 
-async function enableAdminAccess(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; secret?: unknown };
+async function enableAdminAccess(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		secret?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	if (typeof body.secret !== "string" || !isAdminSecret(body.secret)) {
@@ -448,8 +728,15 @@ async function enableAdminAccess(req: import("node:http").IncomingMessage, res: 
 	json(res, { ok: true, adminLevel: player.adminLevel, enabled: true });
 }
 
-async function disableAdminAccess(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown };
+async function disableAdminAccess(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
@@ -464,20 +751,36 @@ async function disableAdminAccess(req: import("node:http").IncomingMessage, res:
 	json(res, { ok: true });
 }
 
-async function enableFullMapVision(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown };
+async function enableFullMapVision(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
 	if (!player.adminLevel) return adminRequired(res);
 	player.godMode = !player.godMode;
 	delete player._visCache;
-	Logs.log(`${player.name} ${player.godMode ? "enabled" : "disabled"} full-map admin vision.`);
+	Logs.log(
+		`${player.name} ${player.godMode ? "enabled" : "disabled"} full-map admin vision.`,
+	);
 	json(res, { ok: true, enabled: player.godMode });
 }
 
-async function enableSoundDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown };
+async function enableSoundDebug(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
@@ -486,8 +789,15 @@ async function enableSoundDebug(req: import("node:http").IncomingMessage, res: i
 	json(res, { ok: true, enabled: player.soundDebug });
 }
 
-async function enableZombieDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown };
+async function enableZombieDebug(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
@@ -496,55 +806,115 @@ async function enableZombieDebug(req: import("node:http").IncomingMessage, res: 
 	json(res, { ok: true, enabled: player.zombieDebug });
 }
 
-async function kickPlayer(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; targetPlayerId?: unknown };
+async function kickPlayer(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+	globalLeaderboard: GlobalLeaderboardStore,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		targetPlayerId?: unknown;
+	};
 	const admin = adminPlayer(world, body);
 	if (!admin) return adminRequired(res);
-	if (!isSafeId(body.targetPlayerId)) return json(res, { ok: false, error: "Player not found." }, 404);
-	if (!getOwn(world.players, body.targetPlayerId)) return json(res, { ok: false, error: "Player not found." }, 404);
-	await globalLeaderboard.trackWorldPeaks(world, { playerId: body.targetPlayerId, force: true });
+	if (!isSafeId(body.targetPlayerId))
+		return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!getOwn(world.players, body.targetPlayerId))
+		return json(res, { ok: false, error: "Player not found." }, 404);
+	await globalLeaderboard.trackWorldPeaks(world, {
+		playerId: body.targetPlayerId,
+		force: true,
+	});
 	removePlayer(world, body.targetPlayerId);
 	Logs.log(`${admin.name} kicked a player.`);
 	json(res, { ok: true });
 }
 
-async function banPlayer(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; targetPlayerId?: unknown };
+async function banPlayer(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+	globalLeaderboard: GlobalLeaderboardStore,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		targetPlayerId?: unknown;
+	};
 	const admin = adminPlayer(world, body);
 	if (!admin) return adminRequired(res);
-	if (!isSafeId(body.targetPlayerId)) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!isSafeId(body.targetPlayerId))
+		return json(res, { ok: false, error: "Player not found." }, 404);
 	const target = getOwn(world.players, body.targetPlayerId);
-	if (!target) return json(res, { ok: false, error: "Player not found." }, 404);
+	if (!target)
+		return json(res, { ok: false, error: "Player not found." }, 404);
 	const ipAddress = target.connection?.ipAddress;
-	if (!ipAddress) return json(res, { ok: false, error: "No IP address recorded for that player." }, 400);
+	if (!ipAddress)
+		return json(
+			res,
+			{ ok: false, error: "No IP address recorded for that player." },
+			400,
+		);
 	world.bannedIpAddresses ??= [];
-	if (!world.bannedIpAddresses.includes(ipAddress)) world.bannedIpAddresses.push(ipAddress);
-	await globalLeaderboard.trackWorldPeaks(world, { playerId: body.targetPlayerId, force: true });
+	if (!world.bannedIpAddresses.includes(ipAddress))
+		world.bannedIpAddresses.push(ipAddress);
+	await globalLeaderboard.trackWorldPeaks(world, {
+		playerId: body.targetPlayerId,
+		force: true,
+	});
 	removePlayer(world, body.targetPlayerId);
 	Logs.log(`${admin.name} banned ${ipAddress}.`);
 	json(res, { ok: true, ipAddress });
 }
 
-async function unbanIp(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; ipAddress?: unknown };
+async function unbanIp(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		ipAddress?: unknown;
+	};
 	const admin = adminPlayer(world, body);
 	if (!admin) return adminRequired(res);
-	if (typeof body.ipAddress !== "string") return json(res, { ok: false, error: "IP address is required." }, 400);
-	world.bannedIpAddresses = (world.bannedIpAddresses ?? []).filter((ipAddress) => ipAddress !== body.ipAddress);
+	if (typeof body.ipAddress !== "string")
+		return json(res, { ok: false, error: "IP address is required." }, 400);
+	world.bannedIpAddresses = (world.bannedIpAddresses ?? []).filter(
+		(ipAddress) => ipAddress !== body.ipAddress,
+	);
 	Logs.log(`${admin.name} unbanned ${body.ipAddress}.`);
 	json(res, { ok: true });
 }
 
-async function enablePathDebug(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown };
+async function enablePathDebug(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
 	const player = adminPlayer(world, body);
 	if (!player) return adminRequired(res);
 	player.pathDebug = true;
 	json(res, { ok: true });
 }
 
-async function spawnDevZombies(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; count?: unknown };
+async function spawnDevZombies(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		count?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
@@ -555,8 +925,16 @@ async function spawnDevZombies(req: import("node:http").IncomingMessage, res: im
 	json(res, { ok: true, spawned });
 }
 
-async function grantDevSoldiers(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; count?: unknown };
+async function grantDevSoldiers(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		count?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
@@ -567,31 +945,65 @@ async function grantDevSoldiers(req: import("node:http").IncomingMessage, res: i
 	json(res, { ok: true, granted });
 }
 
-async function toggleTownCenterInvincible(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown };
+async function toggleTownCenterInvincible(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
 	if (!player.adminLevel) return adminRequired(res);
 	const invincible = toggleTownCenterInvincibility(world, auth.playerId);
-	if (invincible === null) return json(res, { ok: false, error: "No town center found." }, 404);
-	Logs.log(`${player.name} ${invincible ? "enabled" : "disabled"} town center invincibility.`);
+	if (invincible === null)
+		return json(res, { ok: false, error: "No town center found." }, 404);
+	Logs.log(
+		`${player.name} ${invincible ? "enabled" : "disabled"} town center invincibility.`,
+	);
 	json(res, { ok: true, invincible });
 }
 
-async function emitDevNoise(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; x?: unknown; y?: unknown };
+async function emitDevNoise(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		x?: unknown;
+		y?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
 	if (!player.adminLevel) return adminRequired(res);
-	if (typeof body.x !== "number" || typeof body.y !== "number") return json(res, { ok: false, error: "Noise position is required." }, 400);
+	if (typeof body.x !== "number" || typeof body.y !== "number")
+		return json(
+			res,
+			{ ok: false, error: "Noise position is required." },
+			400,
+		);
 	emitDevBang(world, body.x, body.y);
 	json(res, { ok: true });
 }
 
-async function restartServer(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, state: ServerState, clients: Set<Client>, world: World, globalLeaderboard: GlobalLeaderboardStore) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown };
+async function restartServer(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	state: ServerState,
+	clients: Set<Client>,
+	world: World,
+	globalLeaderboard: GlobalLeaderboardStore,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
@@ -604,28 +1016,53 @@ async function restartServer(req: import("node:http").IncomingMessage, res: impo
 	clients.clear();
 }
 
-async function receiveClientLog(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World | null) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; message?: unknown };
-	if (typeof body.message !== "string") return json(res, { ok: false, error: "Log message is required." }, 400);
-	const player = world && typeof body.playerId === "string" ? authenticatedPlayer(world, body)?.player ?? null : null;
+async function receiveClientLog(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World | null,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		message?: unknown;
+	};
+	if (typeof body.message !== "string")
+		return json(res, { ok: false, error: "Log message is required." }, 400);
+	const player =
+		world && typeof body.playerId === "string"
+			? (authenticatedPlayer(world, body)?.player ?? null)
+			: null;
 	const source = player?.name || "client";
 	if (world) addAdminLog(world, source, body.message);
 	json(res, { ok: true });
 }
 
-async function receiveClientPing(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown; pingMs?: unknown };
+async function receiveClientPing(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		pingMs?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	const player = auth.player;
 	const pingMs = typeof body.pingMs === "number" ? body.pingMs : null;
-	if (!player.connection || pingMs === null) return json(res, { ok: false }, 400);
+	if (!player.connection || pingMs === null)
+		return json(res, { ok: false }, 400);
 	player.connection.pingMs = Math.max(0, Math.min(60000, Math.round(pingMs)));
 	player.connection.lastSeenAt = Date.now();
 	json(res, { ok: true });
 }
 
-async function receiveCommand(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World) {
+async function receiveCommand(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
 	const body = await readJson(req);
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
@@ -635,7 +1072,10 @@ async function receiveCommand(req: import("node:http").IncomingMessage, res: imp
 	json(res, result, result.ok ? 200 : 400);
 }
 
-function validateCommandPayload(body: Record<string, unknown>, playerId: PlayerId): { ok: true; command: CommandPayload } | { ok: false; error: string } {
+function validateCommandPayload(
+	body: Record<string, unknown>,
+	playerId: PlayerId,
+): { ok: true; command: CommandPayload } | { ok: false; error: string } {
 	const type = body.type;
 	if (!isCommandType(type)) return { ok: false, error: "Unknown command." };
 	switch (type) {
@@ -644,47 +1084,108 @@ function validateCommandPayload(body: Record<string, unknown>, playerId: PlayerI
 			if (!unitIds.ok) return unitIds;
 			const point = validatePoint(body);
 			if (!point.ok) return point;
-			return { ok: true, command: { type, playerId, unitIds: unitIds.value, x: point.x, y: point.y } };
+			return {
+				ok: true,
+				command: {
+					type,
+					playerId,
+					unitIds: unitIds.value,
+					x: point.x,
+					y: point.y,
+				},
+			};
 		}
 		case "build": {
 			const unitIds = validateUnitIds(body.unitIds);
 			if (!unitIds.ok) return unitIds;
 			const point = validatePoint(body);
 			if (!point.ok) return point;
-			if (!isBuildingType(body.buildingType)) return { ok: false, error: "Unknown building." };
-			return { ok: true, command: { type, playerId, unitIds: unitIds.value, buildingType: body.buildingType, x: point.x, y: point.y } };
+			if (!isBuildingType(body.buildingType))
+				return { ok: false, error: "Unknown building." };
+			return {
+				ok: true,
+				command: {
+					type,
+					playerId,
+					unitIds: unitIds.value,
+					buildingType: body.buildingType,
+					x: point.x,
+					y: point.y,
+				},
+			};
 		}
 		case "instantBuild": {
 			const point = validatePoint(body);
 			if (!point.ok) return point;
-			if (!isBuildingType(body.buildingType)) return { ok: false, error: "Unknown building." };
-			return { ok: true, command: { type, playerId, buildingType: body.buildingType, x: point.x, y: point.y } };
+			if (!isBuildingType(body.buildingType))
+				return { ok: false, error: "Unknown building." };
+			return {
+				ok: true,
+				command: {
+					type,
+					playerId,
+					buildingType: body.buildingType,
+					x: point.x,
+					y: point.y,
+				},
+			};
 		}
 		case "finishBuild": {
 			const unitIds = validateUnitIds(body.unitIds);
 			if (!unitIds.ok) return unitIds;
 			const buildingId = validateId(body.buildingId, "Invalid building.");
 			if (!buildingId.ok) return buildingId;
-			return { ok: true, command: { type, playerId, unitIds: unitIds.value, buildingId: buildingId.value } };
+			return {
+				ok: true,
+				command: {
+					type,
+					playerId,
+					unitIds: unitIds.value,
+					buildingId: buildingId.value,
+				},
+			};
 		}
 		case "deleteBuilding": {
 			const buildingId = validateId(body.buildingId, "Invalid building.");
 			if (!buildingId.ok) return buildingId;
-			return { ok: true, command: { type, playerId, buildingId: buildingId.value } };
+			return {
+				ok: true,
+				command: { type, playerId, buildingId: buildingId.value },
+			};
 		}
 		case "setRallyPoint": {
 			const point = validatePoint(body);
 			if (!point.ok) return point;
 			const buildingId = validateId(body.buildingId, "Invalid building.");
 			if (!buildingId.ok) return buildingId;
-			if (body.targetId !== undefined && !isSafeId(body.targetId)) return { ok: false, error: "Invalid rally target." };
-			return { ok: true, command: { type, playerId, buildingId: buildingId.value, x: point.x, y: point.y, targetId: body.targetId } };
+			if (body.targetId !== undefined && !isSafeId(body.targetId))
+				return { ok: false, error: "Invalid rally target." };
+			return {
+				ok: true,
+				command: {
+					type,
+					playerId,
+					buildingId: buildingId.value,
+					x: point.x,
+					y: point.y,
+					targetId: body.targetId,
+				},
+			};
 		}
 		case "train": {
 			const buildingId = validateId(body.buildingId, "Invalid building.");
 			if (!buildingId.ok) return buildingId;
-			if (!isUnitType(body.unitType)) return { ok: false, error: "Unknown unit." };
-			return { ok: true, command: { type, playerId, buildingId: buildingId.value, unitType: body.unitType } };
+			if (!isUnitType(body.unitType))
+				return { ok: false, error: "Unknown unit." };
+			return {
+				ok: true,
+				command: {
+					type,
+					playerId,
+					buildingId: buildingId.value,
+					unitType: body.unitType,
+				},
+			};
 		}
 		case "attack":
 		case "gather": {
@@ -692,39 +1193,72 @@ function validateCommandPayload(body: Record<string, unknown>, playerId: PlayerI
 			if (!unitIds.ok) return unitIds;
 			const targetId = validateId(body.targetId, "Invalid target.");
 			if (!targetId.ok) return targetId;
-			return { ok: true, command: { type, playerId, unitIds: unitIds.value, targetId: targetId.value } };
+			return {
+				ok: true,
+				command: {
+					type,
+					playerId,
+					unitIds: unitIds.value,
+					targetId: targetId.value,
+				},
+			};
 		}
 		case "blowHorn": {
 			const unitIds = validateUnitIds(body.unitIds);
 			if (!unitIds.ok) return unitIds;
-			return { ok: true, command: { type, playerId, unitIds: unitIds.value } };
+			return {
+				ok: true,
+				command: { type, playerId, unitIds: unitIds.value },
+			};
 		}
 		case "toggleAutoFarm":
 			return { ok: true, command: { type, playerId } };
 		case "replenishFarm":
 			const farmId = validateId(body.farmId, "Invalid farm.");
 			if (!farmId.ok) return farmId;
-			return { ok: true, command: { type, playerId, farmId: farmId.value } };
+			return {
+				ok: true,
+				command: { type, playerId, farmId: farmId.value },
+			};
 	}
 }
 
-function validateUnitIds(value: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
-	if (!Array.isArray(value)) return { ok: false, error: "Unit IDs are required." };
-	if (value.length > MAX_COMMAND_UNIT_IDS) return { ok: false, error: "Too many units selected." };
+function validateUnitIds(
+	value: unknown,
+): { ok: true; value: string[] } | { ok: false; error: string } {
+	if (!Array.isArray(value))
+		return { ok: false, error: "Unit IDs are required." };
+	if (value.length > MAX_COMMAND_UNIT_IDS)
+		return { ok: false, error: "Too many units selected." };
 	if (!value.every(isSafeId)) return { ok: false, error: "Invalid unit ID." };
 	return { ok: true, value };
 }
 
-function validateId(value: unknown, error: string): { ok: true; value: string } | { ok: false; error: string } {
+function validateId(
+	value: unknown,
+	error: string,
+): { ok: true; value: string } | { ok: false; error: string } {
 	return isSafeId(value) ? { ok: true, value } : { ok: false, error };
 }
 
 function isSafeId(value: unknown): value is string {
-	return typeof value === "string" && value !== "__proto__" && value !== "prototype" && value !== "constructor";
+	return (
+		typeof value === "string" &&
+		value !== "__proto__" &&
+		value !== "prototype" &&
+		value !== "constructor"
+	);
 }
 
-function validatePoint(body: Record<string, unknown>): { ok: true; x: number; y: number } | { ok: false; error: string } {
-	if (typeof body.x !== "number" || typeof body.y !== "number" || !Number.isFinite(body.x) || !Number.isFinite(body.y)) {
+function validatePoint(
+	body: Record<string, unknown>,
+): { ok: true; x: number; y: number } | { ok: false; error: string } {
+	if (
+		typeof body.x !== "number" ||
+		typeof body.y !== "number" ||
+		!Number.isFinite(body.x) ||
+		!Number.isFinite(body.y)
+	) {
 		return { ok: false, error: "Invalid map position." };
 	}
 	return { ok: true, x: body.x, y: body.y };
@@ -742,25 +1276,55 @@ function isUnitType(value: unknown): value is UnitType {
 	return typeof value === "string" && !!unitBehaviorFor(value as UnitType);
 }
 
-async function leaveGame(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, globalLeaderboard: GlobalLeaderboardStore) {
-	const body = (await readJson(req)) as { playerId?: unknown; sessionToken?: unknown };
+async function leaveGame(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+	globalLeaderboard: GlobalLeaderboardStore,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
 	const auth = authenticatedPlayer(world, body);
 	if (!auth) return invalidSession(res);
 	cancelDisconnectLeave(world, auth.playerId);
-	await globalLeaderboard.trackWorldPeaks(world, { playerId: auth.playerId, force: true });
+	await globalLeaderboard.trackWorldPeaks(world, {
+		playerId: auth.playerId,
+		force: true,
+	});
 	await globalLeaderboard.countDeadKingdom();
 	removePlayer(world, auth.playerId);
 	json(res, { ok: true });
 }
 
-function streamEvents(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, world: World, clients: Set<Client>, globalLeaderboard: GlobalLeaderboardStore, url: URL) {
+function streamEvents(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+	clients: Set<Client>,
+	globalLeaderboard: GlobalLeaderboardStore,
+	url: URL,
+) {
 	const playerIdParam = url.searchParams.get("playerId");
 	const sessionToken = url.searchParams.get("sessionToken");
-	const auth = authenticatedPlayer(world, { playerId: playerIdParam, sessionToken });
+	const auth = authenticatedPlayer(world, {
+		playerId: playerIdParam,
+		sessionToken,
+	});
 	if (!auth) return invalidSession(res);
 	const ipAddress = clientIp(req);
-	if (activeStreamCountForIp(clients, ipAddress) >= MAX_EVENT_STREAMS_PER_IP) {
-		return json(res, { ok: false, error: "Too many live connections from this IP address." }, 429);
+	if (
+		activeStreamCountForIp(clients, ipAddress) >= MAX_EVENT_STREAMS_PER_IP
+	) {
+		return json(
+			res,
+			{
+				ok: false,
+				error: "Too many live connections from this IP address.",
+			},
+			429,
+		);
 	}
 	const playerId = auth.playerId;
 	const adminView = adminViewFromParam(url.searchParams.get("adminView"));
@@ -776,22 +1340,44 @@ function streamEvents(req: import("node:http").IncomingMessage, res: import("nod
 	// sentExplored is null for the first snapshot (server then sends the full
 	// explored set). After that we populate the Set so subsequent snapshots
 	// only carry the new tiles in `exploredDelta`.
-	const client: Client = { playerId, sessionToken, res, sentExplored: null, adminView, lastSnapshot: null, lastSeq: 0, ipAddress };
+	const client: Client = {
+		playerId,
+		sessionToken,
+		res,
+		sentExplored: null,
+		adminView,
+		lastSnapshot: null,
+		lastSeq: 0,
+		ipAddress,
+	};
 	clients.add(client);
 	const initialSnapshot = makeSnapshot(world, playerId, null, adminView);
 	const initialMessage = snapshotMessageForClient(client, initialSnapshot);
-	const initialPayload = serializeSnapshotMessage(world, playerId, initialMessage);
+	const initialPayload = serializeSnapshotMessage(
+		world,
+		playerId,
+		initialMessage,
+	);
 	res.write(`data: ${initialPayload}\n\n`);
 	client.sentExplored = new Set(auth.player.explored || []);
 	req.on("close", () => {
 		clients.delete(client);
 		const currentPlayer = getOwn(world.players, playerId);
 		if (currentPlayer?.connection) {
-			currentPlayer.connection.streamCount = activeStreamCount(clients, playerId);
+			currentPlayer.connection.streamCount = activeStreamCount(
+				clients,
+				playerId,
+			);
 			currentPlayer.connection.lastSeenAt = Date.now();
 		}
 		if (!client.replaced && activeStreamCount(clients, playerId) === 0) {
-			scheduleDisconnectLeave(world, clients, globalLeaderboard, playerId, sessionToken);
+			scheduleDisconnectLeave(
+				world,
+				clients,
+				globalLeaderboard,
+				playerId,
+				sessionToken,
+			);
 		}
 	});
 }
@@ -804,7 +1390,9 @@ function isAdminSecret(secret: string) {
 		process.env.DEV_OPERATOR_SECRET,
 		process.env.DEV_GOD_MODE_SECRET,
 	].filter((value): value is string => !!value);
-	return configuredSecrets.some((configuredSecret) => secret.endsWith(configuredSecret));
+	return configuredSecrets.some((configuredSecret) =>
+		secret.endsWith(configuredSecret),
+	);
 }
 
 function adminViewFromParam(value: string | null): AdminView {
@@ -817,11 +1405,15 @@ function adminViewFromParam(value: string | null): AdminView {
 		value === "logs" ||
 		value === "devCommands" ||
 		value === "bans"
-	) return value;
+	)
+		return value;
 	return "popup";
 }
 
-function adminPlayer(world: World, credentials: { playerId?: unknown; sessionToken?: unknown }): Player | null {
+function adminPlayer(
+	world: World,
+	credentials: { playerId?: unknown; sessionToken?: unknown },
+): Player | null {
 	const player = authenticatedPlayer(world, credentials)?.player;
 	return player?.adminLevel ? player : null;
 }
@@ -830,22 +1422,38 @@ function adminRequired(res: import("node:http").ServerResponse) {
 	return json(res, { ok: false, error: "Admin access is required." }, 403);
 }
 
-function authenticatedPlayer(world: World, credentials: { playerId?: unknown; sessionToken?: unknown }): AuthenticatedPlayer | null {
-	if (!isSafeId(credentials.playerId) || typeof credentials.sessionToken !== "string") return null;
+function authenticatedPlayer(
+	world: World,
+	credentials: { playerId?: unknown; sessionToken?: unknown },
+): AuthenticatedPlayer | null {
+	if (
+		!isSafeId(credentials.playerId) ||
+		typeof credentials.sessionToken !== "string"
+	)
+		return null;
 	const player = getOwn(world.players, credentials.playerId);
-	if (!player || player.sessionToken !== credentials.sessionToken) return null;
+	if (!player || player.sessionToken !== credentials.sessionToken)
+		return null;
 	return { playerId: credentials.playerId, player };
 }
 
 function invalidSession(res: import("node:http").ServerResponse) {
-	return json(res, { ok: false, error: "Invalid or expired player session." }, 403);
+	return json(
+		res,
+		{ ok: false, error: "Invalid or expired player session." },
+		403,
+	);
 }
 
 function newSessionToken() {
 	return randomBytes(32).toString("base64url");
 }
 
-function closeExistingClientStreams(clients: Set<Client>, world: World, playerId: PlayerId) {
+function closeExistingClientStreams(
+	clients: Set<Client>,
+	world: World,
+	playerId: PlayerId,
+) {
 	for (const client of [...clients]) {
 		if (client.playerId !== playerId) continue;
 		client.replaced = true;
@@ -853,7 +1461,8 @@ function closeExistingClientStreams(clients: Set<Client>, world: World, playerId
 		client.res.end();
 	}
 	const player = getOwn(world.players, playerId);
-	if (player?.connection) player.connection.streamCount = activeStreamCount(clients, playerId);
+	if (player?.connection)
+		player.connection.streamCount = activeStreamCount(clients, playerId);
 }
 
 function cancelDisconnectLeave(world: World, playerId: PlayerId) {
@@ -863,7 +1472,13 @@ function cancelDisconnectLeave(world: World, playerId: PlayerId) {
 	disconnectTimers.get(world)?.delete(playerId);
 }
 
-function scheduleDisconnectLeave(world: World, clients: Set<Client>, globalLeaderboard: GlobalLeaderboardStore, playerId: PlayerId, sessionToken: string | null) {
+function scheduleDisconnectLeave(
+	world: World,
+	clients: Set<Client>,
+	globalLeaderboard: GlobalLeaderboardStore,
+	playerId: PlayerId,
+	sessionToken: string | null,
+) {
 	cancelDisconnectLeave(world, playerId);
 	let timers = disconnectTimers.get(world);
 	if (!timers) {
@@ -871,18 +1486,37 @@ function scheduleDisconnectLeave(world: World, clients: Set<Client>, globalLeade
 		disconnectTimers.set(world, timers);
 	}
 	const timer = setTimeout(() => {
-		void removeDisconnectedPlayer(world, clients, globalLeaderboard, playerId, sessionToken).catch((error: unknown) => {
-			console.error(`Could not remove disconnected player: ${errorMessage(error)}`);
+		void removeDisconnectedPlayer(
+			world,
+			clients,
+			globalLeaderboard,
+			playerId,
+			sessionToken,
+		).catch((error: unknown) => {
+			console.error(
+				`Could not remove disconnected player: ${errorMessage(error)}`,
+			);
 		});
 	}, DISCONNECT_LEAVE_GRACE_MS);
 	timer.unref?.();
 	timers.set(playerId, timer);
 }
 
-async function removeDisconnectedPlayer(world: World, clients: Set<Client>, globalLeaderboard: GlobalLeaderboardStore, playerId: PlayerId, sessionToken: string | null) {
+async function removeDisconnectedPlayer(
+	world: World,
+	clients: Set<Client>,
+	globalLeaderboard: GlobalLeaderboardStore,
+	playerId: PlayerId,
+	sessionToken: string | null,
+) {
 	disconnectTimers.get(world)?.delete(playerId);
 	const player = getOwn(world.players, playerId);
-	if (!player || player.sessionToken !== sessionToken || activeStreamCount(clients, playerId) > 0) return;
+	if (
+		!player ||
+		player.sessionToken !== sessionToken ||
+		activeStreamCount(clients, playerId) > 0
+	)
+		return;
 	Logs.log(`${player.name} lost connection and left the world.`);
 	await globalLeaderboard.trackWorldPeaks(world, { playerId, force: true });
 	await globalLeaderboard.countDeadKingdom();
@@ -897,7 +1531,10 @@ function activeStreamCount(clients: Set<Client>, playerId: PlayerId) {
 	return count;
 }
 
-function activeStreamCountForIp(clients: Set<Client>, ipAddress: string | null) {
+function activeStreamCountForIp(
+	clients: Set<Client>,
+	ipAddress: string | null,
+) {
 	if (!ipAddress) return 0;
 	let count = 0;
 	for (const client of clients) {
@@ -908,9 +1545,11 @@ function activeStreamCountForIp(clients: Set<Client>, ipAddress: string | null) 
 
 function rateLimitFor(req: import("node:http").IncomingMessage, url: URL) {
 	if (req.method === "POST" && url.pathname === "/api/join") return "join";
-	if (req.method === "POST" && url.pathname === "/api/command") return "command";
+	if (req.method === "POST" && url.pathname === "/api/command")
+		return "command";
 	if (req.method === "POST" && url.pathname === "/api/log") return "log";
-	if (req.method === "POST" && url.pathname.startsWith("/api/dev/")) return "admin";
+	if (req.method === "POST" && url.pathname.startsWith("/api/dev/"))
+		return "admin";
 	if (req.method === "GET" && url.pathname === "/events") return "events";
 	return null;
 }
@@ -938,7 +1577,11 @@ function pruneRateLimitBuckets(now: number) {
 	}
 }
 
-function recordPlayerConnection(player: Player | null | undefined, ipAddress: string | null, openedStream: boolean) {
+function recordPlayerConnection(
+	player: Player | null | undefined,
+	ipAddress: string | null,
+	openedStream: boolean,
+) {
 	if (!player) return;
 	const now = Date.now();
 	if (!player.connection) {
@@ -957,11 +1600,16 @@ function recordPlayerConnection(player: Player | null | undefined, ipAddress: st
 
 function clientIp(req: import("node:http").IncomingMessage): string | null {
 	const cloudflareIp = req.headers["cf-connecting-ip"];
-	const cloudflareAddress = Array.isArray(cloudflareIp) ? cloudflareIp[0] : cloudflareIp;
+	const cloudflareAddress = Array.isArray(cloudflareIp)
+		? cloudflareIp[0]
+		: cloudflareIp;
 	if (cloudflareAddress?.trim()) return normalizeIp(cloudflareAddress.trim());
 	const forwardedFor = req.headers["x-forwarded-for"];
-	const forwardedIp = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-	const ipAddress = forwardedIp?.split(",")[0]?.trim() || req.socket.remoteAddress || null;
+	const forwardedIp = Array.isArray(forwardedFor)
+		? forwardedFor[0]
+		: forwardedFor;
+	const ipAddress =
+		forwardedIp?.split(",")[0]?.trim() || req.socket.remoteAddress || null;
 	return normalizeIp(ipAddress);
 }
 
@@ -970,7 +1618,11 @@ function normalizeIp(ipAddress: string | null | undefined): string | null {
 	return ipAddress.startsWith("::ffff:") ? ipAddress.slice(7) : ipAddress;
 }
 
-async function serveStatic(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, url: URL) {
+async function serveStatic(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	url: URL,
+) {
 	const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
 	const safePath = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
 	const rootDir = safePath.startsWith("/js/") ? CLIENT_BUILD_DIR : PUBLIC_DIR;
@@ -980,35 +1632,46 @@ async function serveStatic(req: import("node:http").IncomingMessage, res: import
 		if (!stat.isFile()) throw new Error("Not a file");
 		res.writeHead(200, {
 			...securityHeaders(),
-			"Content-Type": MIME[extname(filePath) as keyof typeof MIME] || "application/octet-stream",
+			"Content-Type":
+				MIME[extname(filePath) as keyof typeof MIME] ||
+				"application/octet-stream",
 			"Cache-Control": cacheControl(filePath),
 		});
 		createReadStream(filePath).pipe(res);
 	} catch {
-		res.writeHead(404, { ...securityHeaders(), "Content-Type": "text/plain; charset=utf-8" });
+		res.writeHead(404, {
+			...securityHeaders(),
+			"Content-Type": "text/plain; charset=utf-8",
+		});
 		res.end("Not found");
 	}
 }
 
 function cacheControl(filePath: string) {
 	const ext = extname(filePath);
-	if (ext === ".html" || ext === ".css" || ext === ".js" || ext === ".wav") return "no-cache";
+	if (ext === ".html" || ext === ".css" || ext === ".js" || ext === ".wav")
+		return "no-cache";
 	return "public, max-age=86400";
 }
 
-async function readJson(req: import("node:http").IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(
+	req: import("node:http").IncomingMessage,
+): Promise<Record<string, unknown>> {
 	let data = "";
 	let bytes = 0;
 	try {
 		for await (const chunk of req) {
-			const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+			const text =
+				typeof chunk === "string" ? chunk : chunk.toString("utf8");
 			bytes += Buffer.byteLength(text);
-			if (bytes > MAX_JSON_BODY_BYTES) throw new JsonBodyError("Request body is too large.", 413);
+			if (bytes > MAX_JSON_BODY_BYTES)
+				throw new JsonBodyError("Request body is too large.", 413);
 			data += text;
 		}
 		if (!data) return {};
 		const parsed = JSON.parse(data) as unknown;
-		if (!isJsonObject(parsed)) throw new JsonBodyError("JSON body must be an object.", 400);
+		if (!isJsonObject(parsed))
+			throw new JsonBodyError("JSON body must be an object.", 400);
 		return parsed;
 	} catch (error) {
 		if (error instanceof JsonBodyError) throw error;
@@ -1022,13 +1685,20 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 }
 
 class JsonBodyError extends Error {
-	constructor(message: string, readonly status: number) {
+	constructor(
+		message: string,
+		readonly status: number,
+	) {
 		super(message);
 	}
 }
 
 function isRequestAbort(error: unknown) {
-	return error instanceof Error && (error.message === "aborted" || (error as NodeJS.ErrnoException).code === "ECONNRESET");
+	return (
+		error instanceof Error &&
+		(error.message === "aborted" ||
+			(error as NodeJS.ErrnoException).code === "ECONNRESET")
+	);
 }
 
 function errorMessage(error: unknown) {
@@ -1039,12 +1709,21 @@ function securityHeaders() {
 	return {
 		"X-Content-Type-Options": "nosniff",
 		"Referrer-Policy": "strict-origin-when-cross-origin",
-		"Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
-		"Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+		"Permissions-Policy":
+			"camera=(), microphone=(), geolocation=(), payment=()",
+		"Content-Security-Policy":
+			"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
 	};
 }
 
-function json(res: import("node:http").ServerResponse, payload: unknown, status = 200) {
-	res.writeHead(status, { ...securityHeaders(), "Content-Type": "application/json; charset=utf-8" });
+function json(
+	res: import("node:http").ServerResponse,
+	payload: unknown,
+	status = 200,
+) {
+	res.writeHead(status, {
+		...securityHeaders(),
+		"Content-Type": "application/json; charset=utf-8",
+	});
 	res.end(JSON.stringify(payload));
 }
