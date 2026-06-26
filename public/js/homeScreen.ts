@@ -15,7 +15,8 @@ import soldierFlagUrl from "./sprites/soldier_flag.png";
 
 const PLAYER_NAME_STORAGE_KEY = "rtsPlayerName";
 const PLAYER_COLOR_STORAGE_KEY = "rtsPlayerColor";
-const GITHUB_REPOSITORY_URL = "https://github.com/AlexanderHeffernan/DeadKingdoms";
+const GITHUB_REPOSITORY_URL =
+	"https://github.com/AlexanderHeffernan/DeadKingdoms";
 const DEFAULT_PLAYER_COLORS = [
 	"#ff2b1a",
 	"#ff9f1c",
@@ -63,7 +64,8 @@ const CONTRIBUTORS: ContributorCredit[] = [
 	},
 	{
 		name: "Cara Lill",
-		avatarUrl: "https://avatars.githubusercontent.com/u/157843393?s=130&v=4",
+		avatarUrl:
+			"https://avatars.githubusercontent.com/u/157843393?s=130&v=4",
 		url: "https://github.com/Cara-Lill",
 		contribution: "In-Game Sprite Artist.",
 	},
@@ -108,10 +110,18 @@ const HOW_TO_PLAY_ITEMS: HowToPlayItem[] = [
 ];
 
 export class HomeScreen {
-	private readonly joinForm = document.getElementById("joinForm") as HTMLFormElement | null;
-	private readonly nameInput = document.getElementById("nameInput") as HTMLInputElement | null;
-	private readonly colorInput = document.getElementById("colorInput") as HTMLInputElement | null;
-	private readonly joinButton = this.joinForm?.querySelector("button[type='submit']") as HTMLButtonElement | null;
+	private readonly joinForm = document.getElementById(
+		"joinForm",
+	) as HTMLFormElement | null;
+	private readonly nameInput = document.getElementById(
+		"nameInput",
+	) as HTMLInputElement | null;
+	private readonly colorInput = document.getElementById(
+		"colorInput",
+	) as HTMLInputElement | null;
+	private readonly joinButton = this.joinForm?.querySelector(
+		"button[type='submit']",
+	) as HTMLButtonElement | null;
 	private readonly joinNotice = document.getElementById("joinNotice");
 	private latestStatus: ServerStatus | null = null;
 	private statusFull = false;
@@ -124,27 +134,55 @@ export class HomeScreen {
 
 	wireDom() {
 		if (this.nameInput) {
-			this.nameInput.value = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) || "";
+			this.nameInput.value =
+				localStorage.getItem(PLAYER_NAME_STORAGE_KEY) || "";
 			this.nameInput.addEventListener("input", () => this.showNotice(""));
 			this.nameInput.focus();
 			this.nameInput.select();
 		}
 		if (this.colorInput) {
-			this.colorInput.value = localStorage.getItem(PLAYER_COLOR_STORAGE_KEY) || this.randomDefaultPlayerColor();
-			this.colorInput.addEventListener("input", () => this.showNotice(""));
+			this.colorInput.value =
+				localStorage.getItem(PLAYER_COLOR_STORAGE_KEY) ||
+				this.randomDefaultPlayerColor();
+			this.colorInput.addEventListener("input", () =>
+				this.showNotice(""),
+			);
 			this.colorInput.addEventListener("keydown", (event) => {
 				if (event.key !== "Enter") return;
 				event.preventDefault();
 				this.joinForm?.requestSubmit();
 			});
 		}
-		this.joinForm?.addEventListener("submit", (event) => void this.join(event));
-		document.getElementById("howToPlayButton")?.addEventListener("click", () => this.openModal("howToPlayModal"));
-		document.getElementById("howToPlayClose")?.addEventListener("click", () => this.closeModal("howToPlayModal"));
-		document.getElementById("howToPlayModal")?.addEventListener("mousedown", (event) => this.closeModalFromBackdrop(event));
-		document.getElementById("changelogButton")?.addEventListener("click", () => void this.openChangelog());
-		document.getElementById("changelogClose")?.addEventListener("click", () => this.closeModal("changelogModal"));
-		document.getElementById("changelogModal")?.addEventListener("mousedown", (event) => this.closeModalFromBackdrop(event));
+		this.joinForm?.addEventListener(
+			"submit",
+			(event) => void this.join(event),
+		);
+		document
+			.getElementById("howToPlayButton")
+			?.addEventListener("click", () => this.openModal("howToPlayModal"));
+		document
+			.getElementById("howToPlayClose")
+			?.addEventListener("click", () =>
+				this.closeModal("howToPlayModal"),
+			);
+		document
+			.getElementById("howToPlayModal")
+			?.addEventListener("mousedown", (event) =>
+				this.closeModalFromBackdrop(event),
+			);
+		document
+			.getElementById("changelogButton")
+			?.addEventListener("click", () => void this.openChangelog());
+		document
+			.getElementById("changelogClose")
+			?.addEventListener("click", () =>
+				this.closeModal("changelogModal"),
+			);
+		document
+			.getElementById("changelogModal")
+			?.addEventListener("mousedown", (event) =>
+				this.closeModalFromBackdrop(event),
+			);
 	}
 
 	renderStaticContent() {
@@ -170,7 +208,14 @@ export class HomeScreen {
 		const lastUpdateDate = document.getElementById("lastUpdateDate");
 		const lastUpdateTime = document.getElementById("lastUpdateTime");
 		const deadKingdomsCount = document.getElementById("deadKingdomsCount");
-		if (!onlinePlayers && !resetStatus && !lastUpdateDate && !lastUpdateTime && !deadKingdomsCount) return;
+		if (
+			!onlinePlayers &&
+			!resetStatus &&
+			!lastUpdateDate &&
+			!lastUpdateTime &&
+			!deadKingdomsCount
+		)
+			return;
 		const status = this.latestStatus;
 		if (!status) {
 			this.setJoinButtonFull(false);
@@ -193,10 +238,28 @@ export class HomeScreen {
 			count += resetStatus.textContent ? 1 : 0;
 		}
 		if (separator) separator.style.display = count > 1 ? "inline" : "none";
-		const updatedAt = status.lastUpdate ? new Date(status.lastUpdate) : null;
-		if (lastUpdateDate) lastUpdateDate.textContent = updatedAt ? updatedAt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "--";
-		if (lastUpdateTime) lastUpdateTime.textContent = updatedAt ? updatedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "--";
-		if (deadKingdomsCount) deadKingdomsCount.textContent = status.deadKingdoms.toLocaleString();
+		const updatedAt = status.lastUpdate
+			? new Date(status.lastUpdate)
+			: null;
+		if (lastUpdateDate)
+			lastUpdateDate.textContent = updatedAt
+				? updatedAt.toLocaleDateString(undefined, {
+						year: "numeric",
+						month: "short",
+						day: "numeric",
+					})
+				: "--";
+		if (lastUpdateTime)
+			lastUpdateTime.textContent = updatedAt
+				? updatedAt.toLocaleTimeString(undefined, {
+						hour: "numeric",
+						minute: "2-digit",
+						timeZoneName: "short",
+					})
+				: "--";
+		if (deadKingdomsCount)
+			deadKingdomsCount.textContent =
+				status.deadKingdoms.toLocaleString();
 	}
 
 	showNotice(message: string) {
@@ -222,7 +285,7 @@ export class HomeScreen {
 		}
 		this.onBeforeJoin();
 		this.showNotice("");
-		const name = this.nameInput?.value.trim() || "Player";
+		const name = this.nameInput?.value.trim() ?? "";
 		const color = this.colorInput?.value || "";
 		const result = await join(name, color);
 		if (!result.ok || !result.playerId || !result.sessionToken) {
@@ -232,7 +295,12 @@ export class HomeScreen {
 		this.showNotice("");
 		localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
 		localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, color);
-		this.onJoined({ playerId: result.playerId, sessionToken: result.sessionToken, name, color });
+		this.onJoined({
+			playerId: result.playerId,
+			sessionToken: result.sessionToken,
+			name,
+			color,
+		});
 	}
 
 	private renderCredits() {
@@ -245,7 +313,8 @@ export class HomeScreen {
 				<span>Open Source</span>
 			</a>
 			<div class="contributors" aria-label="Contributors">
-				${CONTRIBUTORS.map((contributor) => `
+				${CONTRIBUTORS.map(
+					(contributor) => `
 					<a class="contributor" href="${contributor.url}" target="_blank" rel="noreferrer" aria-label="${escapeHtml(contributor.name)}: ${escapeHtml(contributor.contribution)}">
 						<img src="${contributor.avatarUrl}" alt="${escapeHtml(contributor.name)}" loading="lazy" />
 						<span class="contributor-popup">
@@ -253,7 +322,8 @@ export class HomeScreen {
 							<span>${escapeHtml(contributor.contribution)}</span>
 						</span>
 					</a>
-				`).join("")}
+				`,
+				).join("")}
 			</div>
 		`;
 	}
@@ -261,7 +331,8 @@ export class HomeScreen {
 	private renderHowToPlayRows() {
 		const rows = document.getElementById("howToPlayRows");
 		if (!rows) return;
-		rows.innerHTML = HOW_TO_PLAY_ITEMS.map((item) => `
+		rows.innerHTML = HOW_TO_PLAY_ITEMS.map(
+			(item) => `
 			<p>
 				<span class="how-to-sprite">
 					<img class="how-to-sprite-base" src="${item.baseUrl}" alt="" />
@@ -269,7 +340,8 @@ export class HomeScreen {
 				</span>
 				<span><strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.body)}</span>
 			</p>
-		`).join("");
+		`,
+		).join("");
 	}
 
 	private async openChangelog() {
@@ -292,12 +364,18 @@ export class HomeScreen {
 			rows.innerHTML = `<div class="global-loading">No recent changes found.</div>`;
 			return;
 		}
-		rows.innerHTML = entries.map((entry) => `
+		rows.innerHTML =
+			entries
+				.map(
+					(entry) => `
 			<a class="changelog-row" href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer">
 				<span>${escapeHtml(this.shortCommitMessage(entry.message))}</span>
 				<small>${escapeHtml(this.formatCommitDate(entry.date))}</small>
 			</a>
-		`).join("") + `
+		`,
+				)
+				.join("") +
+			`
 			<a class="changelog-all-link" href="${GITHUB_REPOSITORY_URL}/commits/main" target="_blank" rel="noreferrer">See all commits</a>
 		`;
 	}
@@ -311,11 +389,17 @@ export class HomeScreen {
 	}
 
 	private closeModalFromBackdrop(event: MouseEvent) {
-		if (event.target instanceof HTMLElement && event.target === event.currentTarget) event.target.classList.add("hidden");
+		if (
+			event.target instanceof HTMLElement &&
+			event.target === event.currentTarget
+		)
+			event.target.classList.add("hidden");
 	}
 
 	private randomDefaultPlayerColor() {
-		return DEFAULT_PLAYER_COLORS[Math.floor(Math.random() * DEFAULT_PLAYER_COLORS.length)]!;
+		return DEFAULT_PLAYER_COLORS[
+			Math.floor(Math.random() * DEFAULT_PLAYER_COLORS.length)
+		]!;
 	}
 
 	private shortCommitMessage(message: string) {
@@ -326,7 +410,10 @@ export class HomeScreen {
 		if (!value) return "recent";
 		const date = new Date(value);
 		if (Number.isNaN(date.getTime())) return "recent";
-		return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+		return date.toLocaleDateString(undefined, {
+			month: "short",
+			day: "numeric",
+		});
 	}
 
 	private onlinePlayersText(status: ServerStatus) {

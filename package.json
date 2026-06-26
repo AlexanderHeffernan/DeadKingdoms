@@ -27,6 +27,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "obscenity": "^0.4.6",
     "pixi.js": "^7.4.2"
   }
 }
