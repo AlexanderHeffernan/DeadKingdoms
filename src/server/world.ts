@@ -34,13 +34,12 @@ import {
 	hasReasonableZombiePathToTarget,
 	isWalkable,
 	moveAroundSmallObstacle,
-	moveNearTarget,
 	moveUnit,
-	moveWithPath,
 	moveZombieSteered,
 	moveZombieWithPath,
 	resolveUnitSeparation,
 } from "./pathing.js";
+import { PlayerUnitPathfinder } from "./playerUnitPathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
 import { ZombieAiWorkerClient } from "./zombieAiWorkerClient.js";
@@ -824,6 +823,7 @@ function createSimulationContext(
 	world: World,
 ): UnitSimulationContext & import("./zombieSpawning.js").ZombieSpawnContext {
 	const zombieCadence = new ZombieUpdateCadence(world);
+	const playerPathfinder = new PlayerUnitPathfinder(world);
 	const unitGridsByOwner = unitTargetGridsByOwner(world);
 	const buildingGrid = new SpatialGrid(
 		Object.values(world.buildings).filter((building) => building.hp > 0),
@@ -848,9 +848,9 @@ function createSimulationContext(
 		isComplete,
 		unitSoundLevel: (unit) => unitBehavior(unit).soundLevel(),
 		moveWithPath: (unit, command, maxStep) =>
-			moveWithPath(world, unit, command, maxStep),
+			playerPathfinder.moveWithPath(unit, command, maxStep),
 		moveNearTarget: (unit, command, target, range, maxStep) =>
-			moveNearTarget(world, unit, command, target, range, maxStep),
+			playerPathfinder.moveNearTarget(unit, command, target, range, maxStep),
 		moveUnit: (unit, target, maxStep) =>
 			moveUnit(world, unit, target, maxStep),
 		moveZombieWithPath: (unit, target, maxStep) =>

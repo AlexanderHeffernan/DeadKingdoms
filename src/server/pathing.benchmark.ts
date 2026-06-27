@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Unit, World } from "../shared/types.js";
 import { findPath, findSharedPath, moveWithPath, resolveUnitSeparation } from "./pathing.js";
+import { movePlayerUnitWithPath } from "./playerUnitPathing.js";
 
 type PathRequest = {
 	unit: Unit;
@@ -37,6 +38,8 @@ type MovementBenchmarkCase = {
 	name: string;
 	repeats: number;
 	makeWorld: () => World;
+	playerPathing?: boolean;
+	reuseWorld?: boolean;
 };
 
 type MovementBenchmarkResult = {
@@ -78,6 +81,8 @@ function main() {
 	];
 	const movementCases = [
 		arrival800UnitsNearGroupEdge(),
+		playerPathing1000UnitsSingleGroup(),
+		playerPathing2000UnitsTenPlayers(),
 	];
 
 	printPathResults(pathCases.map(runPathBenchmark));
@@ -143,13 +148,14 @@ function runSeparationBenchmark(testCase: SeparationBenchmarkCase): SeparationBe
 }
 
 function runMovementBenchmark(testCase: MovementBenchmarkCase): MovementBenchmarkResult {
-	for (let i = 0; i < Math.min(5, testCase.repeats); i += 1) stepMovingUnits(testCase.makeWorld());
+	if (testCase.reuseWorld) return runPersistentMovementBenchmark(testCase);
+	for (let i = 0; i < Math.min(5, testCase.repeats); i += 1) stepMovingUnits(testCase.makeWorld(), testCase.playerPathing === true);
 
 	let unitCount = 0;
 	const start = performance.now();
 	for (let i = 0; i < testCase.repeats; i += 1) {
 		const world = testCase.makeWorld();
-		unitCount = stepMovingUnits(world);
+		unitCount = stepMovingUnits(world, testCase.playerPathing === true);
 	}
 	const totalMs = performance.now() - start;
 	return {
@@ -162,11 +168,36 @@ function runMovementBenchmark(testCase: MovementBenchmarkCase): MovementBenchmar
 	};
 }
 
-function stepMovingUnits(world: World): number {
+function runPersistentMovementBenchmark(testCase: MovementBenchmarkCase): MovementBenchmarkResult {
+	const world = testCase.makeWorld();
+	const playerPathing = testCase.playerPathing === true;
+	for (let i = 0; i < Math.min(5, testCase.repeats); i += 1) {
+		world.tick = i;
+		stepMovingUnits(world, playerPathing);
+	}
+	const unitCount = Object.values(world.units).filter((unit) => unit.command.type === "move").length;
+	const start = performance.now();
+	for (let i = 0; i < testCase.repeats; i += 1) {
+		world.tick = i + 5;
+		stepMovingUnits(world, playerPathing);
+	}
+	const totalMs = performance.now() - start;
+	return {
+		name: testCase.name,
+		repeats: testCase.repeats,
+		units: unitCount,
+		totalMs,
+		averageMs: totalMs / testCase.repeats,
+		unitsPerSecond: ((unitCount * testCase.repeats) / totalMs) * 1000,
+	};
+}
+
+function stepMovingUnits(world: World, playerPathing: boolean): number {
 	let count = 0;
 	for (const unit of Object.values(world.units)) {
 		if (unit.command.type !== "move") continue;
-		moveWithPath(world, unit, unit.command, 0.32);
+		if (playerPathing) movePlayerUnitWithPath(world, unit, unit.command, 0.32);
+		else moveWithPath(world, unit, unit.command, 0.32);
 		count += 1;
 	}
 	return count;
@@ -352,6 +383,73 @@ function arrival800UnitsNearGroupEdge(): MovementBenchmarkCase {
 				return unit;
 			});
 			for (const unit of [...arrived, ...moving]) world.units[unit.id] = unit;
+			return world;
+		},
+	};
+}
+
+function playerPathing1000UnitsSingleGroup(): MovementBenchmarkCase {
+	return {
+		name: "1000 player units shared gap flow",
+		repeats: 80,
+		playerPathing: true,
+		reuseWorld: true,
+		makeWorld: () => {
+			const blocked = [];
+			for (let y = 10; y < 90; y += 1) {
+				if (y >= 48 && y <= 54) continue;
+				blocked.push({ x: 60, y });
+			}
+			const world = makeWorld(blocked);
+			const target = { x: 100.5, y: 51.5 };
+			for (let i = 0; i < 1000; i += 1) {
+				const unit = makeUnit(20.5 + (i % 40) * 0.25, 30.5 + Math.floor(i / 40) * 0.25, `player-flow-${i}`);
+				unit.type = "soldier";
+				unit.command = {
+					type: "move",
+					...target,
+					path: null,
+					pathCrowd: 1000,
+					moveGroupId: "benchmark-player-flow",
+					moveGroupTarget: target,
+				};
+				world.units[unit.id] = unit;
+			}
+			return world;
+		},
+	};
+}
+
+function playerPathing2000UnitsTenPlayers(): MovementBenchmarkCase {
+	return {
+		name: "2000 player units ten group flow",
+		repeats: 60,
+		playerPathing: true,
+		reuseWorld: true,
+		makeWorld: () => {
+			const blocked = [];
+			for (let y = 10; y < 120; y += 1) {
+				if (y >= 58 && y <= 66) continue;
+				blocked.push({ x: 80, y });
+			}
+			const world = makeWorld(blocked);
+			for (let player = 0; player < 10; player += 1) {
+				const target = { x: 130.5, y: 40.5 + player * 5 };
+				for (let i = 0; i < 200; i += 1) {
+					const unit = makeUnit(20.5 + (i % 20) * 0.25, 25.5 + player * 7 + Math.floor(i / 20) * 0.25, `player-${player}-flow-${i}`);
+					unit.type = "soldier";
+					unit.ownerId = `p-${player}` as Unit["ownerId"];
+					unit.command = {
+						type: "move",
+						...target,
+						path: null,
+						pathCrowd: 200,
+						moveGroupId: `benchmark-player-flow-${player}`,
+						moveGroupTarget: target,
+					};
+					world.units[unit.id] = unit;
+				}
+			}
 			return world;
 		},
 	};
