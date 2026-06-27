@@ -4,6 +4,7 @@ import { MAP_SIZE } from "../shared/config.js";
 import type { Building, ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
 import { ZombieUnit, type UnitSimulationContext } from "../shared/units/index.js";
 import { findPath, findSharedPath, hasPathToInteractionRange, hasReasonableZombiePathToTarget, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
+import { movePlayerUnitNearTarget, movePlayerUnitWithPath } from "./playerUnitPathing.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 	const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -1540,6 +1541,307 @@ test("resolveUnitSeparation spreads units after they become idle at destination"
 	resolveUnitSeparation(world);
 
 	assert.ok(distanceBetween(a, b) >= 0.47);
+});
+
+test("player group pathing moves a large crowd through a shared gap", () => {
+	const blocked = [];
+	for (let y = 8; y <= 78; y += 1) {
+		if (y >= 36 && y <= 42) continue;
+		blocked.push({ x: 48, y });
+	}
+	const world = makeWorld(blocked);
+	const target = { x: 82.5, y: 39.5 };
+	const units = [];
+	for (let i = 0; i < 320; i += 1) {
+		const unit = makeUnit(14.5 + (i % 32) * 0.22, 30.5 + Math.floor(i / 32) * 0.22, `u-player-flow-${i}`);
+		unit.type = "soldier";
+		unit.command = {
+			type: "move",
+			...target,
+			path: null,
+			pathCrowd: 320,
+			moveGroupId: "player-flow-group",
+			moveGroupTarget: target,
+		};
+		units.push(unit);
+	}
+	addUnits(world, units);
+
+	let arrived = 0;
+	for (let tick = 0; tick < 320; tick += 1) {
+		world.tick = tick;
+		arrived = 0;
+		for (const unit of units) {
+			if (unit.command.type === "move" && movePlayerUnitWithPath(world, unit, unit.command, 0.32)) arrived += 1;
+		}
+		if (arrived === units.length) break;
+	}
+
+	assert.equal(arrived, units.length);
+	assert.ok(units.every((unit) => unit.x > 48));
+});
+
+test("player move command settles around a blocked destination", () => {
+	const world = makeWorld([{ x: 24, y: 24 }]);
+	const unit = makeUnit(18.5, 24.5, "u-player-blocked-destination");
+	unit.command = {
+		type: "move",
+		x: 24.5,
+		y: 24.5,
+		path: null,
+		pathCrowd: 20,
+		moveGroupId: "player-blocked-destination",
+		moveGroupTarget: { x: 24.5, y: 24.5 },
+	};
+	addUnits(world, [unit]);
+
+	let arrived = false;
+	for (let tick = 0; tick < 80; tick += 1) {
+		world.tick = tick;
+		if (unit.command.type === "move") arrived = movePlayerUnitWithPath(world, unit, unit.command, 0.32);
+		if (arrived) break;
+	}
+
+	assert.equal(arrived, true);
+	assert.notDeepEqual({ x: Math.floor(unit.x), y: Math.floor(unit.y) }, { x: 24, y: 24 });
+	assert.ok(distanceFrom(unit, { x: 24.5, y: 24.5 }) < 3);
+});
+
+test("player interaction pathing approaches resources without entering the blocked resource tile", () => {
+	const world = makeWorld([{ x: 12, y: 12 }]);
+	const tree: ResourceNode = {
+		id: "r-player-interaction-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 12,
+		y: 12,
+		amount: 100,
+		maxAmount: 100,
+	};
+	world.resources[tree.id] = tree;
+	const unit = makeUnit(8.5, 12.5, "u-player-interaction");
+	unit.command = { type: "gather", targetId: tree.id, resourceKind: "wood", progress: 0, path: null };
+	addUnits(world, [unit]);
+
+	let inRange = false;
+	for (let tick = 0; tick < 50; tick += 1) {
+		world.tick = tick;
+		inRange = movePlayerUnitNearTarget(world, unit, unit.command, tree, 1.1, 0.32);
+		if (inRange) break;
+	}
+
+	assert.equal(inRange, true);
+	assert.notDeepEqual({ x: Math.floor(unit.x), y: Math.floor(unit.y) }, { x: 12, y: 12 });
+});
+
+test("player pathing refreshes own gate access when a wall becomes a gate", () => {
+	const world = makeWorld([{ x: 12, y: 10 }]);
+	world.buildings["b-player-wall"] = {
+		id: "b-player-wall",
+		kind: "building",
+		type: "wall",
+		ownerId: "p-test",
+		x: 12,
+		y: 10,
+		size: 1,
+		width: 1,
+		height: 1,
+		hp: 100,
+		maxHp: 100,
+		walkBlocking: true,
+	} as never;
+	const unit = makeUnit(10.5, 10.5, "u-player-gate-cache");
+	unit.command = {
+		type: "move",
+		x: 16.5,
+		y: 10.5,
+		path: null,
+		pathCrowd: 20,
+		moveGroupId: "player-gate-cache",
+		moveGroupTarget: { x: 16.5, y: 10.5 },
+	};
+	addUnits(world, [unit]);
+
+	world.tick = 1;
+	movePlayerUnitWithPath(world, unit, unit.command, 0.32);
+	delete world.buildings["b-player-wall"];
+	world.buildings["b-player-gate"] = {
+		id: "b-player-gate",
+		kind: "building",
+		type: "gate",
+		ownerId: "p-test",
+		x: 12,
+		y: 10,
+		size: 1,
+		width: 1,
+		height: 1,
+		hp: 100,
+		maxHp: 100,
+		walkBlocking: true,
+	} as never;
+
+	for (let tick = 2; tick < 30; tick += 1) {
+		world.tick = tick;
+		movePlayerUnitWithPath(world, unit, unit.command, 0.32);
+	}
+
+	assert.ok(unit.x > 12.2);
+});
+
+test("player pathing passes through own gates without clipping adjacent walls", () => {
+	const blocked = [];
+	for (let y = 8; y <= 12; y += 1) blocked.push({ x: 12, y });
+	const world = makeWorld(blocked);
+	world.buildings["b-player-own-gate"] = {
+		id: "b-player-own-gate",
+		kind: "building",
+		type: "gate",
+		ownerId: "p-test",
+		x: 12,
+		y: 10,
+		size: 1,
+		width: 1,
+		height: 1,
+		hp: 100,
+		maxHp: 100,
+		walkBlocking: true,
+	} as never;
+	const wallTiles = new Set(blocked.filter((tile) => tile.y !== 10).map((tile) => `${tile.x},${tile.y}`));
+	const unit = makeUnit(9.5, 10.5, "u-player-own-gate-walls");
+	unit.command = {
+		type: "move",
+		x: 16.5,
+		y: 10.5,
+		path: null,
+		pathCrowd: 80,
+		moveGroupId: "player-own-gate-walls",
+		moveGroupTarget: { x: 16.5, y: 10.5 },
+	};
+	addUnits(world, [unit]);
+
+	for (let tick = 0; tick < 60; tick += 1) {
+		world.tick = tick;
+		movePlayerUnitWithPath(world, unit, unit.command, 0.32);
+		assert.equal(wallTiles.has(`${Math.floor(unit.x)},${Math.floor(unit.y)}`), false);
+	}
+
+	assert.ok(unit.x > 13);
+});
+
+test("player pathing slides off wall edges toward an own gate", () => {
+	const blocked = [];
+	for (let y = 8; y <= 12; y += 1) blocked.push({ x: 12, y });
+	const world = makeWorld(blocked);
+	world.buildings["b-player-edge-gate"] = {
+		id: "b-player-edge-gate",
+		kind: "building",
+		type: "gate",
+		ownerId: "p-test",
+		x: 12,
+		y: 10,
+		size: 1,
+		width: 1,
+		height: 1,
+		hp: 100,
+		maxHp: 100,
+		walkBlocking: true,
+	} as never;
+	const wallTiles = new Set(blocked.filter((tile) => tile.y !== 10).map((tile) => `${tile.x},${tile.y}`));
+	const unit = makeUnit(11.95, 9.62, "u-player-wall-edge-slide");
+	unit.command = {
+		type: "move",
+		x: 16.5,
+		y: 10.5,
+		path: null,
+		pathCrowd: 80,
+		moveGroupId: "player-wall-edge-slide",
+		moveGroupTarget: { x: 16.5, y: 10.5 },
+	};
+	addUnits(world, [unit]);
+
+	for (let tick = 0; tick < 90; tick += 1) {
+		world.tick = tick;
+		movePlayerUnitWithPath(world, unit, unit.command, 0.32);
+		assert.equal(wallTiles.has(`${Math.floor(unit.x)},${Math.floor(unit.y)}`), false);
+	}
+
+	assert.ok(unit.x > 13);
+});
+
+test("player pathing routes around a solid wall end without edge vibration", () => {
+	const blocked = [];
+	for (let x = 20; x <= 44; x += 1) blocked.push({ x, y: 30 });
+	const wallTiles = new Set(blocked.map((tile) => `${tile.x},${tile.y}`));
+	const target = { x: 30.5, y: 27.5 };
+	const units = ["u-solid-wall-edge-1", "u-solid-wall-edge-2", "u-solid-wall-edge-3", "u-solid-wall-edge-4"].map((id, index) => {
+		const unit = makeUnit(43.8 + index * 0.04, 32.3 + index * 0.03, id);
+		unit.command = {
+			type: "move",
+			...target,
+			path: null,
+			pathCrowd: 80,
+			moveGroupId: "player-solid-wall-edge",
+			moveGroupTarget: target,
+		};
+		return unit;
+	});
+	const world = makeWorld(blocked);
+	addUnits(world, units);
+
+	let arrived = 0;
+	for (let tick = 0; tick < 260; tick += 1) {
+		world.tick = tick;
+		arrived = 0;
+		for (const unit of units) {
+			if (unit.command.type === "move" && movePlayerUnitWithPath(world, unit, unit.command, 0.32)) arrived += 1;
+			assert.equal(wallTiles.has(`${Math.floor(unit.x)},${Math.floor(unit.y)}`), false);
+		}
+		if (arrived === units.length) break;
+	}
+
+	assert.equal(arrived, units.length);
+	assert.ok(units.every((unit) => unit.y < 30));
+	assert.ok(units.every((unit) => distanceFrom(unit, target) < 4));
+});
+
+test("player pathing cannot pass through enemy gates", () => {
+	const blocked = [];
+	for (let y = 0; y < MAP_SIZE; y += 1) blocked.push({ x: 12, y });
+	const world = makeWorld(blocked);
+	world.buildings["b-player-enemy-gate"] = {
+		id: "b-player-enemy-gate",
+		kind: "building",
+		type: "gate",
+		ownerId: "p-enemy",
+		x: 12,
+		y: 10,
+		size: 1,
+		width: 1,
+		height: 1,
+		hp: 100,
+		maxHp: 100,
+		walkBlocking: true,
+	} as never;
+	const unit = makeUnit(9.5, 10.5, "u-player-enemy-gate");
+	unit.command = {
+		type: "move",
+		x: 16.5,
+		y: 10.5,
+		path: null,
+		pathCrowd: 80,
+		moveGroupId: "player-enemy-gate",
+		moveGroupTarget: { x: 16.5, y: 10.5 },
+	};
+	addUnits(world, [unit]);
+
+	for (let tick = 0; tick < 80; tick += 1) {
+		world.tick = tick;
+		movePlayerUnitWithPath(world, unit, unit.command, 0.32);
+		assert.notEqual(Math.floor(unit.x), 12);
+	}
+
+	assert.ok(unit.x < 12);
 });
 
 function distanceBetween(a: { x: number; y: number }, b: { x: number; y: number }) {

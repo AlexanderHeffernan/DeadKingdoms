@@ -36,6 +36,13 @@ export interface PathingWorldState {
 	hardBlockingTilesVersion?: number;
 	blockingBuildingsByTile?: Map<number, Building>;
 	blockingBuildingsByTileVersion?: number;
+	ownGateTiles?: Map<PlayerId, Set<number>>;
+	ownGateTilesVersion?: number;
+	ownGateTilesTick?: number;
+	ownGateSignature?: string;
+	ownGateSignatureTick?: number;
+	pathDebugViewer?: boolean;
+	pathDebugViewerTick?: number;
 	idleUnitTiles?: Map<number, Map<PlayerId, number>>;
 	idleUnitTilesTick?: number;
 	movingUnitGrid?: unknown;
