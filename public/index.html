@@ -379,27 +379,10 @@
 					</div>
 				</div>
 				<div id="adminPerformanceView" class="admin-tab-view hidden">
-					<div id="adminPerfBreakdown" class="admin-perf-breakdown"></div>
-					<div class="admin-chart-controls">
-						<button id="adminChartOlderButton" type="button">Older</button>
-						<button id="adminChartNewerButton" type="button">Newer</button>
-						<label>
-							Range
-							<select id="adminChartRange">
-								<option value="10">10s</option>
-								<option value="30" selected>30s</option>
-								<option value="60">1m</option>
-								<option value="120">2m</option>
-							</select>
-						</label>
-						<span id="adminChartWindow"></span>
+					<div class="admin-perf-toolbar">
+						<button id="adminPerfPauseButton" type="button" aria-pressed="false">Pause</button>
 					</div>
-					<canvas
-						id="adminFullscreenChart"
-						width="1280"
-						height="520"
-						aria-label="Full screen server performance chart"
-					></canvas>
+					<div id="adminPerfBreakdown" class="admin-perf-breakdown"></div>
 				</div>
 				<div id="adminPlayersView" class="admin-tab-view hidden">
 					<table class="admin-player-table">

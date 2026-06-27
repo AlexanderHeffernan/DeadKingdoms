@@ -86,7 +86,7 @@ let lastFrameAt = performance.now();
 let smoothedFps = 60;
 let lastPingReportAt = 0;
 let adminDiagnosticsVisible = false;
-let adminView: "closed" | "popup" | "overview" | "performance" | "players" | "logs" | "devCommands" | "bans" = "closed";
+let adminView: "closed" | "popup" | "overview" | "performance" | "performancePaused" | "players" | "logs" | "devCommands" | "bans" = "closed";
 const ui = new UI(state, {
 	setBuildMode(type) {
 		view.buildMode = type;
@@ -480,7 +480,7 @@ function resetToJoin(message: string) {
 }
 
 function isAdminView(value: string): value is typeof adminView {
-	return value === "closed" || value === "popup" || value === "overview" || value === "performance" || value === "players" || value === "logs" || value === "devCommands" || value === "bans";
+	return value === "closed" || value === "popup" || value === "overview" || value === "performance" || value === "performancePaused" || value === "players" || value === "logs" || value === "devCommands" || value === "bans";
 }
 
 let centered = false;

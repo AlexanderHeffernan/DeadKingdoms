@@ -210,7 +210,7 @@ export interface AdminPlayerSnapshot {
 	ipAddress?: string;
 }
 
-export type AdminView = "closed" | "popup" | "overview" | "performance" | "players" | "logs" | "devCommands" | "bans";
+export type AdminView = "closed" | "popup" | "overview" | "performance" | "performancePaused" | "players" | "logs" | "devCommands" | "bans";
 
 export interface AdminSnapshot {
 	level: AdminLevel;
@@ -280,8 +280,8 @@ export interface SnapshotDelta {
 	hornSounds: HornSoundSource[];
 	soundDebug: SoundDebugSource[] | null;
 	pathDebug: boolean;
-	serverPerf: ServerPerfStats | null;
-	admin: AdminSnapshot | null;
+	serverPerf?: ServerPerfStats | null;
+	admin?: AdminSnapshot | null;
 }
 
 export type SnapshotMessage = Snapshot | SnapshotDelta;

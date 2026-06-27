@@ -156,8 +156,8 @@ export class SnapshotStore {
 			hornSounds: delta.hornSounds,
 			soundDebug: delta.soundDebug,
 			pathDebug: delta.pathDebug,
-			serverPerf: delta.serverPerf,
-			admin: delta.admin,
+			serverPerf: delta.serverPerf !== undefined ? delta.serverPerf : previous.serverPerf,
+			admin: delta.admin !== undefined ? delta.admin : previous.admin,
 		};
 	}
 

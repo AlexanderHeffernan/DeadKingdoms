@@ -155,9 +155,18 @@ function buildAdminSnapshot(world: World, level: AdminLevel | undefined, view: A
 }
 
 function adminPerfSamples(world: World, view: AdminView) {
-	if (view === "popup") return world.serverPerf.samples.slice(-POPUP_PERF_SAMPLE_LIMIT);
-	if (view === "overview") return world.serverPerf.samples.slice(-OVERVIEW_PERF_SAMPLE_LIMIT);
-	return world.serverPerf.samples.slice();
+	if (view === "popup") return compactPerfSamples(world.serverPerf.samples.slice(-POPUP_PERF_SAMPLE_LIMIT));
+	if (view === "overview") return compactPerfSamples(world.serverPerf.samples.slice(-OVERVIEW_PERF_SAMPLE_LIMIT));
+	return [];
+}
+
+function compactPerfSamples(samples: World["serverPerf"]["samples"]) {
+	return samples.map((sample) => ({
+		tick: sample.tick,
+		tps: sample.tps,
+		tickMs: sample.tickMs,
+		at: sample.at,
+	}));
 }
 
 function serializeUnit(unit: Unit, includeZombieDebug: boolean): Unit {

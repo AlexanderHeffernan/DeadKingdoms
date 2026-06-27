@@ -56,6 +56,7 @@ const DISCONNECT_LEAVE_GRACE_MS = 10_000;
 const MAX_JSON_BODY_BYTES = 256 * 1024;
 const MAX_COMMAND_UNIT_IDS = 1000;
 const MAX_EVENT_STREAMS_PER_IP = 6;
+const ADMIN_PERFORMANCE_UPDATE_MS = 1000;
 const RATE_LIMITS: Record<string, { windowMs: number; max: number }> = {
 	join: { windowMs: 60_000, max: 12 },
 	command: { windowMs: 1_000, max: 30 },
@@ -86,6 +87,7 @@ export type Client = {
 	res: import("node:http").ServerResponse;
 	sentExplored: Set<number> | null;
 	adminView: AdminView;
+	lastAdminPerformanceAt: number;
 	lastSnapshot: Snapshot | null;
 	lastSeq: number;
 	replaced?: boolean;
@@ -513,6 +515,7 @@ export function broadcast(world: World, clients: Set<Client>) {
 			client.sentExplored,
 			client.adminView,
 		);
+		throttleAdminPerformanceSnapshot(client, snapshot);
 		const message = snapshotMessageForClient(client, snapshot);
 		const payload = serializeSnapshotMessage(
 			world,
@@ -607,9 +610,29 @@ export function makeSnapshotDelta(
 		hornSounds: current.hornSounds,
 		soundDebug: current.soundDebug,
 		pathDebug: current.pathDebug,
-		serverPerf: current.serverPerf,
-		admin: current.admin,
+		...(JSON.stringify(previous.serverPerf) !== JSON.stringify(current.serverPerf) ? { serverPerf: current.serverPerf } : {}),
+		...(JSON.stringify(previous.admin) !== JSON.stringify(current.admin) ? { admin: current.admin } : {}),
 	};
+}
+
+function throttleAdminPerformanceSnapshot(client: Client, snapshot: Snapshot) {
+	if (client.adminView === "performancePaused") {
+		freezeAdminSnapshot(client, snapshot);
+		return;
+	}
+	if (client.adminView !== "performance") return;
+	const now = Date.now();
+	if (client.lastAdminPerformanceAt && now - client.lastAdminPerformanceAt < ADMIN_PERFORMANCE_UPDATE_MS) {
+		freezeAdminSnapshot(client, snapshot);
+		return;
+	}
+	client.lastAdminPerformanceAt = now;
+}
+
+function freezeAdminSnapshot(client: Client, snapshot: Snapshot) {
+	if (!client.lastSnapshot) return;
+	snapshot.admin = client.lastSnapshot.admin ?? null;
+	snapshot.serverPerf = client.lastSnapshot.serverPerf ?? null;
 }
 
 function diffRecord<T>(
@@ -1348,6 +1371,7 @@ function streamEvents(
 		adminView,
 		lastSnapshot: null,
 		lastSeq: 0,
+		lastAdminPerformanceAt: 0,
 		ipAddress,
 	};
 	clients.add(client);
@@ -1401,6 +1425,7 @@ function adminViewFromParam(value: string | null): AdminView {
 		value === "popup" ||
 		value === "overview" ||
 		value === "performance" ||
+		value === "performancePaused" ||
 		value === "players" ||
 		value === "logs" ||
 		value === "devCommands" ||

@@ -297,11 +297,12 @@
 	white-space: nowrap;
 }
 
-.admin-chart-controls {
+.admin-perf-toolbar {
 	display: flex;
 	align-items: center;
 	gap: 10px;
 	flex-wrap: wrap;
+	margin-bottom: 10px;
 }
 
 .admin-perf-breakdown {
@@ -403,38 +404,8 @@
 	font-size: 13px;
 }
 
-.admin-chart-controls button,
-.admin-chart-controls select {
+.admin-perf-toolbar button {
 	min-height: 32px;
-}
-
-.admin-chart-controls label {
-	display: inline-flex;
-	align-items: center;
-	gap: 7px;
-	color: #cfc7b7;
-	font-size: 12px;
-}
-
-.admin-chart-controls select {
-	border: 1px solid #645b4f;
-	background: #121411;
-	color: #f4efe6;
-	padding: 0 8px;
-}
-
-#adminChartWindow {
-	color: #cfc7b7;
-	font-size: 12px;
-}
-
-#adminFullscreenChart {
-	display: block;
-	width: 100%;
-	height: min(38vh, 420px);
-	min-height: 280px;
-	border: 1px solid rgb(244 239 230 / 0.2);
-	background: #101410;
 }
 
 .admin-fullscreen-grid {
