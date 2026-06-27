@@ -119,6 +119,9 @@ export type UnitSimulationContext = {
 	/** Finds the next nearby resource or gatherable building for continued gathering. */
 	findNextResource(unit: Unit, resourceKind: "wood" | "food" | "ore" | null): ResourceNode | Building | null;
 
+	/** Finds a reachable same-kind replacement when the assigned gather target cannot be approached. */
+	findAlternateResource(unit: Unit, resourceKind: "wood" | "food" | "ore", currentTarget: ResourceNode | Building): ResourceNode | Building | null;
+
 	/** Attempts automatic replenishment for a gatherable building. */
 	maybeAutoReplenishBuilding(building: Building): void;
 

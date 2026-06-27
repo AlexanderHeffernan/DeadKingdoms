@@ -16,6 +16,8 @@ const GROUP_ARRIVAL_BASE_RADIUS = 0.9;
 const GROUP_ARRIVAL_MAX_RADIUS = 8.5;
 const FORMATION_SLOT_SETTLE_RADIUS = 0.85;
 const FORMATION_SLOT_PRACTICAL_SETTLE_RADIUS = 1.35;
+const FORMATION_SLOT_CLOSE_SETTLE_RADIUS = 2.8;
+const FORMATION_SLOT_CLOSE_STUCK_TICKS = 2;
 const FORMATION_DEPLOY_MAX_RADIUS = 38;
 const MOVING_UNIT_CELL_SIZE = 1.5;
 const MOVING_UNIT_RADIUS = 0.85;
@@ -62,25 +64,34 @@ export function movePlayerUnitWithPath(world: World, unit: Unit, command: Extrac
 
 	const steeringTarget = movementTarget(world, unit, command, baseTarget, finalTarget);
 	const before = { x: unit.x, y: unit.y };
+	const beforeFinalDistance = distance(unit, finalTarget);
 	movePlayerUnitSteered(world, unit, steeringTarget, maxStep, pathFollowMode(command));
 	const movedDistance = distance(before, unit);
+	const finalProgress = beforeFinalDistance - distance(unit, finalTarget);
 	updateMovePathDebug(world, command, steeringTarget);
 
 	if (isMoveComplete(world, unit, command, baseTarget, finalTarget)) return true;
-	if (isPracticalGroupComplete(world, unit, command, baseTarget, finalTarget, movedDistance)) return true;
+	if (isPracticalGroupComplete(world, unit, command, baseTarget, finalTarget, movedDistance, finalProgress)) return true;
 	return false;
 }
 
 export function movePlayerUnitNearTarget(world: World, unit: Unit, command: UnitCommand, target: Vec2, range: number, maxStep: number): boolean {
-	if (distance(unit, target) <= range) return true;
+	if (distance(unit, target) <= range) {
+		resetInteractionProgress(command);
+		return true;
+	}
 	if (escapeOccupiedTile(world, unit, target, maxStep)) return false;
 	const field = interactionFlowField(world, unit, target, range);
 	const steeringTarget = fieldTarget(world, unit, field, target);
 	const before = { x: unit.x, y: unit.y };
+	const beforeDistance = distance(unit, target);
 	movePlayerUnitSteered(world, unit, steeringTarget, maxStep, "tight");
+	const afterDistance = distance(unit, target);
 	command.path = debugPathFromTarget(steeringTarget);
 	if (distance(before, unit) < STUCK_MOVEMENT_EPSILON) command.path = null;
-	return distance(unit, target) <= range;
+	const arrived = afterDistance <= range;
+	trackInteractionProgress(world, unit, command, target, range, field, beforeDistance, afterDistance, arrived);
+	return arrived;
 }
 
 function moveCommandTarget(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>): Vec2 {
@@ -198,11 +209,12 @@ function bestSteeringCandidate(
 	const beforeGoalDistance = distance(unit, steeringTarget.finalTarget);
 	let best: { target: Vec2; score: number } | null = null;
 
+	if (steeringTarget.field && hasNearbyHardObstacle(world, unit, 2)) {
+		const immediateFlowStep = immediateFlowStepTarget(world, unit, steeringTarget.field, maxStep);
+		if (immediateFlowStep) return immediateFlowStep;
+	}
+
 	if (mode === "flow") {
-		if (hasNearbyHardObstacle(world, unit, 2)) {
-			const immediateFlowStep = immediateFlowStepTarget(world, unit, steeringTarget.field, maxStep);
-			if (immediateFlowStep) return immediateFlowStep;
-		}
 		const preferred = preferredSteeringTarget(world, unit, steeringTarget, desired, crowdPush, resourcePush, maxStep, beforeCost, beforeGoalDistance);
 		if (preferred) return preferred;
 	}
@@ -608,19 +620,40 @@ function isMoveComplete(world: World, unit: Unit, command: Extract<UnitCommand, 
 	return isAccessibleArrival(world, unit, baseTarget, arrivalRadius(command)) && isAccessibleArrival(world, unit, finalTarget, FORMATION_SLOT_PRACTICAL_SETTLE_RADIUS);
 }
 
-function isPracticalGroupComplete(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, baseTarget: Vec2, finalTarget: Vec2, movedDistance: number): boolean {
+function isPracticalGroupComplete(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>, baseTarget: Vec2, finalTarget: Vec2, movedDistance: number, finalProgress: number): boolean {
 	if (!isAccessibleArrival(world, unit, baseTarget, arrivalRadius(command))) {
 		command.moveStuckTicks = 0;
+		delete command.moveBestDistance;
 		return false;
 	}
 	if (!command.formationTarget) return movedDistance < STUCK_MOVEMENT_EPSILON;
 	if (isAccessibleArrival(world, unit, finalTarget, FORMATION_SLOT_PRACTICAL_SETTLE_RADIUS)) return true;
+	const closeSettle = closeFormationSettleState(unit, command, finalTarget, finalProgress);
+	if (closeSettle !== "open") return closeSettle === "settled";
 	if (movedDistance >= STUCK_MOVEMENT_EPSILON) {
 		command.moveStuckTicks = 0;
+		delete command.moveBestDistance;
 		return false;
 	}
 	command.moveStuckTicks = (command.moveStuckTicks || 0) + 1;
 	return command.moveStuckTicks >= (commandCrowd(command) >= 20 ? 2 : 4);
+}
+
+function closeFormationSettleState(unit: Unit, command: Extract<UnitCommand, { type: "move" }>, finalTarget: Vec2, finalProgress: number): "open" | "waiting" | "settled" {
+	const finalDistance = distance(unit, finalTarget);
+	if (finalDistance > FORMATION_SLOT_CLOSE_SETTLE_RADIUS) {
+		delete command.moveBestDistance;
+		return "open";
+	}
+	const bestDistance = command.moveBestDistance ?? Infinity;
+	if (finalDistance + 0.04 < bestDistance) {
+		command.moveBestDistance = finalDistance;
+		command.moveStuckTicks = 0;
+		return "waiting";
+	}
+	if (finalProgress > 0.03) return "waiting";
+	command.moveStuckTicks = (command.moveStuckTicks || 0) + 1;
+	return command.moveStuckTicks >= FORMATION_SLOT_CLOSE_STUCK_TICKS ? "settled" : "waiting";
 }
 
 function isAccessibleArrival(world: World, unit: Unit, target: Vec2, radius: number): boolean {
@@ -647,6 +680,57 @@ function pathFollowMode(command: UnitCommand): "tight" | "flow" {
 
 function updateMovePathDebug(world: World, command: UnitCommand, target: SteeringTarget) {
 	command.path = hasPathDebugViewer(world) ? debugPathFromTarget(target) : null;
+}
+
+function trackInteractionProgress(
+	world: World,
+	unit: Unit,
+	command: UnitCommand,
+	target: Vec2,
+	range: number,
+	field: FlowField,
+	beforeDistance: number,
+	afterDistance: number,
+	arrived: boolean,
+) {
+	if (arrived) {
+		resetInteractionProgress(command);
+		return;
+	}
+	const key = interactionProgressKey(target, range);
+	if (command.interactionTargetKey !== key) {
+		command.interactionTargetKey = key;
+		delete command.interactionBestCost;
+		command.moveStuckTicks = 0;
+	}
+	const currentCost = interactionProgressCost(world, unit, field, afterDistance);
+	if (command.interactionBestCost === undefined || currentCost + FLOW_BASE_COST < command.interactionBestCost) {
+		command.interactionBestCost = currentCost;
+		command.moveStuckTicks = 0;
+		return;
+	}
+	if (afterDistance < beforeDistance - 0.03) {
+		command.moveStuckTicks = 0;
+		return;
+	}
+	command.moveStuckTicks = (command.moveStuckTicks || 0) + 1;
+}
+
+function interactionProgressCost(world: World, unit: Unit, field: FlowField, fallbackDistance: number): number {
+	const cost = flowCostAt(world, field, unit);
+	if (cost !== FLOW_UNREACHED) return cost;
+	return Math.ceil(fallbackDistance * FLOW_BASE_COST);
+}
+
+function interactionProgressKey(target: Vec2, range: number): string {
+	const tile = worldTile(target);
+	return `${tile.x},${tile.y}:${Math.ceil(range * 10)}`;
+}
+
+function resetInteractionProgress(command: UnitCommand) {
+	command.moveStuckTicks = 0;
+	delete command.interactionBestCost;
+	delete command.interactionTargetKey;
 }
 
 function debugPathFromTarget(target: SteeringTarget): PathNode[] | null {

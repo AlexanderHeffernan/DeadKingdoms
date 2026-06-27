@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MAP_SIZE } from "../shared/config.js";
 import type { Building, ResourceNode, Unit, UnitCommand, World } from "../shared/types.js";
-import { ZombieUnit, type UnitSimulationContext } from "../shared/units/index.js";
+import { VillagerUnit, ZombieUnit, type UnitSimulationContext } from "../shared/units/index.js";
 import { findPath, findSharedPath, hasPathToInteractionRange, hasReasonableZombiePathToTarget, isWalkable, moveAroundSmallObstacle, moveNearTarget, moveWithPath, moveZombieSteered, moveZombieWithPath, resolveUnitSeparation, ZOMBIE_PATH_LOOKAHEAD_DISTANCE } from "./pathing.js";
 import { movePlayerUnitNearTarget, movePlayerUnitWithPath } from "./playerUnitPathing.js";
+import { command as issueWorldCommand } from "./world.js";
 
 function makeWorld(blocked: Array<{ x: number; y: number }> = []): World {
 	const occupancy = new Uint8Array(MAP_SIZE * MAP_SIZE);
@@ -1635,6 +1636,205 @@ test("player interaction pathing approaches resources without entering the block
 	assert.notDeepEqual({ x: Math.floor(unit.x), y: Math.floor(unit.y) }, { x: 12, y: 12 });
 });
 
+test("player interaction pathing does not vibrate along dense resource edges", () => {
+	const blocked = [];
+	for (let x = 20; x <= 44; x += 1) blocked.push({ x, y: 30 });
+	const blockedTiles = new Set(blocked.map((tile) => `${tile.x},${tile.y}`));
+	const world = makeWorld(blocked);
+	const target = { x: 30.5, y: 30.5 };
+	const unit = makeUnit(43.8, 32.3, "u-player-resource-edge");
+	unit.command = { type: "gather", targetId: "r-edge-tree" as ResourceNode["id"], resourceKind: "wood", progress: 0, path: null };
+	addUnits(world, [unit]);
+
+	let inRange = false;
+	for (let tick = 0; tick < 180; tick += 1) {
+		world.tick = tick;
+		inRange = movePlayerUnitNearTarget(world, unit, unit.command, target, 1.1, 0.32);
+		assert.equal(blockedTiles.has(`${Math.floor(unit.x)},${Math.floor(unit.y)}`), false);
+		if (inRange) break;
+	}
+
+	assert.equal(inRange, true);
+	assert.ok(distanceFrom(unit, target) <= 1.1);
+});
+
+test("villager gathering fills carried resources linearly", () => {
+	const tree: ResourceNode = {
+		id: "r-linear-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 12.4,
+		y: 12,
+		amount: 100,
+		maxAmount: 100,
+	};
+	const unit = makeUnit(12, 12, "u-linear-gather");
+	unit.command = { type: "gather", targetId: tree.id, resourceKind: "wood", progress: 0, path: null };
+	const behavior = new VillagerUnit();
+	const context = {
+		world: makeWorld(),
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		gatherTarget: () => tree,
+		gatherResource: () => "wood",
+		gatherTargetFor: () => ({ gatherAmountFor: (worker: { carryCapacity: number }) => worker.carryCapacity, gatherSecondsFor: () => 20 }),
+		gatherRange: () => 1.1,
+		isBuilding: (entity: unknown): entity is Building => !!entity && (entity as { kind?: string }).kind === "building",
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number }) => entity,
+		moveNearTarget: () => true,
+		emitActionSound: () => {},
+		maybeAutoReplenishBuilding: () => {},
+		deleteResource: () => {},
+		makeStump: () => {},
+		nearestDepot: () => null,
+		depositResource: () => {},
+		findNextResource: () => null,
+		findAlternateResource: () => null,
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, unit, 5);
+
+	assert.equal(unit.carried?.resource, "wood");
+	assert.equal(unit.carried?.amount, 5);
+	assert.equal(tree.amount, 95);
+	assert.equal(unit.command.type === "gather" ? unit.command.progress : 0, 5);
+
+	for (let i = 0; i < 3; i += 1) behavior.step(context, unit, 5);
+
+	assert.equal(unit.carried?.amount, 20);
+	assert.equal(tree.amount, 80);
+	assert.equal(unit.command.type === "gather" ? unit.command.progress : undefined, 0);
+});
+
+test("villager gathering retargets after a resource remains unreachable", () => {
+	const blockedTree: ResourceNode = {
+		id: "r-blocked-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 18,
+		y: 18,
+		amount: 100,
+		maxAmount: 100,
+	};
+	const alternateTree: ResourceNode = {
+		...blockedTree,
+		id: "r-alternate-tree" as ResourceNode["id"],
+		x: 16,
+		y: 18,
+	};
+	const unit = makeUnit(10, 18, "u-retarget-gather");
+	unit.command = { type: "gather", targetId: blockedTree.id, resourceKind: "wood", progress: 0, path: null, moveStuckTicks: 45 };
+	const behavior = new VillagerUnit();
+	const context = {
+		world: makeWorld(),
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		gatherTarget: () => blockedTree,
+		gatherResource: () => "wood",
+		gatherTargetFor: () => ({ gatherAmountFor: (worker: { carryCapacity: number }) => worker.carryCapacity, gatherSecondsFor: () => 20 }),
+		gatherRange: () => 1.1,
+		isBuilding: (entity: unknown): entity is Building => !!entity && (entity as { kind?: string }).kind === "building",
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number }) => entity,
+		moveNearTarget: () => false,
+		findAlternateResource: () => alternateTree,
+		emitActionSound: () => {},
+		maybeAutoReplenishBuilding: () => {},
+		deleteResource: () => {},
+		makeStump: () => {},
+		nearestDepot: () => null,
+		depositResource: () => {},
+		findNextResource: () => null,
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, unit, 0.1);
+
+	assert.equal(unit.command.type, "gather");
+	assert.equal(unit.command.type === "gather" ? unit.command.targetId : null, alternateTree.id);
+});
+
+test("gather command immediately retargets an unreachable resource", () => {
+	const world = makeWorld();
+	world.players["p-test"] = {
+		id: "p-test",
+		name: "Tester",
+		color: "#ffffff",
+		resources: { wood: 0, food: 0, ore: 0 },
+		autoReplenishFarms: true,
+		explored: new Set(),
+		population: 1,
+		popCap: 10,
+		workerCounts: { idle: 0, gathering: { wood: 0, food: 0, ore: 0 } },
+		defeated: false,
+		score: 0,
+		joinedAt: Date.now(),
+	};
+	const unit = makeUnit(10.5, 18.5, "u-immediate-retarget");
+	const blockedTree: ResourceNode = {
+		id: "r-command-blocked-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 18,
+		y: 18,
+		amount: 100,
+		maxAmount: 100,
+	};
+	const alternateTree: ResourceNode = {
+		id: "r-command-alternate-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 12,
+		y: 18,
+		amount: 100,
+		maxAmount: 100,
+	};
+	world.units[unit.id] = unit;
+	world.resources[blockedTree.id] = blockedTree;
+	world.resources[alternateTree.id] = alternateTree;
+	for (let dy = -1; dy <= 1; dy += 1) {
+		for (let dx = -1; dx <= 1; dx += 1) {
+			if (dx === 0 && dy === 0) continue;
+			const wall = {
+				id: `b-block-tree-${dx}-${dy}`,
+				kind: "building",
+				type: "wall",
+				ownerId: "p-test",
+				x: blockedTree.x + dx,
+				y: blockedTree.y + dy,
+				size: 1,
+				width: 1,
+				height: 1,
+				hp: 100,
+				maxHp: 100,
+				completed: true,
+				walkBlocking: true,
+				isComplete: () => true,
+				canBeGatheredBy: () => false,
+				canAcceptResource: () => false,
+			} as unknown as Building;
+			world.buildings[wall.id] = wall;
+		}
+	}
+
+	const result = issueWorldCommand(world, "p-test" as Unit["ownerId"], {
+		type: "gather",
+		playerId: "p-test" as Unit["ownerId"],
+		unitIds: [unit.id],
+		targetId: blockedTree.id,
+	});
+
+	assert.equal(result.ok, true);
+	assert.equal(unit.command.type, "gather");
+	assert.equal(unit.command.type === "gather" ? unit.command.targetId : null, alternateTree.id);
+});
+
 test("player pathing refreshes own gate access when a wall becomes a gate", () => {
 	const world = makeWorld([{ x: 12, y: 10 }]);
 	world.buildings["b-player-wall"] = {
@@ -1803,6 +2003,125 @@ test("player pathing routes around a solid wall end without edge vibration", () 
 	assert.equal(arrived, units.length);
 	assert.ok(units.every((unit) => unit.y < 30));
 	assert.ok(units.every((unit) => distanceFrom(unit, target) < 4));
+});
+
+test("player formation pathing settles near an obstructed personal slot", () => {
+	const world = makeWorld([{ x: 21, y: 20 }]);
+	const unit = makeUnit(20.5, 20.5, "u-obstructed-formation-slot");
+	unit.command = {
+		type: "move",
+		x: 20.5,
+		y: 20.5,
+		path: null,
+		pathCrowd: 80,
+		moveGroupId: "player-obstructed-formation-slot",
+		moveGroupTarget: { x: 20.5, y: 20.5 },
+		formationTarget: { x: 22.5, y: 20.5 },
+	};
+	addUnits(world, [unit]);
+
+	let arrived = false;
+	for (let tick = 0; tick < 8; tick += 1) {
+		world.tick = tick;
+		if (unit.command.type === "move") arrived = movePlayerUnitWithPath(world, unit, unit.command, 0.32);
+		if (arrived) break;
+	}
+
+	assert.equal(arrived, true);
+	assert.notDeepEqual({ x: Math.floor(unit.x), y: Math.floor(unit.y) }, { x: 21, y: 20 });
+	assert.ok(distanceFrom(unit, { x: 22.5, y: 20.5 }) <= 2.4);
+});
+
+test("player formation pathing settles near a close personal slot after no progress", () => {
+	const world = makeWorld();
+	const unit = makeUnit(20.5, 20.5, "u-close-formation-slot");
+	unit.command = {
+		type: "move",
+		x: 20.5,
+		y: 20.5,
+		path: null,
+		pathCrowd: 80,
+		moveGroupId: "player-close-formation-slot",
+		moveGroupTarget: { x: 20.5, y: 20.5 },
+		formationTarget: { x: 22.5, y: 20.5 },
+	};
+	addUnits(world, [unit]);
+
+	let arrived = false;
+	for (let tick = 0; tick < 4; tick += 1) {
+		world.tick = tick;
+		if (unit.command.type === "move") arrived = movePlayerUnitWithPath(world, unit, unit.command, 0);
+		if (arrived) break;
+	}
+
+	assert.equal(arrived, true);
+	assert.ok(distanceFrom(unit, { x: 22.5, y: 20.5 }) <= 2.8);
+});
+
+test("move command places formation slots outside dense resource clutter", () => {
+	const world = makeWorld();
+	world.players["p-test"] = {
+		id: "p-test",
+		name: "Tester",
+		color: "#ffffff",
+		resources: { wood: 0, food: 0, ore: 0 },
+		autoReplenishFarms: true,
+		explored: new Set(),
+		population: 16,
+		popCap: 20,
+		workerCounts: { idle: 0, gathering: { wood: 0, food: 0, ore: 0 } },
+		defeated: false,
+		score: 0,
+		joinedAt: Date.now(),
+	};
+	const unitIds = [];
+	for (let i = 0; i < 16; i += 1) {
+		const unit = makeUnit(10 + (i % 4), 10 + Math.floor(i / 4), `u-formation-clutter-${i}`);
+		unit.type = "soldier";
+		world.units[unit.id] = unit;
+		unitIds.push(unit.id);
+	}
+	const blockedTiles = new Set<string>();
+	let resourceIndex = 0;
+	for (let y = 18; y <= 23; y += 1) {
+		for (let x = 18; x <= 23; x += 1) {
+			const resource: ResourceNode = {
+				id: `r-formation-clutter-${resourceIndex}` as ResourceNode["id"],
+				kind: "resource",
+				type: "tree",
+				resource: "wood",
+				x,
+				y,
+				amount: 100,
+				maxAmount: 100,
+			};
+			world.resources[resource.id] = resource;
+			blockedTiles.add(`${x},${y}`);
+			resourceIndex += 1;
+		}
+	}
+
+	const result = issueWorldCommand(world, "p-test" as Unit["ownerId"], {
+		type: "move",
+		playerId: "p-test" as Unit["ownerId"],
+		unitIds,
+		x: 20.5,
+		y: 20.5,
+	});
+
+	assert.equal(result.ok, true);
+	const formationTargets = Object.values(world.units)
+		.map((unit) => unit.command.type === "move" ? unit.command.formationTarget : undefined)
+		.filter((target): target is { x: number; y: number } => !!target);
+	assert.ok(formationTargets.length > 0);
+	for (const target of formationTargets) {
+		const tile = { x: Math.floor(target.x), y: Math.floor(target.y) };
+		for (let dy = -1; dy <= 1; dy += 1) {
+			for (let dx = -1; dx <= 1; dx += 1) {
+				assert.equal(blockedTiles.has(`${tile.x + dx},${tile.y + dy}`), false);
+			}
+		}
+	}
 });
 
 test("player pathing cannot pass through enemy gates", () => {

@@ -96,6 +96,10 @@ const SERVER_PERF_SAMPLE_LIMIT = TICK_RATE * 120;
 const TARGET_UNIT_GRID_CELL_SIZE = 4;
 const COMMAND_CLUSTER_DISTANCE = 12;
 const RALLY_GATHER_RADIUS = 6;
+const GATHER_RETARGET_CANDIDATE_LIMIT = 20;
+const FORMATION_SEARCH_RADIUS = 16;
+const FORMATION_ADJACENT_BLOCK_PENALTY = 5;
+const FORMATION_NEARBY_BLOCK_PENALTY = 1.2;
 function createEmptyWorkerCounts() {
 	return {
 		idle: 0,
@@ -896,6 +900,8 @@ function createSimulationContext(
 			nearestDepot(world, ownerId, resource, source),
 		findNextResource: (unit, resourceKind) =>
 			findNextResource(world, unit, resourceKind),
+		findAlternateResource: (unit, resourceKind, currentTarget) =>
+			findAlternateResource(world, unit, resourceKind, currentTarget),
 		maybeAutoReplenishBuilding: (building) =>
 			maybeAutoReplenishBuilding(world, building),
 		deleteResource: (resource) => {
@@ -1767,19 +1773,22 @@ function commandGather(
 		depotGatherTarget;
 	if (!resource) return { ok: false, error: "Invalid resource." };
 	let assigned = false;
+	const reachability = createGatherReachabilityCache();
 	forOwnUnits(world, playerId, body.unitIds, (unit) => {
 		if (unitBehavior(unit).canGather) {
+			const assignedResource = reachableGatherResourceForUnit(world, unit, resource, reachability);
+			if (!assignedResource) return;
 			if (
-				isBuilding(resource) &&
-				!buildingHasGathererCapacity(world, resource, unit)
+				isBuilding(assignedResource) &&
+				!buildingHasGathererCapacity(world, assignedResource, unit)
 			)
 				return;
 			setUnitCommand(world, unit, {
 				type: "gather",
-				targetId: resource.id,
+				targetId: assignedResource.id,
 				// Remember what this worker was after so we can auto-find another
 				// tree / ore vein / farm when the current target is gone.
-				resourceKind: gatherResource(resource),
+				resourceKind: gatherResource(assignedResource),
 				progress: 0,
 				path: null,
 			});
@@ -2206,9 +2215,8 @@ function nearestWalkablePoint(
 		x: clamp(Math.floor(point.x), 0, MAP_SIZE - 1),
 		y: clamp(Math.floor(point.y), 0, MAP_SIZE - 1),
 	};
-	if (isAvailableFormationTile(world, origin.x, origin.y, reserved))
-		return reserveFormationPoint(origin.x, origin.y, reserved);
-	for (let radius = 1; radius <= 16; radius += 1) {
+	let best: { x: number; y: number; score: number } | null = null;
+	for (let radius = 0; radius <= FORMATION_SEARCH_RADIUS; radius += 1) {
 		for (let y = origin.y - radius; y <= origin.y + radius; y += 1) {
 			for (let x = origin.x - radius; x <= origin.x + radius; x += 1) {
 				if (
@@ -2216,15 +2224,36 @@ function nearestWalkablePoint(
 					Math.abs(y - origin.y) !== radius
 				)
 					continue;
-				if (isAvailableFormationTile(world, x, y, reserved))
-					return reserveFormationPoint(x, y, reserved);
+				if (!isAvailableFormationTile(world, x, y, reserved)) continue;
+				const score = formationTileScore(world, point, x, y);
+				if (!best || score < best.score) best = { x, y, score };
 			}
 		}
+		if (best && formationTileClutter(world, best.x, best.y) === 0) break;
 	}
+	if (best) return reserveFormationPoint(best.x, best.y, reserved);
 	return {
 		x: clamp(point.x, 0.2, MAP_SIZE - 0.2),
 		y: clamp(point.y, 0.2, MAP_SIZE - 0.2),
 	};
+}
+
+function formationTileScore(world: World, point: Vec2, x: number, y: number) {
+	return Math.hypot(x + 0.5 - point.x, y + 0.5 - point.y) + formationTileClutter(world, x, y);
+}
+
+function formationTileClutter(world: World, x: number, y: number) {
+	let score = 0;
+	for (let dy = -2; dy <= 2; dy += 1) {
+		for (let dx = -2; dx <= 2; dx += 1) {
+			if (dx === 0 && dy === 0) continue;
+			if (!occupied(world, x + dx, y + dy)) continue;
+			score += Math.abs(dx) <= 1 && Math.abs(dy) <= 1
+				? FORMATION_ADJACENT_BLOCK_PENALTY
+				: FORMATION_NEARBY_BLOCK_PENALTY;
+		}
+	}
+	return score;
 }
 
 function isAvailableFormationTile(
@@ -2598,6 +2627,83 @@ function findNextResource(
 	return findNextResourceNear(world, unit, resourceKind, unit.ownerId, unit);
 }
 
+type GatherReachabilityCache = {
+	reachable: Map<string, boolean>;
+	alternates: Map<string, ResourceNode | Building | null>;
+};
+
+type RankedGatherCandidate = {
+	candidate: ResourceNode | Building;
+	score: number;
+};
+
+function createGatherReachabilityCache(): GatherReachabilityCache {
+	return {
+		reachable: new Map(),
+		alternates: new Map(),
+	};
+}
+
+function reachableGatherResourceForUnit(
+	world: World,
+	unit: Unit,
+	resource: ResourceNode | Building,
+	cache?: GatherReachabilityCache,
+): ResourceNode | Building | null {
+	if (canReachGatherResource(world, unit, resource, cache)) return resource;
+	return findAlternateResource(world, unit, gatherResource(resource), resource, cache);
+}
+
+function findAlternateResource(
+	world: World,
+	unit: Unit,
+	resourceKind: ResourceType,
+	currentTarget: ResourceNode | Building,
+	cache?: GatherReachabilityCache,
+): ResourceNode | Building | null {
+	const cacheKey = gatherAlternateCacheKey(unit, resourceKind, currentTarget);
+	const cached = cache?.alternates.get(cacheKey);
+	if (cached !== undefined) return cached;
+	const depot = nearestDepot(world, unit.ownerId, resourceKind, unit);
+	const currentPoint = isBuilding(currentTarget) ? centerOf(currentTarget) : currentTarget;
+	const candidates = rankedGatherResourceCandidates(world, unit, resourceKind, currentTarget, currentPoint, depot);
+	for (const { candidate } of candidates) {
+		if (canReachGatherResource(world, unit, candidate, cache)) {
+			cache?.alternates.set(cacheKey, candidate);
+			return candidate;
+		}
+	}
+	cache?.alternates.set(cacheKey, null);
+	return null;
+}
+
+function canReachGatherResource(world: World, unit: Unit, resource: ResourceNode | Building, cache?: GatherReachabilityCache) {
+	const cacheKey = gatherReachabilityCacheKey(unit, resource);
+	const cached = cache?.reachable.get(cacheKey);
+	if (cached !== undefined) return cached;
+	const point = isBuilding(resource) ? centerOf(resource) : resource;
+	const range = isBuilding(resource) ? resource.gatherRange : 1.1;
+	const reachable = hasPathToInteractionRange(world, unit, point, range);
+	cache?.reachable.set(cacheKey, reachable);
+	return reachable;
+}
+
+function gatherReachabilityCacheKey(unit: Unit, resource: ResourceNode | Building) {
+	const tile = {
+		x: Math.floor(unit.x),
+		y: Math.floor(unit.y),
+	};
+	return `${tile.x},${tile.y}:${resource.id}`;
+}
+
+function gatherAlternateCacheKey(unit: Unit, resourceKind: ResourceType, currentTarget: ResourceNode | Building) {
+	const tile = {
+		x: Math.floor(unit.x),
+		y: Math.floor(unit.y),
+	};
+	return `${tile.x},${tile.y}:${resourceKind}:${currentTarget.id}`;
+}
+
 function findNextResourceNear(
 	world: World,
 	source: { x: number; y: number },
@@ -2632,6 +2738,60 @@ function findNextResourceNear(
 		}
 	}
 	return best;
+}
+
+function rankedGatherResourceCandidates(
+	world: World,
+	unit: Unit,
+	resourceKind: ResourceType,
+	currentTarget: ResourceNode | Building,
+	currentPoint: Vec2,
+	depot: Building | null,
+): RankedGatherCandidate[] {
+	const ranked: RankedGatherCandidate[] = [];
+	for (const resource of Object.values(world.resources)) {
+		if (resource.id === currentTarget.id || resource.amount <= 0 || resource.resource !== resourceKind) continue;
+		addRankedGatherCandidate(ranked, {
+			candidate: resource,
+			score: gatherRetargetScore(unit, resource, currentPoint, depot),
+		});
+	}
+	for (const building of Object.values(world.buildings)) {
+		if (
+			building.id !== currentTarget.id &&
+			building.canBeGatheredBy(unit.ownerId) &&
+			building.gatherResource === resourceKind &&
+			!building.gatherExhausted &&
+			buildingHasGathererCapacity(world, building, unit)
+		) {
+			addRankedGatherCandidate(ranked, {
+				candidate: building,
+				score: gatherRetargetScore(unit, centerOf(building), currentPoint, depot),
+			});
+		}
+	}
+	return ranked.sort((a, b) => a.score - b.score);
+}
+
+function gatherRetargetScore(unit: Unit, point: Vec2, currentPoint: Vec2, depot: Building | null) {
+	const depotScore = depot ? distance(centerOf(depot), point) * 0.45 : 0;
+	return distance(unit, point) + distance(currentPoint, point) * 0.65 + depotScore;
+}
+
+function addRankedGatherCandidate(ranked: RankedGatherCandidate[], candidate: RankedGatherCandidate) {
+	if (ranked.length < GATHER_RETARGET_CANDIDATE_LIMIT) {
+		ranked.push(candidate);
+		return;
+	}
+	let worstIndex = 0;
+	let worstScore = ranked[0]!.score;
+	for (let index = 1; index < ranked.length; index += 1) {
+		if (ranked[index]!.score > worstScore) {
+			worstIndex = index;
+			worstScore = ranked[index]!.score;
+		}
+	}
+	if (candidate.score < worstScore) ranked[worstIndex] = candidate;
 }
 
 function assignRallyCommand(

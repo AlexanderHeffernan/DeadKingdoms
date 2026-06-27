@@ -3,6 +3,8 @@ import type { UnitSimulationContext } from "./BaseUnit.js";
 import type { Building, ResourceNode, Unit, UnitCommand } from "../types.js";
 
 const TREE_STUMP_THRESHOLD = 36;
+const GATHER_RETARGET_STUCK_TICKS = 45;
+const GATHER_EPSILON = 0.001;
 
 export class VillagerUnit extends BaseUnit {
 	public static readonly type = "villager";
@@ -42,7 +44,7 @@ export class VillagerUnit extends BaseUnit {
 
 	private stepGather(context: UnitSimulationContext, unit: Unit, command: Extract<UnitCommand, { type: "gather" }>, dt: number) {
 		let resource: ResourceNode | Building | null = context.gatherTarget(command.targetId, unit.ownerId);
-		if (unit.carried && unit.carried.amount > 0) {
+		if (this.hasReadyGatherLoad(unit, command)) {
 			this.depositCarriedResource(context, unit, command, dt);
 			return;
 		}
@@ -62,7 +64,8 @@ export class VillagerUnit extends BaseUnit {
 		const targetPoint = context.isBuilding(resource) ? context.centerOf(resource) : resource;
 		const gatherRange = context.gatherRange(resource);
 		if (context.distance(unit, targetPoint) > gatherRange) {
-			context.moveNearTarget(unit, command, targetPoint, gatherRange, this.speed * dt);
+			const arrived = context.moveNearTarget(unit, command, targetPoint, gatherRange, this.speed * dt);
+			if (!arrived) this.retargetBlockedGather(context, unit, command, resource);
 			return;
 		}
 		this.gatherFromTarget(context, unit, command, resource, targetPoint, dt);
@@ -90,14 +93,49 @@ export class VillagerUnit extends BaseUnit {
 	) {
 		unit.workFlash = 0.25;
 		this.emitGatherSound(context, resource, targetPoint);
-		command.progress = (command.progress || 0) + dt;
 		const gatherTarget = context.gatherTargetFor(resource);
-		if (command.progress < this.gatherSeconds(gatherTarget)) return;
-		const amount = Math.min(this.gatherAmount(gatherTarget), resource.amount!);
-		resource.amount! -= amount;
-		unit.carried = { resource: context.gatherResource(resource), amount };
-		command.progress = 0;
-		this.handleGatheredOutTarget(context, resource);
+		const loadTarget = this.gatherAmount(gatherTarget);
+		const gatherSeconds = this.gatherSeconds(gatherTarget);
+		const carriedResource = context.gatherResource(resource);
+		const carriedAmount = unit.carried?.resource === carriedResource ? unit.carried.amount : 0;
+		const remainingLoad = Math.max(0, loadTarget - carriedAmount);
+		const gathered = Math.min((loadTarget / gatherSeconds) * dt, remainingLoad, resource.amount!);
+		if (gathered <= 0) {
+			command.progress = 0;
+			this.handleGatheredOutTarget(context, resource);
+			return;
+		}
+		resource.amount! -= gathered;
+		const nextAmount = carriedAmount + gathered;
+		unit.carried = { resource: carriedResource, amount: nextAmount };
+		if (nextAmount + GATHER_EPSILON >= loadTarget || resource.amount! <= GATHER_EPSILON) {
+			command.progress = 0;
+			this.handleGatheredOutTarget(context, resource);
+			return;
+		}
+		command.progress = Math.min(gatherSeconds, (nextAmount / loadTarget) * gatherSeconds);
+	}
+
+	private hasReadyGatherLoad(unit: Unit, command: Extract<UnitCommand, { type: "gather" }>) {
+		return !!unit.carried && unit.carried.amount > GATHER_EPSILON && (command.progress || 0) <= 0;
+	}
+
+	private retargetBlockedGather(
+		context: UnitSimulationContext,
+		unit: Unit,
+		command: Extract<UnitCommand, { type: "gather" }>,
+		resource: ResourceNode | Building,
+	) {
+		if ((command.moveStuckTicks || 0) < GATHER_RETARGET_STUCK_TICKS) return;
+		const next = context.findAlternateResource(unit, command.resourceKind, resource);
+		if (!next) return;
+		context.setCommand(unit, {
+			type: "gather",
+			targetId: next.id,
+			resourceKind: command.resourceKind,
+			progress: 0,
+			path: null,
+		});
 	}
 
 	private emitGatherSound(context: UnitSimulationContext, resource: ResourceNode | Building, point: { x: number; y: number }) {
@@ -111,7 +149,7 @@ export class VillagerUnit extends BaseUnit {
 		if (context.isBuilding(resource)) {
 			resource.onGatheredOut();
 			context.maybeAutoReplenishBuilding(resource);
-		} else if (resource.amount! <= 0) {
+		} else if (resource.amount! <= GATHER_EPSILON) {
 			context.deleteResource(resource);
 		} else if (resource.type === "tree" && resource.amount! <= TREE_STUMP_THRESHOLD) {
 			context.makeStump(resource);

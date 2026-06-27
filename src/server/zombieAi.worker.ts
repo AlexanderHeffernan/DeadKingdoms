@@ -192,6 +192,7 @@ function createZombieSimulationContext(
 		isBuilding: (entity): entity is Building => entity?.kind === "building",
 		nearestDepot: () => null,
 		findNextResource: () => null,
+		findAlternateResource: () => null,
 		maybeAutoReplenishBuilding: () => {},
 		deleteResource: () => {},
 		makeStump: () => {},

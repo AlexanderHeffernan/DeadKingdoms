@@ -9,6 +9,9 @@ export interface UnitCommandBase {
 	moveGroupId?: string;
 	moveGroupTarget?: Vec2;
 	moveStuckTicks?: number;
+	moveBestDistance?: number;
+	interactionTargetKey?: string;
+	interactionBestCost?: number;
 	/** World tick of the last executed path search; used to throttle replans when no usable path exists. */
 	pathRetryTick?: number;
 }
