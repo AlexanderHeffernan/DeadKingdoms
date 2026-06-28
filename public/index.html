@@ -9,6 +9,7 @@
 		<link rel="stylesheet" href="/hud.css?v=3" />
 		<link rel="stylesheet" href="/admin.css?v=3" />
 		<link rel="stylesheet" href="/settings.css?v=3" />
+		<link rel="stylesheet" href="/tutorial.css?v=1" />
 	</head>
 	<body>
 		<div id="mobile-not-supported" class="mobile-not-supported">
@@ -128,6 +129,16 @@
 				height="720"
 				draggable="false"
 			></canvas>
+			<section id="tutorialPanel" class="tutorial-panel hidden" aria-labelledby="tutorialTitle">
+				<header class="tutorial-header">
+					<h2 id="tutorialTitle">Getting Started</h2>
+					<button id="tutorialCollapseButton" class="tutorial-collapse" type="button" aria-expanded="true" aria-controls="tutorialContent" aria-label="Collapse tutorial">−</button>
+				</header>
+				<div id="tutorialContent">
+					<ul id="tutorialList" class="tutorial-list" aria-live="polite"></ul>
+					<button id="tutorialSkipButton" class="tutorial-skip" type="button">Skip tutorial</button>
+				</div>
+			</section>
 			<section class="hud top-left">
 				<div id="resources" class="resources"></div>
 			</section>
@@ -246,6 +257,11 @@
 							/>
 							<strong id="textScaleValue">100%</strong>
 						</label>
+						<h3>Tutorial</h3>
+						<button id="restartTutorialButton" class="settings-action-option" type="button">
+							<strong>Show tutorial again</strong>
+							<span>Restart the getting started checklist.</span>
+						</button>
 						<h3>Panning</h3>
 						<label class="settings-toggle-option" for="throwPanningInput">
 							<span>Throw panning</span>
