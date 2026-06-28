@@ -11,7 +11,9 @@ export class MusicPlayer {
 	private masterVolume = 1;
 	private musicVolume = 1;
 
-	constructor(private readonly sfx: SoundEffects) {}
+	constructor(private readonly sfx: SoundEffects) {
+		this.sfx.setMuted(this.muted);
+	}
 
 	async init() {
 		this.audio.muted = this.muted;
@@ -41,6 +43,7 @@ export class MusicPlayer {
 		this.muted = event?.target instanceof HTMLInputElement ? event.target.checked : !this.muted;
 		localStorage.setItem(MUSIC_MUTED_STORAGE_KEY, String(this.muted));
 		this.audio.muted = this.muted;
+		this.sfx.setMuted(this.muted);
 		this.applyVolume();
 		if (this.muted) {
 			this.audio.pause();
