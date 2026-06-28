@@ -206,3 +206,38 @@
 	outline: 2px solid #e9bd59;
 	outline-offset: 4px;
 }
+
+.settings-action-option {
+	width: 100%;
+	min-height: 56px;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	justify-content: center;
+	gap: 4px;
+	padding: 8px 10px;
+	border: 3px solid #5f4a32;
+	border-right-color: #211914;
+	border-bottom-color: #211914;
+	background: rgb(10 10 14 / 0.94);
+	color: #cfc7b7;
+	cursor: pointer;
+	font: inherit;
+	text-align: left;
+}
+
+.settings-action-option strong {
+	color: #e9bd59;
+	font-size: var(--ui-text-md);
+}
+
+.settings-action-option span {
+	font-size: var(--ui-text-sm);
+}
+
+.settings-action-option:hover,
+.settings-action-option:focus-visible {
+	background: rgb(79 61 24 / 0.65);
+	outline: 2px solid #e9bd59;
+	outline-offset: 2px;
+}

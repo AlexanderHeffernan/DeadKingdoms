@@ -18,6 +18,7 @@ import { GlobalLeaderboardModal } from "./globalLeaderboardModal.js";
 import { HomeScreen } from "./homeScreen.js";
 import { SelectionController } from "./selectionController.js";
 import { BuildPlacement } from "./buildPlacement.js";
+import { TutorialController } from "./tutorial/tutorialController.js";
 import type { Building, BuildingType, CommandPayload, Corpse, EntityId, ResourceNode, SnapshotMessage, Unit, UnitType } from "../../src/shared/types.js";
 import type { SessionCredentials } from "./api.js";
 import type { ClientCommand, GameState, ViewState } from "./clientTypes.js";
@@ -62,12 +63,19 @@ const cameraDragPan = new CameraDragPan();
 const cameraEdgeScroll = new CameraEdgeScroll();
 const cameraPanThrow = new CameraPanThrow();
 const music = new MusicPlayer(sfx);
-const settings = new SettingsController(music, sfx, cameraDragPan, cameraEdgeScroll, cameraPanThrow);
 const snapshots = new SnapshotStore(state);
 const snapshotPreview = new SnapshotPreview(snapshots);
 const globalLeaderboard = new GlobalLeaderboardModal(snapshotPreview);
 const selection = new SelectionController(state, view, sfx);
 const buildPlacement = new BuildPlacement(state, view);
+const tutorial = new TutorialController(
+	document.getElementById("tutorialPanel")!,
+	document.getElementById("tutorialList")!,
+	document.getElementById("tutorialSkipButton") as HTMLButtonElement,
+	document.getElementById("tutorialCollapseButton") as HTMLButtonElement,
+	document.getElementById("tutorialContent")!,
+);
+const settings = new SettingsController(music, sfx, cameraDragPan, cameraEdgeScroll, cameraPanThrow, () => tutorial.restart());
 
 const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const DEV_COMMAND_BUFFER_LENGTH = 40;
@@ -351,6 +359,7 @@ function enterGame() {
 	renderer.resize();
 	music.start();
 	connectEvents();
+	tutorial.start();
 }
 
 function onDevShortcutKeyDown(event: KeyboardEvent) {
@@ -753,6 +762,7 @@ async function issue(payload: ClientCommand, options: { silent?: boolean } = {})
 	const credentials = currentCredentials();
 	if (!credentials) return { ok: false };
 	const result = await sendCommand({ ...payload, playerId: credentials.playerId } as unknown as CommandPayload, credentials.sessionToken);
+	if (result.ok) tutorial.handleEvent({ type: "commandSucceeded", command: payload });
 	if (!result.ok && !options.silent) {
 		ui.showToast(result.error || "Command failed.");
 		sfx.play(result.error?.includes("Population") ? "population_blocked" : "ui_error");

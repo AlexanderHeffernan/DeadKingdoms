@@ -26,6 +26,7 @@ export class SettingsController {
 		private readonly cameraDragPan: CameraDragPan,
 		private readonly cameraEdgeScroll: CameraEdgeScroll,
 		private readonly cameraPanThrow: CameraPanThrow,
+		private readonly restartTutorial: () => void,
 	) {}
 
 	init() {
@@ -68,6 +69,10 @@ export class SettingsController {
 		});
 		document.getElementById("edgeScrollSpeedInput")?.addEventListener("input", (event) => {
 			if (event.target instanceof HTMLInputElement) this.setEdgeScrollSpeed(Number(event.target.value));
+		});
+		document.getElementById("restartTutorialButton")?.addEventListener("click", () => {
+			this.restartTutorial();
+			this.closeModal();
 		});
 		document.addEventListener("keydown", (event) => this.closeModalOnEscape(event));
 		window.addEventListener("resize", () => this.updateResponsiveControls());
