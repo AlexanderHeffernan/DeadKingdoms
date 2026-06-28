@@ -121,6 +121,7 @@ export class SoundEffects {
 	private underAttackActive = false;
 	private lastOwnedDamageAt = -Infinity;
 	private ready = false;
+	private muted = false;
 	private masterVolume = 1;
 	private sfxVolume = 1;
 
@@ -129,6 +130,13 @@ export class SoundEffects {
 	setVolume(masterVolume: number, sfxVolume: number) {
 		this.masterVolume = clamp(masterVolume, 0, 1);
 		this.sfxVolume = clamp(sfxVolume, 0, 1);
+	}
+
+	setMuted(muted: boolean) {
+		this.muted = muted;
+		if (!muted) return;
+		this.stopZombieIdle();
+		this.stopAllHornLoops();
 	}
 
 	unlock() {
@@ -322,6 +330,7 @@ export class SoundEffects {
 	}
 
 	private effectiveVolume(name: SoundEffectName, options: PlayOptions) {
+		if (this.muted) return 0;
 		const def = SOUND_EFFECTS[name];
 		const master = def.space === "ui" ? UI_SFX_MASTER_VOLUME : WORLD_SFX_MASTER_VOLUME;
 		const base = def.volume * (options.volume ?? 1) * master;
