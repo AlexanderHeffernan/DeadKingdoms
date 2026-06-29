@@ -3,6 +3,7 @@ import { CameraEdgeScroll, DEFAULT_EDGE_SCROLL_SPEED, MAX_EDGE_SCROLL_SPEED, MIN
 import type { CameraPanThrow } from "./cameraPanThrow.js";
 import type { MusicPlayer } from "./musicPlayer.js";
 import type { SoundEffects } from "./sfx.js";
+import type { ActionHotkeySettings } from "./actionHotkeySettings.js";
 
 const TEXT_SCALE_STORAGE_KEY = "rtsTextScale";
 const MASTER_VOLUME_STORAGE_KEY = "rtsMasterVolume";
@@ -27,6 +28,7 @@ export class SettingsController {
 		private readonly cameraEdgeScroll: CameraEdgeScroll,
 		private readonly cameraPanThrow: CameraPanThrow,
 		private readonly restartTutorial: () => void,
+		private readonly actionHotkeySettings: ActionHotkeySettings,
 	) {}
 
 	init() {
@@ -39,6 +41,7 @@ export class SettingsController {
 	}
 
 	wireDom() {
+		this.actionHotkeySettings.wireDom();
 		document.getElementById("settingsButton")?.addEventListener("click", (event) => this.openModal(event));
 		document.getElementById("settingsCloseButton")?.addEventListener("click", () => this.closeModal());
 		document.getElementById("settingsMuteButton")?.addEventListener("change", (event) => this.music.toggleMute(event));

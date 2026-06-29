@@ -7,18 +7,7 @@ import { escapeHtml, label } from "./dom.js";
 import type { HoverCard } from "./hoverCard.js";
 import { DEFAULT_HUD_ICON_MAX_SIZE, DEFAULT_HUD_ICON_OFFSET, icon, type HudIconOffset } from "./icons.js";
 import { resourceIcon } from "./resources.js";
-
-const BUILD_SHORTCUTS = {
-	house: "H",
-	farm: "F",
-	barracks: "B",
-	watchTower: "T",
-	wall: "W",
-	gate: "G",
-	lumberCamp: "L",
-	foodDepot: "D",
-	miningCamp: "M",
-};
+import type { ActionHotkeys } from "../actionHotkeys.js";
 
 export class BottomPanel implements GameUiComponent {
 	private readonly state: GameState;
@@ -28,12 +17,16 @@ export class BottomPanel implements GameUiComponent {
 	private readonly hoverCard: HoverCard;
 	private actionSignature = "";
 
-	constructor(state: GameState, actions: UIActions, selection: HTMLElement, actionsEl: HTMLElement, hoverCard: HoverCard) {
+	constructor(state: GameState, actions: UIActions, selection: HTMLElement, actionsEl: HTMLElement, hoverCard: HoverCard, private readonly actionHotkeys: ActionHotkeys) {
 		this.state = state;
 		this.actions = actions;
 		this.selection = selection;
 		this.actionsEl = actionsEl;
 		this.hoverCard = hoverCard;
+		this.actionHotkeys.onChange(() => {
+			this.actionSignature = "";
+			if (this.state.snapshot) this.render(this.state.snapshot);
+		});
 	}
 
 	render(snapshot: ClientSnapshot) {
@@ -168,7 +161,6 @@ export class BottomPanel implements GameUiComponent {
 					label: def.label,
 					description: def.description,
 					cost: def.cost,
-					shortcut: BUILD_SHORTCUTS[buildingType as keyof typeof BUILD_SHORTCUTS],
 					run: () => this.actions.setBuildMode(buildingType),
 				}));
 			}
@@ -178,7 +170,6 @@ export class BottomPanel implements GameUiComponent {
 				spriteName: "scout",
 				label: scouts.some((unit) => unit.hornActive) ? "Stop horn" : "Blow horn",
 				cost: {},
-				shortcut: "O",
 				run: () => this.actions.blowHorn(scouts.map((unit) => unit.id)),
 			}));
 		}
@@ -186,17 +177,17 @@ export class BottomPanel implements GameUiComponent {
 			if (building.gatherResource) {
 				const player = this.state.snapshot!.players[this.state.playerId!];
 				if (!player) continue;
-				actions.push(new ButtonAction({ spriteName: building.type, label: player.autoReplenishFarms ? "Auto reseed: on" : "Auto reseed: off", cost: {}, displayCost: { wood: 45 }, shortcut: "A", run: () => this.actions.toggleAutoFarm() }));
-				actions.push(new ButtonAction({ spriteName: building.type, label: "Reseed farm", cost: { wood: 45 }, shortcut: "R", run: () => this.actions.replenishFarm(building.id), forceDisabled: !building.exhausted && (building.amount ?? 0) > 0 }));
+				actions.push(new ButtonAction({ spriteName: building.type, label: player.autoReplenishFarms ? "Auto reseed: on" : "Auto reseed: off", cost: {}, displayCost: { wood: 45 }, run: () => this.actions.toggleAutoFarm() }));
+				actions.push(new ButtonAction({ spriteName: building.type, label: "Reseed farm", cost: { wood: 45 }, run: () => this.actions.replenishFarm(building.id), forceDisabled: !building.exhausted && (building.amount ?? 0) > 0 }));
 			}
 			const training = TRAINING[building.type as keyof typeof TRAINING];
 			if (training) {
 				for (const train of training) {
-					actions.push(new ButtonAction({ spriteName: train.unitType, label: train.label, cost: train.cost, shortcut: train.shortcut, run: () => this.actions.train(building.id, train.unitType), forceDisabled: (building.queue?.length ?? 0) >= 10 }));
+					actions.push(new ButtonAction({ spriteName: train.unitType, label: train.label, cost: train.cost, run: () => this.actions.train(building.id, train.unitType), forceDisabled: (building.queue?.length ?? 0) >= 10 }));
 				}
 			}
 			if (training?.length) {
-				actions.push(new ButtonAction({ spriteName: training[0]?.unitType, label: "Set rally point", cost: {}, shortcut: "Y", run: () => this.actions.setRallyMode(building.id) }));
+				actions.push(new ButtonAction({ spriteName: training[0]?.unitType, label: "Set rally point", cost: {}, run: () => this.actions.setRallyMode(building.id) }));
 			}
 		}
 		for (const building of ownedAnyBuildings) {
@@ -208,6 +199,11 @@ export class BottomPanel implements GameUiComponent {
 	private renderActionSet(actions: ActionDef[]) {
 		const player = this.state.snapshot?.players[this.state.playerId || ""];
 		if (!player) return;
+		this.actionHotkeys.setActions(actions.map((action) => ({
+			run: () => action.run(),
+			enabled: !action.forceDisabled && canAfford(player.resources, action.cost || {}),
+		})));
+		actions.forEach((action, position) => action.setShortcut(this.actionHotkeys.getDisplayKey(position)));
 		const signature = JSON.stringify(actions.map((action) => ({
 			type: action.kind,
 			spriteName: action.spriteName,
@@ -377,6 +373,8 @@ interface TooltipAction {
 	getTooltip(): ActionTooltip;
 	getIconSpriteName(): string;
 	getIconMaxSize(): number;
+	setShortcut(shortcut: string): void;
+	run(): void;
 }
 
 type ActionTooltip = {
@@ -407,7 +405,7 @@ class ButtonAction implements TooltipAction {
 	readonly description: string;
 	readonly cost: Record<string, number>;
 	readonly displayCost: Record<string, number> | null;
-	readonly shortcut: string;
+	private shortcut: string;
 	readonly forceDisabled: boolean;
 	private readonly onRun: () => void;
 
@@ -429,6 +427,10 @@ class ButtonAction implements TooltipAction {
 			cost: formatCost(this.displayCost || this.cost),
 			...(this.shortcut ? { shortcut: this.shortcut } : {}),
 		};
+	}
+
+	setShortcut(shortcut: string) {
+		this.shortcut = shortcut;
 	}
 
 	run() {

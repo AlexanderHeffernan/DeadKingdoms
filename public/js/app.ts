@@ -7,11 +7,11 @@ import { CameraPanThrow } from "./cameraPanThrow.js";
 import { SoundEffects, buildingCommandSound, commandSoundForTarget } from "./sfx.js";
 import { UI } from "./ui.js";
 import { TRAINING } from "./constants.js";
-import { BUILDING_TYPES } from "../../src/shared/buildings/index.js";
-import { allUnitClasses, unitBehaviorFor } from "../../src/shared/unitRegistry.js";
 import { Logs } from "../../src/shared/logs.js";
 import { MusicPlayer } from "./musicPlayer.js";
 import { SettingsController } from "./settingsController.js";
+import { ActionHotkeys } from "./actionHotkeys.js";
+import { ActionHotkeySettings } from "./actionHotkeySettings.js";
 import { SnapshotStore } from "./snapshotStore.js";
 import { SnapshotPreview } from "./snapshotPreview.js";
 import { GlobalLeaderboardModal } from "./globalLeaderboardModal.js";
@@ -75,7 +75,9 @@ const tutorial = new TutorialController(
 	document.getElementById("tutorialCollapseButton") as HTMLButtonElement,
 	document.getElementById("tutorialContent")!,
 );
-const settings = new SettingsController(music, sfx, cameraDragPan, cameraEdgeScroll, cameraPanThrow, () => tutorial.restart());
+const actionHotkeys = new ActionHotkeys();
+const actionHotkeySettings = new ActionHotkeySettings(actionHotkeys);
+const settings = new SettingsController(music, sfx, cameraDragPan, cameraEdgeScroll, cameraPanThrow, () => tutorial.restart(), actionHotkeySettings);
 
 const ZOOM_STEPS = [0.2, 0.3, 0.4, 0.55, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const DEV_COMMAND_BUFFER_LENGTH = 40;
@@ -266,7 +268,7 @@ const ui = new UI(state, {
 		resetToJoin("Server restarted. Join again to start a fresh map.");
 		return "Server restarted.";
 	},
-});
+}, actionHotkeys);
 
 const home = new HomeScreen(
 	(result) => {
@@ -789,6 +791,7 @@ function pruneEffects() {
 
 function onKeyDown(event: KeyboardEvent) {
 	sfx.unlock();
+	if (actionHotkeys.handleKeyDown(event)) return;
 	if (document.getElementById("game")?.classList.contains("hidden") || (event.target as HTMLElement)?.matches?.("input, button")) return;
 	const key = event.key.toLowerCase();
 	if (key === "escape") {
@@ -822,80 +825,6 @@ function onKeyDown(event: KeyboardEvent) {
 		ui.render();
 		return;
 	}
-	const buildShortcuts: Record<string, string> = { h: "house", f: "farm", b: "barracks", t: "watchTower", w: "wall", g: "gate", l: "lumberCamp", d: "foodDepot", m: "miningCamp" };
-	if (buildShortcuts[key]) return startBuildShortcut(buildShortcuts[key] as BuildingType);
-	const shortcutUnit = unitTypeForShortcut(key);
-	if (shortcutUnit) return trainShortcut(shortcutUnit);
-	if (key === "r") return selectedFarmAction((farm) => issue({ type: "replenishFarm", farmId: farm.id }));
-	if (key === "a") return selectedFarmAction(() => issue({ type: "toggleAutoFarm" }));
-	if (key === "o") return blowHornForSelectedScouts();
-	if (key === "y") return setRallyForSelectedProduction();
-}
-
-function startBuildShortcut(buildingType: BuildingType) {
-	const hasBuilder = [...state.selectedIds].some((id) => {
-		const unit = state.snapshot?.units[id];
-		return unit?.ownerId === state.playerId && unitBehavior(unit).canBuild;
-	});
-	if (!view.instantBuildMode && !hasBuilder) {
-		sfx.play("ui_error");
-		return ui.showToast("Select build-capable units.");
-	}
-	const def = BUILDING_TYPES[buildingType as keyof typeof BUILDING_TYPES];
-	if (!def) return;
-	if (!view.instantBuildMode && buildingType !== "gate" && !buildPlacement.canAfford(def.cost || {})) {
-		sfx.play("ui_error");
-		return ui.showToast("Not enough resources.");
-	}
-	view.buildMode = buildingType;
-	ui.showToast(`Place ${def.label}.`);
-	sfx.play(buildingCommandSound(buildingType));
-}
-
-function trainShortcut(unitType: UnitType) {
-	if (!state.snapshot || !state.playerId) return;
-	const building = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => {
-		if (!entity || entity.ownerId !== state.playerId) return false;
-		return ((TRAINING as Record<string, readonly { unitType: string; cost: Record<string, number> }[]>)[entity.type] || []).some((train) => train.unitType === unitType);
-	});
-	if (!building) return;
-	const train = ((TRAINING as Record<string, readonly { unitType: string; cost: Record<string, number> }[]>)[building.type] || []).find((item) => item.unitType === unitType);
-	const player = state.snapshot.players[state.playerId]!;
-	if (!train || !buildPlacement.canAfford(train.cost || {})) {
-		sfx.play("ui_error");
-		return ui.showToast("Not enough resources.");
-	}
-	if (player.population >= player.popCap) {
-		sfx.play("population_blocked");
-		return ui.showToast("Population cap reached.");
-	}
-	if ((building.queue?.length ?? 0) >= 10) {
-		sfx.play("ui_error");
-		return ui.showToast("Training queue is full.");
-	}
-	issue({ type: "train", buildingId: building.id, unitType }).then((result) => {
-		sfx.play(result.ok ? "train_queue" : "ui_error", { point: building });
-	});
-}
-
-function selectedFarmAction(action: (farm: Building) => void) {
-	const farm = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId && entity.gatherResource);
-	if (farm) action(farm);
-}
-
-function blowHornForSelectedScouts() {
-	const unitIds = [...state.selectedIds].map((id) => state.snapshot?.units[id]).filter((unit): unit is Unit => (
-		!!unit &&
-		unit.ownerId === state.playerId &&
-		unit.type === "scout"
-	)).map((unit) => unit.id);
-	if (unitIds.length === 0) {
-		sfx.play("ui_error");
-		return ui.showToast("Select a scout.");
-	}
-	issue({ type: "blowHorn", unitIds }).then((result) => {
-		if (!result.ok) sfx.play("ui_error");
-	});
 }
 
 function deleteSelectedBuilding() {
@@ -909,13 +838,6 @@ function selectedProductionBuilding() {
 	return [...state.selectedIds]
 		.map((id) => state.snapshot?.buildings[id])
 		.find((building) => building?.ownerId === state.playerId && ((TRAINING as Record<string, unknown[]>)[building.type] || []).length > 0);
-}
-
-function setRallyForSelectedProduction() {
-	const building = selectedProductionBuilding();
-	if (!building) return;
-	view.rallyModeBuildingId = building.id;
-	ui.showToast("Choose a rally point.");
 }
 
 function setZoom(zoom: number) {
@@ -1017,15 +939,4 @@ function minimapScreenToIso(px: number, py: number, width: number, height: numbe
 		x: (a + b) / 2,
 		y: (b - a) / 2,
 	};
-}
-
-function unitBehavior(unit: Unit) {
-	return unitBehaviorFor(unit.type);
-}
-
-function unitTypeForShortcut(key: string): UnitType | null {
-	for (const Unit of allUnitClasses()) {
-		if (Unit.trainShortcut?.toLowerCase() === key) return Unit.type;
-	}
-	return null;
 }
