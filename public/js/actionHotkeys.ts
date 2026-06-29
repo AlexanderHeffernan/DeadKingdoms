@@ -3,21 +3,31 @@ export interface HotkeyAction {
 	enabled: boolean;
 }
 
+declare const shortcutKeyBrand: unique symbol;
+export type ShortcutKey = string & { readonly [shortcutKeyBrand]: true };
+
+function parseShortcutKey(value: string): ShortcutKey | null {
+	const normalized = value.toLowerCase();
+	return normalized.length === 1 && !/\s/.test(normalized) ? normalized as ShortcutKey : null;
+}
+
 const STORAGE_KEY = "rtsActionHotkeys";
-const DEFAULT_KEYS = ["q", "w", "e", "r", "a", "s", "d", "f", "z", "x", "c", "v"] as const;
+const DEFAULT_KEYS = ["q", "w", "e", "r", "a", "s", "d", "f", "z", "x", "c", "v"].map((key) => parseShortcutKey(key)!);
 
 export class ActionHotkeys {
 	private keys = this.loadKeys();
 	private actions: HotkeyAction[] = [];
 	private readonly changeListeners = new Set<() => void>();
 
-	setActions(actions: HotkeyAction[]) {
+	setActions(actions: HotkeyAction[]): void {
 		this.actions = actions;
 	}
 
-	handleKeyDown(event: KeyboardEvent) {
+	handleKeyDown(event: KeyboardEvent): boolean {
 		if (!this.isEligible(event)) return false;
-		const position = this.keys.indexOf(this.normalizeKey(event.key));
+		const key = parseShortcutKey(event.key);
+		if (!key) return false;
+		const position = this.keys.indexOf(key);
 		if (position < 0) return false;
 		const action = this.actions[position];
 		if (!action) return false;
@@ -26,21 +36,21 @@ export class ActionHotkeys {
 		return true;
 	}
 
-	getKeys() {
+	getKeys(): ShortcutKey[] {
 		return [...this.keys];
 	}
 
-	getDisplayKey(position: number) {
+	getDisplayKey(position: number): string {
 		return this.keys[position]?.toUpperCase() ?? "";
 	}
 
-	setKey(position: number, key: string) {
-		const normalized = this.normalizeKey(key);
-		if (!this.isSupportedKey(normalized)) return "Choose a letter, number, or punctuation key.";
-		const duplicatePosition = this.keys.indexOf(normalized);
-		if (duplicatePosition >= 0 && duplicatePosition !== position) return `${normalized.toUpperCase()} is already assigned.`;
+	setKey(position: number, key: string): string | null {
+		const shortcutKey = parseShortcutKey(key);
+		if (!shortcutKey) return "Choose a letter, number, or punctuation key.";
+		const duplicatePosition = this.keys.indexOf(shortcutKey);
+		if (duplicatePosition >= 0 && duplicatePosition !== position) return `${shortcutKey.toUpperCase()} is already assigned.`;
 		if (position < 0 || position >= this.keys.length) return "Unknown action position.";
-		this.keys[position] = normalized;
+		this.keys[position] = shortcutKey;
 		this.saveAndNotify();
 		return null;
 	}
@@ -50,31 +60,24 @@ export class ActionHotkeys {
 		this.saveAndNotify();
 	}
 
-	onChange(listener: () => void) {
+	onChange(listener: () => void): () => void {
 		this.changeListeners.add(listener);
 		return () => this.changeListeners.delete(listener);
 	}
 
-	private isEligible(event: KeyboardEvent) {
+	private isEligible(event: KeyboardEvent): boolean {
 		if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return false;
 		if (document.getElementById("game")?.classList.contains("hidden")) return false;
 		if (!document.getElementById("settingsModal")?.classList.contains("hidden")) return false;
 		return !(event.target instanceof HTMLElement && event.target.matches("input, textarea, select, button, [contenteditable='true']"));
 	}
 
-	private normalizeKey(key: string) {
-		return key.toLowerCase();
-	}
-
-	private isSupportedKey(key: string) {
-		return key.length === 1 && !/\s/.test(key);
-	}
-
-	private loadKeys() {
+	private loadKeys(): ShortcutKey[] {
 		try {
 			const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-			if (Array.isArray(stored) && stored.length === DEFAULT_KEYS.length && stored.every((key) => typeof key === "string" && this.isSupportedKey(key)) && new Set(stored).size === stored.length) {
-				return stored.map((key) => this.normalizeKey(key));
+			if (Array.isArray(stored) && stored.length === DEFAULT_KEYS.length && stored.every((key) => typeof key === "string")) {
+				const keys = stored.map((key) => parseShortcutKey(key));
+				if (keys.every((key): key is ShortcutKey => key !== null) && new Set(keys).size === keys.length) return keys;
 			}
 		} catch {
 			// Ignore malformed local settings and restore the defaults.
@@ -82,7 +85,7 @@ export class ActionHotkeys {
 		return [...DEFAULT_KEYS];
 	}
 
-	private saveAndNotify() {
+	private saveAndNotify(): void {
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(this.keys));
 		for (const listener of this.changeListeners) listener();
 	}
