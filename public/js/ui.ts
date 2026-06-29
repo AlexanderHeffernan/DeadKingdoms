@@ -8,6 +8,7 @@ import { HoverCard } from "./ui/hoverCard.js";
 import { ResourcePanel } from "./ui/resources.js";
 import { TrainingStatusPanel } from "./ui/trainingStatus.js";
 import { TopPanel } from "./ui/topPanel.js";
+import type { ActionHotkeys } from "./actionHotkeys.js";
 
 export class UI {
 	private readonly state: GameState;
@@ -15,7 +16,7 @@ export class UI {
 	private readonly toast: HTMLElement;
 	private lastToast = "";
 
-	constructor(state: GameState, actions: UIActions) {
+	constructor(state: GameState, actions: UIActions, actionHotkeys: ActionHotkeys) {
 		this.state = state;
 		const hoverCard = new HoverCard();
 		const adminDashboard = new AdminDashboard({
@@ -96,7 +97,7 @@ export class UI {
 				events: mustGet("adminEvents"),
 			}, adminDashboard),
 			new TrainingStatusPanel(state, mustGet("trainingStatus"), hoverCard),
-			new BottomPanel(state, actions, mustGet("selection"), mustGet("actions"), hoverCard),
+			new BottomPanel(state, actions, mustGet("selection"), mustGet("actions"), hoverCard, actionHotkeys),
 		];
 		this.toast = mustGet("toast");
 	}

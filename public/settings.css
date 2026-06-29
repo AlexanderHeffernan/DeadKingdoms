@@ -241,3 +241,58 @@
 	outline: 2px solid #e9bd59;
 	outline-offset: 2px;
 }
+
+.settings-help,
+.action-hotkey-status {
+	margin: 0;
+	color: #cfc7b7;
+	font-size: var(--ui-text-sm);
+}
+
+.action-hotkey-grid {
+	display: grid;
+	grid-template-columns: repeat(4, 52px);
+	gap: 8px;
+}
+
+.settings-body .action-hotkey-grid button {
+	display: grid;
+	place-items: center;
+	padding: 4px 4px 8px;
+	border: 3px solid #5f4a32;
+	border-right-color: #211914;
+	border-bottom-color: #211914;
+	background: rgb(10 10 14 / 0.94);
+	color: #e9bd59;
+	cursor: pointer;
+	font: inherit;
+}
+
+.action-hotkey-grid button:focus-visible,
+.action-hotkey-grid button.active {
+	background: rgb(79 61 24 / 0.65);
+	outline: 2px solid #e9bd59;
+	outline-offset: 2px;
+}
+
+.action-hotkey-grid button span {
+	color: #827665;
+	font-size: var(--ui-text-xs);
+}
+
+.action-hotkey-status {
+	min-height: 2em;
+	margin-bottom: 8px;
+	line-height: normal;
+	overflow-wrap: anywhere;
+	white-space: normal;
+	color: #8fcf82;
+}
+
+.action-hotkey-status + .settings-action-option {
+	margin-top: 0;
+}
+
+.action-hotkey-status.error {
+	color: #e7826f;
+}
