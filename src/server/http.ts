@@ -10,6 +10,7 @@ import {
 	addPlayer,
 	command,
 	emitDevBang,
+	grantPlayerResource,
 	grantPlayerSoldiers,
 	removePlayer,
 	setWorldTimeOfDay,
@@ -29,6 +30,7 @@ import type {
 	CommandType,
 	Player,
 	PlayerId,
+	ResourceType,
 	Snapshot,
 	SnapshotDelta,
 	UnitType,
@@ -55,6 +57,7 @@ const BACKPRESSURE_BYTES = 256 * 1024;
 const DISCONNECT_LEAVE_GRACE_MS = 10_000;
 const MAX_JSON_BODY_BYTES = 256 * 1024;
 const MAX_COMMAND_UNIT_IDS = 1000;
+const MAX_COMMAND_TILES = 512;
 const MAX_EVENT_STREAMS_PER_IP = 6;
 const ADMIN_PERFORMANCE_UPDATE_MS = 1000;
 const RATE_LIMITS: Record<string, { windowMs: number; max: number }> = {
@@ -67,6 +70,7 @@ const RATE_LIMITS: Record<string, { windowMs: number; max: number }> = {
 const COMMAND_TYPES: Record<CommandType, true> = {
 	move: true,
 	build: true,
+	buildWallLine: true,
 	instantBuild: true,
 	finishBuild: true,
 	deleteBuilding: true,
@@ -190,10 +194,16 @@ export function createHandler(
 					return await enableZombieDebug(req, res, world);
 				if (url.pathname === "/api/dev/path-debug")
 					return await enablePathDebug(req, res, world);
+				if (url.pathname === "/api/dev/path-availability-debug")
+					return await togglePathAvailabilityDebug(req, res, world);
+				if (url.pathname === "/api/dev/unit-tile-debug")
+					return await toggleUnitTileDebug(req, res, world);
 				if (url.pathname === "/api/dev/spawn-zombies")
 					return await spawnDevZombies(req, res, world);
 				if (url.pathname === "/api/dev/grant-soldiers")
 					return await grantDevSoldiers(req, res, world);
+				if (url.pathname === "/api/dev/grant-resources")
+					return await grantDevResources(req, res, world);
 				if (url.pathname === "/api/dev/town-center-invincible")
 					return await toggleTownCenterInvincible(req, res, world);
 				if (url.pathname === "/api/dev/emit-noise")
@@ -607,10 +617,12 @@ export function makeSnapshotDelta(
 		dayNight: current.dayNight,
 		leaderboard: current.leaderboard,
 		notices: current.notices,
-		hornSounds: current.hornSounds,
-		soundDebug: current.soundDebug,
-		pathDebug: current.pathDebug,
-		...(JSON.stringify(previous.serverPerf) !== JSON.stringify(current.serverPerf) ? { serverPerf: current.serverPerf } : {}),
+			hornSounds: current.hornSounds,
+			soundDebug: current.soundDebug,
+			pathDebug: current.pathDebug,
+			pathAvailabilityDebug: current.pathAvailabilityDebug,
+			unitTileDebug: current.unitTileDebug,
+			...(JSON.stringify(previous.serverPerf) !== JSON.stringify(current.serverPerf) ? { serverPerf: current.serverPerf } : {}),
 		...(JSON.stringify(previous.admin) !== JSON.stringify(current.admin) ? { admin: current.admin } : {}),
 	};
 }
@@ -742,10 +754,12 @@ async function enableAdminAccess(
 		delete player.adminLevel;
 		player.godMode = false;
 		player.soundDebug = false;
-		player.zombieDebug = false;
-		player.pathDebug = false;
-		delete player._visCache;
-		return json(res, { ok: true, adminLevel: null, enabled: false });
+			player.zombieDebug = false;
+			player.pathDebug = false;
+			player.pathAvailabilityDebug = false;
+			player.unitTileDebug = false;
+			delete player._visCache;
+			return json(res, { ok: true, adminLevel: null, enabled: false });
 	}
 	player.adminLevel = "admin";
 	json(res, { ok: true, adminLevel: player.adminLevel, enabled: true });
@@ -769,6 +783,8 @@ async function disableAdminAccess(
 	player.soundDebug = false;
 	player.zombieDebug = false;
 	player.pathDebug = false;
+	player.pathAvailabilityDebug = false;
+	player.unitTileDebug = false;
 	delete player._visCache;
 	Logs.log(`${player.name} disabled admin mode.`);
 	json(res, { ok: true });
@@ -924,8 +940,38 @@ async function enablePathDebug(
 	};
 	const player = adminPlayer(world, body);
 	if (!player) return adminRequired(res);
-	player.pathDebug = true;
-	json(res, { ok: true });
+	player.pathDebug = !player.pathDebug;
+	json(res, { ok: true, enabled: player.pathDebug });
+}
+
+async function togglePathAvailabilityDebug(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
+	const player = adminPlayer(world, body);
+	if (!player) return adminRequired(res);
+	player.pathAvailabilityDebug = !player.pathAvailabilityDebug;
+	json(res, { ok: true, enabled: player.pathAvailabilityDebug });
+}
+
+async function toggleUnitTileDebug(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+	};
+	const player = adminPlayer(world, body);
+	if (!player) return adminRequired(res);
+	player.unitTileDebug = !player.unitTileDebug;
+	json(res, { ok: true, enabled: player.unitTileDebug });
 }
 
 async function spawnDevZombies(
@@ -966,6 +1012,39 @@ async function grantDevSoldiers(
 	const granted = grantPlayerSoldiers(world, auth.playerId, count);
 	Logs.log(`${player.name} granted ${granted} soldiers.`);
 	json(res, { ok: true, granted });
+}
+
+async function grantDevResources(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	world: World,
+) {
+	const body = (await readJson(req)) as {
+		playerId?: unknown;
+		sessionToken?: unknown;
+		resource?: unknown;
+		amount?: unknown;
+	};
+	const auth = authenticatedPlayer(world, body);
+	if (!auth) return invalidSession(res);
+	const player = auth.player;
+	if (!player.adminLevel) return adminRequired(res);
+	const resource = normalizeGrantResource(body.resource);
+	if (!resource)
+		return json(res, { ok: false, error: "Unknown resource." }, 400);
+	const amount = typeof body.amount === "number" ? body.amount : 1000;
+	const total = grantPlayerResource(world, auth.playerId, resource, amount);
+	if (total === null)
+		return json(res, { ok: false, error: "Player not found." }, 404);
+	Logs.log(`${player.name} granted ${amount} ${resource}.`);
+	json(res, { ok: true, resource, amount, total });
+}
+
+function normalizeGrantResource(resource: unknown): ResourceType | null {
+	if (resource === "wood" || resource === "food" || resource === "ore")
+		return resource;
+	if (resource === "stone") return "ore";
+	return null;
 }
 
 async function toggleTownCenterInvincible(
@@ -1135,6 +1214,22 @@ function validateCommandPayload(
 					x: point.x,
 					y: point.y,
 				},
+				};
+			}
+		case "buildWallLine": {
+			const unitIds = validateUnitIds(body.unitIds);
+			if (!unitIds.ok) return unitIds;
+			const tiles = validateTiles(body.tiles);
+			if (!tiles.ok) return tiles;
+			return {
+				ok: true,
+				command: {
+					type,
+					playerId,
+					unitIds: unitIds.value,
+					tiles: tiles.value,
+					instant: body.instant === true ? true : undefined,
+				},
 			};
 		}
 		case "instantBuild": {
@@ -1255,6 +1350,24 @@ function validateUnitIds(
 		return { ok: false, error: "Too many units selected." };
 	if (!value.every(isSafeId)) return { ok: false, error: "Invalid unit ID." };
 	return { ok: true, value };
+}
+
+function validateTiles(
+	value: unknown,
+): { ok: true; value: { x: number; y: number }[] } | { ok: false; error: string } {
+	if (!Array.isArray(value))
+		return { ok: false, error: "Wall tiles are required." };
+	if (value.length > MAX_COMMAND_TILES)
+		return { ok: false, error: "Too many wall tiles." };
+	const tiles: { x: number; y: number }[] = [];
+	for (const tile of value) {
+		if (!tile || typeof tile !== "object")
+			return { ok: false, error: "Invalid wall tile." };
+		const point = validatePoint(tile as Record<string, unknown>);
+		if (!point.ok) return point;
+		tiles.push({ x: point.x, y: point.y });
+	}
+	return { ok: true, value: tiles };
 }
 
 function validateId(

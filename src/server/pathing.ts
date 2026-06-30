@@ -46,6 +46,9 @@ const RESOURCE_CLEARANCE_RADIUS = 1.8;
 const RESOURCE_CLEARANCE_STRENGTH = 1.1;
 export const ZOMBIE_PATH_LOOKAHEAD_DISTANCE = 10;
 const ZOMBIE_PATH_MAX_NODES = ZOMBIE_PATH_LOOKAHEAD_DISTANCE + 2;
+const REASONABLE_ZOMBIE_PATH_STEPS = ZOMBIE_PATH_MAX_NODES * 2;
+const REASONABLE_ZOMBIE_PATH_UNREACHED = 0xffff;
+const REASONABLE_ZOMBIE_PATH_FIELD_CACHE_LIMIT = 96;
 
 type PathFollowMode = "tight" | "flow";
 
@@ -55,6 +58,12 @@ type FlowField = {
 	clearanceRadius: number;
 	distance: Uint32Array;
 	next: Int32Array;
+};
+
+type BoundedInteractionField = {
+	createdTick: number;
+	maxSteps: number;
+	distance: Uint16Array;
 };
 
 export function moveUnit(world: World, unit: Unit, target: { x: number; y: number }, maxStep: number): boolean {
@@ -1046,9 +1055,20 @@ export function hasReasonableZombiePathToTarget(world: World, unit: Unit, target
 	if (distance(unit, target) <= range) return true;
 	const start = worldTile(unit);
 	if (!isInMap(start.x, start.y)) return false;
-	const field = interactionRangeFlowFieldFor(world, target, range);
-	const pathCost = field.distance[tileId(start.x, start.y)]!;
-	return pathCost !== FLOW_UNREACHED && pathCost <= ZOMBIE_PATH_MAX_NODES * FLOW_BASE_COST * 2;
+	if (minimumReasonableZombieSteps(start, worldTile(target), range) > REASONABLE_ZOMBIE_PATH_STEPS)
+		return false;
+	const field = reasonableZombieInteractionFieldFor(world, target, range, REASONABLE_ZOMBIE_PATH_STEPS);
+	return isWithinReasonableZombiePath(field, start);
+}
+
+function minimumReasonableZombieSteps(start: { x: number; y: number }, target: { x: number; y: number }, range: number) {
+	const searchSlack = Math.ceil(range) + 1;
+	return Math.max(0, Math.abs(start.x - target.x) + Math.abs(start.y - target.y) - searchSlack * 2);
+}
+
+function isWithinReasonableZombiePath(field: BoundedInteractionField, start: { x: number; y: number }): boolean {
+	const startDistance = field.distance[tileId(start.x, start.y)]!;
+	return startDistance !== REASONABLE_ZOMBIE_PATH_UNREACHED && startDistance <= field.maxSteps;
 }
 
 function commandCrowd(command: UnitCommand): number {
@@ -1122,6 +1142,22 @@ function interactionRangeFlowFieldFor(world: World, target: Vec2, range: number)
 	const field = buildInteractionRangeFlowField(world, target, range);
 	state.flowFields.set(cacheKey, field);
 	if (state.flowFields.size > 48) pruneFlowFields(state.flowFields as Map<string, FlowField>, world.tick);
+	return field;
+}
+
+function reasonableZombieInteractionFieldFor(world: World, target: Vec2, range: number, maxSteps: number): BoundedInteractionField {
+	const state = pathingState(world);
+	state.reasonableZombiePathFields ??= new Map();
+	const targetTile = worldTile(target);
+	const rangeKey = Math.ceil(range * 10);
+	const cacheKey = `${state.occupancyVersion}:reasonable-zombie:${targetTile.x}:${targetTile.y}:${rangeKey}:${maxSteps}`;
+	const cached = state.reasonableZombiePathFields.get(cacheKey) as BoundedInteractionField | undefined;
+	if (cached && world.tick - cached.createdTick <= FLOW_FIELD_CACHE_TICKS) return cached;
+	const field = buildBoundedInteractionField(world, target, range, maxSteps);
+	state.reasonableZombiePathFields.set(cacheKey, field);
+	if (state.reasonableZombiePathFields.size > REASONABLE_ZOMBIE_PATH_FIELD_CACHE_LIMIT) {
+		pruneReasonableZombiePathFields(state.reasonableZombiePathFields as Map<string, BoundedInteractionField>, world.tick);
+	}
 	return field;
 }
 
@@ -1202,6 +1238,31 @@ function buildInteractionRangeFlowField(world: World, target: Vec2, range: numbe
 	return { goalId, createdTick: world.tick, clearanceRadius: 0, distance: distanceGrid, next };
 }
 
+function buildBoundedInteractionField(world: World, target: Vec2, range: number, maxSteps: number): BoundedInteractionField {
+	const goals = interactionGoalIds(world, target, range);
+	const distanceGrid = new Uint16Array(MAP_SIZE * MAP_SIZE);
+	distanceGrid.fill(REASONABLE_ZOMBIE_PATH_UNREACHED);
+	const queue = new Int32Array(MAP_SIZE * MAP_SIZE);
+	let head = 0;
+	let tail = 0;
+	for (const id of goals) {
+		distanceGrid[id] = 0;
+		queue[tail++] = id;
+	}
+	while (head < tail) {
+		const current = queue[head++]!;
+		const steps = distanceGrid[current]!;
+		if (steps >= maxSteps) continue;
+		const x = current % MAP_SIZE;
+		const y = Math.floor(current / MAP_SIZE);
+		if (touchBoundedInteractionNeighbor(world, distanceGrid, queue, tail, x + 1, y, steps + 1)) tail += 1;
+		if (touchBoundedInteractionNeighbor(world, distanceGrid, queue, tail, x - 1, y, steps + 1)) tail += 1;
+		if (touchBoundedInteractionNeighbor(world, distanceGrid, queue, tail, x, y + 1, steps + 1)) tail += 1;
+		if (touchBoundedInteractionNeighbor(world, distanceGrid, queue, tail, x, y - 1, steps + 1)) tail += 1;
+	}
+	return { createdTick: world.tick, maxSteps, distance: distanceGrid };
+}
+
 function interactionGoalIds(world: World, target: Vec2, range: number): number[] {
 	const origin = worldTile(target);
 	const searchRadius = Math.max(1, Math.ceil(range) + 1);
@@ -1233,6 +1294,23 @@ function touchUnweightedFlowNeighbor(
 	if (distanceGrid[id] !== FLOW_UNREACHED) return false;
 	distanceGrid[id] = nextDistance;
 	next[id] = current;
+	queue[tail] = id;
+	return true;
+}
+
+function touchBoundedInteractionNeighbor(
+	world: World,
+	distanceGrid: Uint16Array,
+	queue: Int32Array,
+	tail: number,
+	x: number,
+	y: number,
+	steps: number,
+) {
+	if (!isInMap(x, y) || !isWalkable(world, x, y)) return false;
+	const id = tileId(x, y);
+	if (distanceGrid[id] !== REASONABLE_ZOMBIE_PATH_UNREACHED) return false;
+	distanceGrid[id] = steps;
 	queue[tail] = id;
 	return true;
 }
@@ -1325,6 +1403,17 @@ function pruneFlowFields(fields: Map<string, FlowField>, tick: number) {
 	for (const key of fields.keys()) {
 		fields.delete(key);
 		if (fields.size <= 36) return;
+	}
+}
+
+function pruneReasonableZombiePathFields(fields: Map<string, BoundedInteractionField>, tick: number) {
+	for (const [key, field] of fields) {
+		if (tick - field.createdTick > FLOW_FIELD_CACHE_TICKS) fields.delete(key);
+	}
+	if (fields.size <= REASONABLE_ZOMBIE_PATH_FIELD_CACHE_LIMIT) return;
+	for (const key of fields.keys()) {
+		fields.delete(key);
+		if (fields.size <= REASONABLE_ZOMBIE_PATH_FIELD_CACHE_LIMIT * 0.75) return;
 	}
 }
 

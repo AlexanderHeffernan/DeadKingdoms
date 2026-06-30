@@ -5,6 +5,9 @@ import type { Building, ResourceNode, Unit, UnitCommand } from "../types.js";
 const TREE_STUMP_THRESHOLD = 36;
 const GATHER_RETARGET_STUCK_TICKS = 45;
 const GATHER_EPSILON = 0.001;
+const VILLAGER_RESOURCE_INTERACTION_RANGE = 1.1;
+const VILLAGER_PREFERRED_WORK_DISTANCE = 0.5;
+const VILLAGER_WORK_POINT_RANGE = 0.55;
 
 export class VillagerUnit extends BaseUnit {
 	public static readonly type = "villager";
@@ -62,12 +65,18 @@ export class VillagerUnit extends BaseUnit {
 			return;
 		}
 		const targetPoint = context.isBuilding(resource) ? context.centerOf(resource) : resource;
-		const gatherRange = context.gatherRange(resource);
-		if (context.distance(unit, targetPoint) > gatherRange) {
-			const arrived = context.moveNearTarget(unit, command, targetPoint, gatherRange, this.speed * dt);
-			if (!arrived) this.retargetBlockedGather(context, unit, command, resource);
-			return;
+		const gatherRange = context.isBuilding(resource)
+			? context.gatherRange(resource)
+			: VILLAGER_RESOURCE_INTERACTION_RANGE;
+		if (!this.canWorkFromHere(unit, resource, gatherRange)) {
+			const workPoint = this.workPointFor(unit, resource);
+			const arrived = context.moveNearTarget(unit, command, workPoint, Math.min(gatherRange, VILLAGER_WORK_POINT_RANGE), this.speed * dt);
+			if (!this.canWorkFromHere(unit, resource, gatherRange)) {
+				if (!arrived) this.retargetBlockedGather(context, unit, command, resource);
+				return;
+			}
 		}
+		this.settleForWork(command);
 		this.gatherFromTarget(context, unit, command, resource, targetPoint, dt);
 	}
 
@@ -75,10 +84,12 @@ export class VillagerUnit extends BaseUnit {
 		if (!unit.carried) return;
 		const depot = context.nearestDepot(unit.ownerId, unit.carried.resource, unit);
 		if (!depot) return;
-		if (context.distance(unit, context.centerOf(depot)) > depot.size + 0.7) {
-			context.moveNearTarget(unit, command, context.centerOf(depot), depot.size + 0.7, this.speed * dt);
+		const depositRange = depot.size + 0.7;
+		if (!this.canWorkFromHere(unit, depot, depositRange)) {
+			context.moveNearTarget(unit, command, this.workPointFor(unit, depot), VILLAGER_WORK_POINT_RANGE, this.speed * dt);
 			return;
 		}
+		this.settleForWork(command);
 		context.depositResource(unit.ownerId, unit.carried.resource, unit.carried.amount);
 		unit.carried = null;
 	}
@@ -167,10 +178,12 @@ export class VillagerUnit extends BaseUnit {
 			return;
 		}
 		const targetPoint = context.centerOf(building);
-		if (context.distance(unit, targetPoint) > building.size + 0.7) {
-			context.moveNearTarget(unit, command, targetPoint, building.size + 0.7, this.speed * dt);
-			return;
+		const buildRange = building.size + 0.7;
+		if (!this.canWorkFromHere(unit, building, buildRange)) {
+			const arrived = context.moveNearTarget(unit, command, this.workPointFor(unit, building), Math.min(buildRange, VILLAGER_WORK_POINT_RANGE), this.speed * dt);
+			if (!arrived || !this.canWorkFromHere(unit, building, buildRange)) return;
 		}
+		this.settleForWork(command);
 		unit.workFlash = 0.2;
 		context.emitActionSound("build", targetPoint);
 		building.hp = Math.min(building.maxHp, building.hp + 76 * dt);
@@ -178,5 +191,66 @@ export class VillagerUnit extends BaseUnit {
 			building.markComplete();
 			context.assignPostBuildGather(unit, command.resourceKind, command.gatherBuiltFarm ? building : null);
 		}
+	}
+
+	private canWorkFromHere(unit: Unit, target: ResourceNode | Building, range: number) {
+		return this.distanceToFootprint(unit, target) <= range;
+	}
+
+	private settleForWork(command: UnitCommand) {
+		command.path = null;
+		command.moveStuckTicks = 0;
+		delete command.interactionBestCost;
+		delete command.interactionTargetKey;
+	}
+
+	private workPointFor(unit: Unit, target: ResourceNode | Building) {
+		const footprint = this.footprintBounds(target);
+		const nearest = {
+			x: Math.min(Math.max(unit.x, footprint.minX), footprint.maxX),
+			y: Math.min(Math.max(unit.y, footprint.minY), footprint.maxY),
+		};
+		let dx = unit.x - nearest.x;
+		let dy = unit.y - nearest.y;
+		let length = Math.hypot(dx, dy);
+		if (length <= 0.001) {
+			const center = {
+				x: (footprint.minX + footprint.maxX) / 2,
+				y: (footprint.minY + footprint.maxY) / 2,
+			};
+			dx = unit.x - center.x || 1;
+			dy = unit.y - center.y;
+			length = Math.hypot(dx, dy) || 1;
+		}
+		return {
+			x: nearest.x + (dx / length) * VILLAGER_PREFERRED_WORK_DISTANCE,
+			y: nearest.y + (dy / length) * VILLAGER_PREFERRED_WORK_DISTANCE,
+		};
+	}
+
+	private distanceToFootprint(point: { x: number; y: number }, target: ResourceNode | Building) {
+		const footprint = this.footprintBounds(target);
+		const dx = point.x < footprint.minX ? footprint.minX - point.x : point.x > footprint.maxX ? point.x - footprint.maxX : 0;
+		const dy = point.y < footprint.minY ? footprint.minY - point.y : point.y > footprint.maxY ? point.y - footprint.maxY : 0;
+		return Math.hypot(dx, dy);
+	}
+
+	private footprintBounds(target: ResourceNode | Building) {
+		// Simulation occupancy is tile-top-left / floor-based: a footprint at
+		// (x, y) occupies the half-open region [x, x+w) × [y, y+h). Buildings and
+		// resources are placed on integer tile coords, so this matches the actual
+		// blocked tile(s) exactly. Do NOT use an `x - 0.5` centered convention here
+		// — that would shift the footprint half a tile away from the real obstacle
+		// and produce work-points on grid intersections, which the floor-based
+		// interaction flow field cannot resolve cleanly (causing approach
+		// vibration, most visibly when approaching from screen-below).
+		const width = "width" in target && typeof target.width === "number" ? target.width : 1;
+		const height = "height" in target && typeof target.height === "number" ? target.height : 1;
+		return {
+			minX: target.x,
+			maxX: target.x + width,
+			minY: target.y,
+			maxY: target.y + height,
+		};
 	}
 }

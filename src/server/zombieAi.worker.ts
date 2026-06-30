@@ -20,7 +20,7 @@ import type {
 
 const TARGET_UNIT_GRID_CELL_SIZE = 4;
 const TARGET_LOOKUP_CACHE_CELL_SIZE = 2;
-const REASONABLE_PATH_CHECKS_PER_BATCH = 80;
+const REASONABLE_PATH_CHECKS_PER_BATCH = 24;
 
 if (!parentPort) throw new Error("Zombie AI worker requires a parent port.");
 
@@ -364,6 +364,21 @@ function isWallLikeBlocker(world: World, building: Building): boolean {
 }
 
 function blockingBuildingsByTile(world: World): Map<number, Building> {
+	world._pathing ??= {
+		occupancyVersion: 0,
+		flowFields: new Map(),
+		clearanceFields: new Map(),
+		arrivalGroups: new Map(),
+		pathRequestsThisTick: 0,
+		lastRequestTick: -1,
+	};
+	const state = world._pathing;
+	if (
+		state.blockingBuildingsByTileVersion === state.occupancyVersion &&
+		state.blockingBuildingsByTile
+	) {
+		return state.blockingBuildingsByTile;
+	}
 	const buildings = new Map<number, Building>();
 	for (const building of Object.values(world.buildings)) {
 		if (!building.walkBlocking || building.hp <= 0) continue;
@@ -376,6 +391,8 @@ function blockingBuildingsByTile(world: World): Map<number, Building> {
 			}
 		}
 	}
+	state.blockingBuildingsByTile = buildings;
+	state.blockingBuildingsByTileVersion = state.occupancyVersion;
 	return buildings;
 }
 

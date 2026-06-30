@@ -1,4 +1,4 @@
-import type { CommandPayload, CommandResult, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId } from "../../src/shared/types.js";
+import type { CommandPayload, CommandResult, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId, ResourceType } from "../../src/shared/types.js";
 
 export type SessionCredentials = {
 	playerId: PlayerId;
@@ -99,6 +99,14 @@ export async function enablePathDebug(credentials: SessionCredentials) {
 	return post("/api/dev/path-debug", credentials);
 }
 
+export async function togglePathAvailabilityDebug(credentials: SessionCredentials) {
+	return post("/api/dev/path-availability-debug", credentials);
+}
+
+export async function toggleUnitTileDebug(credentials: SessionCredentials) {
+	return post("/api/dev/unit-tile-debug", credentials);
+}
+
 export async function spawnZombieHorde(credentials: SessionCredentials, count = 500) {
 	return post("/api/dev/spawn-zombies", { ...credentials, count });
 }
@@ -113,6 +121,10 @@ export async function reportPing(credentials: SessionCredentials, pingMs: number
 
 export async function grantSoldiers(credentials: SessionCredentials, count = 100) {
 	return post("/api/dev/grant-soldiers", { ...credentials, count });
+}
+
+export async function grantResources(credentials: SessionCredentials, resource: ResourceType | "stone", amount = 1000) {
+	return post("/api/dev/grant-resources", { ...credentials, resource, amount });
 }
 
 export async function toggleTownCenterInvincible(credentials: SessionCredentials) {

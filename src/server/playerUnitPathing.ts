@@ -19,6 +19,9 @@ const FORMATION_SLOT_PRACTICAL_SETTLE_RADIUS = 1.35;
 const FORMATION_SLOT_CLOSE_SETTLE_RADIUS = 2.8;
 const FORMATION_SLOT_CLOSE_STUCK_TICKS = 2;
 const FORMATION_DEPLOY_MAX_RADIUS = 38;
+const INTERACTION_PRACTICAL_PADDING = 0.7;
+const INTERACTION_PRACTICAL_STUCK_TICKS = 4;
+const INTERACTION_PROGRESS_EPSILON = 0.25;
 const MOVING_UNIT_CELL_SIZE = 1.5;
 const MOVING_UNIT_RADIUS = 0.85;
 const MOVING_UNIT_PUSH_STRENGTH = 0.55;
@@ -91,7 +94,7 @@ export function movePlayerUnitNearTarget(world: World, unit: Unit, command: Unit
 	if (distance(before, unit) < STUCK_MOVEMENT_EPSILON) command.path = null;
 	const arrived = afterDistance <= range;
 	trackInteractionProgress(world, unit, command, target, range, field, beforeDistance, afterDistance, arrived);
-	return arrived;
+	return arrived || isPracticalInteractionComplete(command, afterDistance, range);
 }
 
 function moveCommandTarget(world: World, unit: Unit, command: Extract<UnitCommand, { type: "move" }>): Vec2 {
@@ -704,12 +707,8 @@ function trackInteractionProgress(
 		command.moveStuckTicks = 0;
 	}
 	const currentCost = interactionProgressCost(world, unit, field, afterDistance);
-	if (command.interactionBestCost === undefined || currentCost + FLOW_BASE_COST < command.interactionBestCost) {
+	if (command.interactionBestCost === undefined || currentCost + INTERACTION_PROGRESS_EPSILON < command.interactionBestCost) {
 		command.interactionBestCost = currentCost;
-		command.moveStuckTicks = 0;
-		return;
-	}
-	if (afterDistance < beforeDistance - 0.03) {
 		command.moveStuckTicks = 0;
 		return;
 	}
@@ -718,7 +717,7 @@ function trackInteractionProgress(
 
 function interactionProgressCost(world: World, unit: Unit, field: FlowField, fallbackDistance: number): number {
 	const cost = flowCostAt(world, field, unit);
-	if (cost !== FLOW_UNREACHED) return cost;
+	if (cost !== FLOW_UNREACHED) return cost + fallbackDistance;
 	return Math.ceil(fallbackDistance * FLOW_BASE_COST);
 }
 
@@ -731,6 +730,11 @@ function resetInteractionProgress(command: UnitCommand) {
 	command.moveStuckTicks = 0;
 	delete command.interactionBestCost;
 	delete command.interactionTargetKey;
+}
+
+function isPracticalInteractionComplete(command: UnitCommand, distanceToTarget: number, range: number): boolean {
+	if ((command.moveStuckTicks || 0) < INTERACTION_PRACTICAL_STUCK_TICKS) return false;
+	return distanceToTarget <= range + INTERACTION_PRACTICAL_PADDING;
 }
 
 function debugPathFromTarget(target: SteeringTarget): PathNode[] | null {

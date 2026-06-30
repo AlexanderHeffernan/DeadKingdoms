@@ -1,4 +1,4 @@
-import { banPlayer as requestBanPlayer, disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, grantSoldiers as requestGrantSoldiers, kickPlayer as requestKickPlayer, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, toggleTownCenterInvincible as requestTownCenterInvincible, unbanIp as requestUnbanIp } from "./api.js";
+import { banPlayer as requestBanPlayer, disableAdminMode as requestDisableAdminMode, emitNoise as requestEmitNoise, enableAdminAccess, enableFullMapVision as requestFullMapVision, enablePathDebug, enableSoundDebug as requestSoundDebug, enableZombieDebug as requestZombieDebug, grantResources as requestGrantResources, grantSoldiers as requestGrantSoldiers, kickPlayer as requestKickPlayer, leave, logClientMessage, reportPing, restartServer as requestRestartServer, sendCommand, setTimeOfDay as requestSetTimeOfDay, spawnZombieHorde, togglePathAvailabilityDebug as requestPathAvailabilityDebug, toggleTownCenterInvincible as requestTownCenterInvincible, toggleUnitTileDebug as requestUnitTileDebug, unbanIp as requestUnbanIp } from "./api.js";
 import { Renderer } from "./render.js";
 import { screenToIso, isoToScreen } from "./iso.js";
 import { CameraDragPan } from "./cameraDragPan.js";
@@ -19,7 +19,7 @@ import { HomeScreen } from "./homeScreen.js";
 import { SelectionController } from "./selectionController.js";
 import { BuildPlacement } from "./buildPlacement.js";
 import { TutorialController } from "./tutorial/tutorialController.js";
-import type { Building, BuildingType, CommandPayload, Corpse, EntityId, ResourceNode, SnapshotMessage, Unit, UnitType } from "../../src/shared/types.js";
+import type { Building, BuildingType, CommandPayload, Corpse, EntityId, ResourceNode, ResourceType, SnapshotMessage, Unit, UnitType } from "../../src/shared/types.js";
 import type { SessionCredentials } from "./api.js";
 import type { ClientCommand, GameState, ViewState } from "./clientTypes.js";
 
@@ -143,10 +143,11 @@ const ui = new UI(state, {
 		if (!credentials) return "No active player.";
 		const result = await requestDisableAdminMode(credentials);
 		if (!result.ok) return result.error || "Could not disable admin mode.";
-		state.exploredSet.clear();
-		view.noiseMode = false;
-		adminDiagnosticsVisible = false;
-		connectEvents();
+			state.exploredSet.clear();
+			view.noiseMode = false;
+			adminDiagnosticsVisible = false;
+			pathDebugEnabled = false;
+			connectEvents();
 		ui.showToast("Admin mode disabled.");
 		ui.render();
 		return "Admin mode disabled.";
@@ -198,6 +199,37 @@ const ui = new UI(state, {
 		ui.showToast(message);
 		return message;
 	},
+	async togglePathDebug() {
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await enablePathDebug(credentials);
+		if (!result.ok) return result.error || "Could not toggle path lines.";
+		pathDebugEnabled = result.enabled === true;
+		connectEvents();
+		const message = result.enabled ? "Path lines enabled." : "Path lines disabled.";
+		ui.showToast(message);
+		return message;
+	},
+	async togglePathAvailabilityDebug() {
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestPathAvailabilityDebug(credentials);
+		if (!result.ok) return result.error || "Could not toggle blocked path tiles.";
+		connectEvents();
+		const message = result.enabled ? "Blocked path tiles enabled." : "Blocked path tiles disabled.";
+		ui.showToast(message);
+		return message;
+	},
+	async toggleUnitTileDebug() {
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestUnitTileDebug(credentials);
+		if (!result.ok) return result.error || "Could not toggle unit tiles.";
+		connectEvents();
+		const message = result.enabled ? "Unit tiles enabled." : "Unit tiles disabled.";
+		ui.showToast(message);
+		return message;
+	},
 	async kickPlayer(targetPlayerId) {
 		const credentials = currentCredentials();
 		if (!credentials) return "No active player.";
@@ -234,6 +266,15 @@ const ui = new UI(state, {
 		if (!result.ok) return result.error || "Could not grant soldiers.";
 		ui.showToast(`Granted ${result.granted ?? 100} soldiers.`);
 		return `Granted ${result.granted ?? 100} soldiers.`;
+	},
+	async grantResources(resource: ResourceType | "stone") {
+		const credentials = currentCredentials();
+		if (!credentials) return "No active player.";
+		const result = await requestGrantResources(credentials, resource, 1000);
+		if (!result.ok) return result.error || "Could not grant resources.";
+		const label = resource === "stone" ? "stone" : resource;
+		ui.showToast(`Granted 1000 ${label}.`);
+		return `Granted 1000 ${label}.`;
 	},
 	async toggleTownCenterInvincible() {
 		const credentials = currentCredentials();
@@ -564,8 +605,7 @@ function onMouseDown(event: MouseEvent) {
 
 function onMouseMove(event: MouseEvent) {
 	if (view.panning && document.pointerLockElement === canvas) return;
-	const iso = screenToIso(event.clientX, event.clientY, view.camera);
-	view.hoverTile = { x: Math.floor(iso.x), y: Math.floor(iso.y) };
+	view.hoverTile = visualTileFromScreen(event.clientX, event.clientY);
 	if (view.panning) panCameraFromMouseMove(event);
 	if (view.dragging) view.dragCurrent = { x: event.clientX, y: event.clientY };
 }
@@ -666,12 +706,17 @@ function handleRightClick(event: MouseEvent) {
 			sfx.play(result.ok ? "ui_command_attack" : "ui_error", { point: target });
 		});
 	} else {
-		const iso = screenToIso(event.clientX, event.clientY, view.camera);
-		issue({ type: "move", unitIds: ownUnits, x: iso.x, y: iso.y }).then((result) => {
-			if (result.ok) addMoveCross(iso.x, iso.y);
-			sfx.play(result.ok ? "ui_command_move" : "ui_error", { point: iso });
+		const point = visualTileFromScreen(event.clientX, event.clientY);
+		issue({ type: "move", unitIds: ownUnits, x: point.x, y: point.y }).then((result) => {
+			if (result.ok) addMoveCross(point.x, point.y);
+			sfx.play(result.ok ? "ui_command_move" : "ui_error", { point });
 		});
 	}
+}
+
+function visualTileFromScreen(x: number, y: number) {
+	const iso = screenToIso(x, y, view.camera);
+	return { x: Math.round(iso.x), y: Math.round(iso.y) };
 }
 
 function canGatherFromClickTarget(target: Building) {
@@ -750,14 +795,15 @@ async function placeWallLine() {
 	}
 	view.buildMode = null;
 	view.wallDragStartTile = null;
-	for (const tile of tiles) {
-		const command = view.instantBuildMode
-			? { type: "instantBuild" as const, buildingType: "wall" as const, x: tile.x, y: tile.y }
-			: { type: "build" as const, unitIds, buildingType: "wall" as const, x: tile.x, y: tile.y };
-		const result = await issue(command);
-		sfx.play(result.ok ? "ui_command_build" : "ui_error", { point: tile, cooldownKey: "wall_line_build" });
-		if (!result.ok) break;
-	}
+	const command = {
+		type: "buildWallLine" as const,
+		unitIds,
+		tiles,
+		instant: view.instantBuildMode ? true : undefined,
+	};
+	const point = tiles[tiles.length - 1]!;
+	const result = await issue(command);
+	sfx.play(result.ok ? "ui_command_build" : "ui_error", { point, cooldownKey: "wall_line_build" });
 }
 
 async function issue(payload: ClientCommand, options: { silent?: boolean } = {}) {

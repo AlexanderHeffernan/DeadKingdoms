@@ -12,6 +12,7 @@ import type {
 import { ZOMBIE_OWNER_ID } from "./zombieSpawning.js";
 
 const WORKER_DISABLED = process.env.ZOMBIE_DIRECTOR_WORKER === "0";
+const MAX_ZOMBIE_DIRECTOR_CATCH_UP_SECONDS = 0.5;
 
 export class ZombieDirectorWorkerClient {
 	private worker: Worker | null = null;
@@ -24,6 +25,7 @@ export class ZombieDirectorWorkerClient {
 	private failures = 0;
 	private lastError: string | null = null;
 	private fallback = WORKER_DISABLED;
+	private queuedDt = 0;
 
 	step(world: World, dt: number) {
 		if (this.fallback || !world._zombieHordes) {
@@ -42,6 +44,7 @@ export class ZombieDirectorWorkerClient {
 		void this.worker?.terminate();
 		this.worker = null;
 		this.pending = false;
+		this.queuedDt = 0;
 	}
 
 	private ensureWorker(world: World) {
@@ -106,8 +109,14 @@ export class ZombieDirectorWorkerClient {
 	}
 
 	private startNext(world: World, dt: number) {
-		if (!this.worker || this.pending) return;
-		const snapshot = this.snapshot(world, dt);
+		if (!this.worker) return;
+		if (this.pending) {
+			this.queuedDt = Math.min(MAX_ZOMBIE_DIRECTOR_CATCH_UP_SECONDS, this.queuedDt + dt);
+			return;
+		}
+		const stepDt = Math.min(MAX_ZOMBIE_DIRECTOR_CATCH_UP_SECONDS, dt + this.queuedDt);
+		this.queuedDt = 0;
+		const snapshot = this.snapshot(world, stepDt);
 		const request: ZombieDirectorWorkerRequest = { type: "step", snapshot };
 		this.pending = true;
 		this.worker.postMessage(request);

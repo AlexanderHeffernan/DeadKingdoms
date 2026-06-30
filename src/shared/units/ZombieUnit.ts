@@ -120,9 +120,10 @@ export class ZombieUnit extends BaseUnit {
 		const targetPoint = context.centerOf(target);
 		const range = this.range + (target.size || 0.6);
 		const wallLikeBlocker = context.wallLikeBlockingBuildingToward?.(zombie, targetPoint);
+		const blockingBuilding = context.blockingBuildingToward(zombie, targetPoint);
+		if (!blockingBuilding) return target;
 		if (context.hasReasonablePathToTarget(zombie, targetPoint, range)) return target;
-		if (wallLikeBlocker) return wallLikeBlocker;
-		return context.blockingBuildingToward(zombie, targetPoint) || target;
+		return wallLikeBlocker || blockingBuilding;
 	}
 
 	private followHordeTarget(context: UnitSimulationContext, zombie: Unit, target: Vec2, dt: number) {
@@ -157,8 +158,9 @@ export class ZombieUnit extends BaseUnit {
 		if (zombie.zombieGoalKind !== "sound") return null;
 		const sourceTarget = zombie.zombieHordeSourceTarget || target;
 		const wallLikeBlocker = context.wallLikeBlockingBuildingToward?.(zombie, sourceTarget);
+		if (!wallLikeBlocker) return null;
 		if (context.hasReasonablePathToTarget(zombie, sourceTarget, 0.45)) return null;
-		return wallLikeBlocker || null;
+		return wallLikeBlocker;
 	}
 
 	private findNearestUnitTarget(context: UnitSimulationContext, zombie: Unit, range: number): Unit | null {

@@ -11,6 +11,7 @@ import type {
 } from "./zombieAiWorkerProtocol.js";
 
 const WORKER_DISABLED = process.env.ZOMBIE_AI_WORKER === "0";
+const MAX_ZOMBIE_AI_CATCH_UP_SECONDS = 0.25;
 
 export type ZombieAiWorkerStepProfiler = {
 	measure<T>(name: string, label: string, count: number, work: () => T): T;
@@ -28,6 +29,7 @@ export class ZombieAiWorkerClient {
 	private failures = 0;
 	private lastError: string | null = null;
 	private fallback = WORKER_DISABLED;
+	private queuedDt = 0;
 
 	step(
 		world: World,
@@ -37,6 +39,7 @@ export class ZombieAiWorkerClient {
 		profiler: ZombieAiWorkerStepProfiler | null = null,
 	): boolean {
 		if (this.fallback || zombies.length === 0) {
+			this.queuedDt = 0;
 			measureWorkerStep(profiler, "zombieAiWorkerStatus", "Zombie AI worker status", 1, () => this.writePerf(world, "fallback"));
 			return false;
 		}
@@ -55,6 +58,7 @@ export class ZombieAiWorkerClient {
 		void this.worker?.terminate();
 		this.worker = null;
 		this.pending = false;
+		this.queuedDt = 0;
 	}
 
 	private ensureWorker(world: World) {
@@ -124,24 +128,32 @@ export class ZombieAiWorkerClient {
 	}
 
 	private startNext(world: World, dt: number, zombies: ZombieAiStep[], profiler: ZombieAiWorkerStepProfiler | null) {
-		if (!this.worker || this.pending) return;
-		const snapshot = measureWorkerStep(profiler, "zombieAiWorkerSnapshot", "Zombie AI worker snapshot", zombies.length, () => this.snapshot(world, dt, zombies));
+		if (!this.worker) return;
+		if (this.pending) {
+			this.queuedDt = Math.min(MAX_ZOMBIE_AI_CATCH_UP_SECONDS, this.queuedDt + dt);
+			return;
+		}
+		const queuedDt = this.queuedDt;
+		const stepDt = Math.min(MAX_ZOMBIE_AI_CATCH_UP_SECONDS, dt + queuedDt);
+		this.queuedDt = 0;
+		const snapshot = measureWorkerStep(profiler, "zombieAiWorkerSnapshot", "Zombie AI worker snapshot", zombies.length, () => this.snapshot(world, dt, stepDt, queuedDt, zombies));
 		const request: ZombieAiWorkerRequest = { type: "step", snapshot };
 		this.pending = true;
 		measureWorkerStep(profiler, "zombieAiWorkerPost", "Zombie AI worker postMessage", zombies.length, () => this.worker!.postMessage(request));
 	}
 
-	private snapshot(world: World, dt: number, zombies: ZombieAiStep[]): ZombieAiWorkerSnapshot {
+	private snapshot(world: World, dt: number, stepDt: number, queuedDt: number, zombies: ZombieAiStep[]): ZombieAiWorkerSnapshot {
+		const adjustedZombies = addQueuedZombieStepDt(zombies, dt, queuedDt);
 		return {
 			id: this.nextId++,
 			tick: world.tick,
-			dt,
+			dt: stepDt,
 			map: world.map,
 			units: snapshotUnits(world),
 			buildings: snapshotBuildings(world),
 			corpses: snapshotCorpses(world),
 			occupancy: world._occupancy ? new Uint8Array(world._occupancy) : undefined,
-			zombies,
+			zombies: adjustedZombies,
 		};
 	}
 
@@ -158,6 +170,15 @@ export class ZombieAiWorkerClient {
 			...(this.lastError ? { lastError: this.lastError } : {}),
 		};
 	}
+}
+
+function addQueuedZombieStepDt(zombies: ZombieAiStep[], tickDt: number, queuedDt: number) {
+	if (tickDt <= 0 || queuedDt <= 0.0001) return zombies;
+	return zombies.map((step) => {
+		const cadenceCoverage = tickDt * Math.max(0, step.cadence - 1);
+		const extraDt = Math.max(0, queuedDt - cadenceCoverage);
+		return extraDt > 0.0001 ? { ...step, dt: step.dt + extraDt } : step;
+	});
 }
 
 function measureWorkerStep<T>(profiler: ZombieAiWorkerStepProfiler | null, name: string, label: string, count: number, work: () => T): T {

@@ -62,6 +62,7 @@ import type {
 	EntityId,
 	Player,
 	PlayerId,
+	ResourceCost,
 	ResourceNode,
 	ResourceType,
 	Ruin,
@@ -97,6 +98,8 @@ const TARGET_UNIT_GRID_CELL_SIZE = 4;
 const COMMAND_CLUSTER_DISTANCE = 12;
 const RALLY_GATHER_RADIUS = 6;
 const GATHER_RETARGET_CANDIDATE_LIMIT = 20;
+const GATHER_ASSIGNMENT_SPREAD_PENALTY = 1000;
+const RESOURCE_GATHER_RANGE = 1.1;
 const FORMATION_SEARCH_RADIUS = 16;
 const FORMATION_ADJACENT_BLOCK_PENALTY = 5;
 const FORMATION_NEARBY_BLOCK_PENALTY = 1.2;
@@ -258,7 +261,7 @@ function clearSpawnResources(
 ) {
 	for (const resource of Object.values(world.resources)) {
 		if (distance(resource, { x, y }) <= radius) {
-			delete world.resources[resource.id];
+			removeResource(world, resource);
 		}
 	}
 }
@@ -318,6 +321,19 @@ export function grantPlayerSoldiers(
 	recalcPlayer(world, playerId);
 	updateLeaderboard(world);
 	return granted;
+}
+
+export function grantPlayerResource(
+	world: World,
+	playerId: PlayerId,
+	resource: ResourceType,
+	amount: number,
+): number | null {
+	const player = world.players[playerId];
+	if (!player) return null;
+	const safeAmount = clamp(Math.floor(amount), 1, 100000);
+	player.resources[resource] = (player.resources[resource] || 0) + safeAmount;
+	return player.resources[resource];
 }
 
 /** Dev tool: toggles invincibility on the player's town center and returns the new state. */
@@ -436,7 +452,7 @@ export function command(
 	const player = getOwn(world.players, playerId);
 	if (!player || player.defeated)
 		return { ok: false, error: "Player unavailable." };
-	rebuildOccupancy(world);
+	ensureOccupancy(world);
 	const handler = hasOwn(COMMAND_HANDLERS, body.type)
 		? COMMAND_HANDLERS[body.type]
 		: null;
@@ -451,9 +467,7 @@ export function stepWorld(world: World, dt: number) {
 	const profiler = new TickProfiler();
 	try {
 		world.tick += 1;
-		profiler.measure("occupancy", "Occupancy", () =>
-			rebuildOccupancy(world),
-		);
+		profiler.measure("occupancy", "Occupancy", () => ensureOccupancy(world));
 		const context = profiler.measure("context", "Context grids", () =>
 			createSimulationContext(world),
 		);
@@ -739,6 +753,7 @@ type CommandHandler<T extends CommandPayload["type"]> = (
 const COMMAND_HANDLERS: { [K in CommandPayload["type"]]: CommandHandler<K> } = {
 	move: commandMove,
 	build: commandBuild,
+	buildWallLine: commandBuildWallLine,
 	instantBuild: commandInstantBuild,
 	finishBuild: commandFinishBuild,
 	deleteBuilding: commandDeleteBuilding,
@@ -894,7 +909,7 @@ function createSimulationContext(
 		gatherResource,
 		gatherTargetFor,
 		gatherRange: (entity) =>
-			isBuilding(entity) ? entity.gatherRange : 1.1,
+			isBuilding(entity) ? entity.gatherRange : RESOURCE_GATHER_RANGE,
 		isBuilding,
 		nearestDepot: (ownerId, resource, source) =>
 			nearestDepot(world, ownerId, resource, source),
@@ -904,9 +919,7 @@ function createSimulationContext(
 			findAlternateResource(world, unit, resourceKind, currentTarget),
 		maybeAutoReplenishBuilding: (building) =>
 			maybeAutoReplenishBuilding(world, building),
-		deleteResource: (resource) => {
-			delete world.resources[resource.id];
-		},
+		deleteResource: (resource) => removeResource(world, resource),
 		makeStump,
 		depositResource: (ownerId, resource, amount) => {
 			world.players[ownerId]!.resources[resource] += amount;
@@ -1087,19 +1100,105 @@ function rebuildOccupancy(world: World) {
 		}
 	}
 	if (!previous || occupancyChanged(previous, grid)) {
-		world._pathing ??= {
-			occupancyVersion: 0,
-			flowFields: new Map(),
-			clearanceFields: new Map(),
-			arrivalGroups: new Map(),
-			pathRequestsThisTick: 0,
-			lastRequestTick: -1,
-		};
-		world._pathing.occupancyVersion += 1;
-		world._pathing.flowFields.clear();
-		world._pathing.clearanceFields.clear();
-		world._pathing.arrivalGroups.clear();
+		invalidatePathing(world);
 	}
+}
+
+function ensureOccupancy(world: World) {
+	if (!world._occupancy || world._occupancy.length !== MAP_SIZE * MAP_SIZE)
+		rebuildOccupancy(world);
+}
+
+function removeBuilding(world: World, building: Building) {
+	if (!world.buildings[building.id]) return;
+	delete world.buildings[building.id];
+	markBuildingOccupancy(world, building, false);
+}
+
+function removeResource(world: World, resource: ResourceNode) {
+	if (!world.resources[resource.id]) return;
+	delete world.resources[resource.id];
+	markResourceOccupancy(world, resource, false);
+}
+
+function markBuildingOccupancy(world: World, building: Building, occupied: boolean) {
+	if (!building.walkBlocking) return;
+	markOccupancyFootprint(world, building, occupied);
+}
+
+function markResourceOccupancy(world: World, resource: ResourceNode, occupied: boolean) {
+	markOccupancyFootprint(world, {
+		x: Math.round(resource.x),
+		y: Math.round(resource.y),
+		width: 1,
+		height: 1,
+	}, occupied);
+}
+
+function markOccupancyFootprint(world: World, footprint: Footprint, occupiedValue: boolean) {
+	if (!world._occupancy || world._occupancy.length !== MAP_SIZE * MAP_SIZE) return;
+	const value = occupiedValue ? 1 : 0;
+	let changed = false;
+	for (let dy = 0; dy < footprintHeight(footprint); dy += 1) {
+		for (let dx = 0; dx < footprintWidth(footprint); dx += 1) {
+			const x = Math.floor(footprint.x) + dx;
+			const y = Math.floor(footprint.y) + dy;
+			if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) continue;
+			const index = y * MAP_SIZE + x;
+			if (world._occupancy[index] === value) continue;
+			world._occupancy[index] = value;
+			changed = true;
+		}
+	}
+	if (changed) invalidatePathing(world);
+}
+
+function invalidatePathing(world: World) {
+	const pathing = ensurePathingState(world);
+	if ((pathing.occupancyBatchDepth ?? 0) > 0) {
+		pathing.occupancyBatchChanged = true;
+		return;
+	}
+	invalidatePathingNow(pathing);
+}
+
+function batchOccupancyUpdates<T>(world: World, work: () => T): T {
+	const pathing = ensurePathingState(world);
+	pathing.occupancyBatchDepth = (pathing.occupancyBatchDepth ?? 0) + 1;
+	try {
+		return work();
+	} finally {
+		pathing.occupancyBatchDepth = Math.max(0, (pathing.occupancyBatchDepth ?? 1) - 1);
+		if (pathing.occupancyBatchDepth === 0 && pathing.occupancyBatchChanged) {
+			pathing.occupancyBatchChanged = false;
+			invalidatePathingNow(pathing);
+		}
+	}
+}
+
+function ensurePathingState(world: World) {
+	world._pathing ??= {
+		occupancyVersion: 0,
+		flowFields: new Map(),
+		clearanceFields: new Map(),
+		arrivalGroups: new Map(),
+		pathRequestsThisTick: 0,
+		lastRequestTick: -1,
+	};
+	return world._pathing;
+}
+
+function invalidatePathingNow(pathing: NonNullable<World["_pathing"]>) {
+	pathing.occupancyVersion += 1;
+	pathing.flowFields.clear();
+	pathing.clearanceFields.clear();
+	pathing.arrivalGroups.clear();
+	delete pathing.hardBlockingTiles;
+	delete pathing.blockingBuildingsByTile;
+	delete pathing.ownGateTiles;
+	delete pathing.ownGateSignature;
+	delete pathing.resourceGrid;
+	delete pathing.clearMovementLineCache;
 }
 
 function occupancyChanged(previous: Uint8Array, next: Uint8Array) {
@@ -1547,6 +1646,7 @@ function createBuilding(
 	});
 	if (!free && !spend(world.players[ownerId]!, def.cost)) return null;
 	world.buildings[building.id] = building;
+	markBuildingOccupancy(world, building, true);
 	return building;
 }
 
@@ -1600,6 +1700,7 @@ function addResourceNode(
 		decay: 0,
 	};
 	world.resources[resource.id] = resource;
+	markResourceOccupancy(world, resource, true);
 	return resource;
 }
 
@@ -1645,15 +1746,16 @@ function commandMove(
 				x: clamp(Number(body.x), 0, MAP_SIZE - 1),
 				y: clamp(Number(body.y), 0, MAP_SIZE - 1),
 			};
-			let landingTarget = clusterLandingTargets.get(cluster);
-			if (!landingTarget) {
-				landingTarget = nearestWalkablePoint(
-					world,
-					target,
-					reservedFormationTargets,
-				);
-				clusterLandingTargets.set(cluster, landingTarget);
-			}
+				let landingTarget = clusterLandingTargets.get(cluster);
+				if (!landingTarget) {
+					landingTarget = nearestCommandLandingPoint(
+						world,
+						target,
+						clusterCenter(cluster),
+						reservedFormationTargets,
+					);
+					clusterLandingTargets.set(cluster, landingTarget);
+				}
 			const moveGroupId = moveGroupIdFor(
 				playerId,
 				world.tick,
@@ -1758,31 +1860,43 @@ function commandGather(
 		targetBuilding?.ownerId === playerId && isComplete(targetBuilding)
 			? targetBuilding.depotGatherKind()
 			: null;
-	const depotGatherTarget =
-		targetBuilding && depotResource
-			? findNextResourceNear(
-					world,
-					centerOf(targetBuilding),
-					depotResource,
-					playerId,
-				)
-			: null;
+	const depotGatherPoint = targetBuilding && depotResource ? centerOf(targetBuilding) : null;
 	const resource =
 		getOwn(world.resources, body.targetId) ||
 		gatherableBuilding(targetBuilding, playerId) ||
-		depotGatherTarget;
+		(depotGatherPoint
+			? findNextResourceNear(
+					world,
+					depotGatherPoint,
+					depotResource,
+					playerId,
+				)
+			: null);
 	if (!resource) return { ok: false, error: "Invalid resource." };
 	let assigned = false;
 	const reachability = createGatherReachabilityCache();
+	const reservedGatherTargets = new Map<string, number>();
 	forOwnUnits(world, playerId, body.unitIds, (unit) => {
 		if (unitBehavior(unit).canGather) {
-			const assignedResource = reachableGatherResourceForUnit(world, unit, resource, reachability);
+			const requestedResource = depotGatherPoint
+				? findNextResourceNear(
+						world,
+						depotGatherPoint,
+						depotResource,
+						playerId,
+						unit,
+						reservedGatherTargets,
+					)
+				: resource;
+			if (!requestedResource) return;
+			const assignedResource = reachableGatherResourceForUnit(world, unit, requestedResource, reachability, reservedGatherTargets);
 			if (!assignedResource) return;
 			if (
 				isBuilding(assignedResource) &&
-				!buildingHasGathererCapacity(world, assignedResource, unit)
+				!buildingHasGathererCapacity(world, assignedResource, unit, reservedGatherTargets)
 			)
 				return;
+			reserveGatherTarget(reservedGatherTargets, assignedResource);
 			setUnitCommand(world, unit, {
 				type: "gather",
 				targetId: assignedResource.id,
@@ -1893,6 +2007,128 @@ function commandBuild(
 	return { ok: true };
 }
 
+function commandBuildWallLine(
+	world: World,
+	playerId: PlayerId,
+	body: Extract<CommandPayload, { type: "buildWallLine" }>,
+): CommandResult {
+	const tiles = normalizeWallLineTiles(body.tiles);
+	if (tiles.length === 0) return { ok: false, error: "No wall tiles." };
+	const plan = planWallLine(world, playerId, tiles);
+	if (!plan.ok) return plan;
+	if (body.instant) return instantBuildWallLine(world, playerId, plan.tiles, plan.skipped);
+	if (plan.tiles.length === 0)
+		return { ok: true, placed: 0, skipped: plan.skipped };
+	const builders = buildCapableUnits(world, playerId, body.unitIds);
+	if (builders.length === 0)
+		return { ok: false, error: "Select build-capable units." };
+	const player = getOwn(world.players, playerId);
+	if (!player) return { ok: false, error: "Player not found." };
+	if (!spend(player, scaleCost(BUILDING_TYPES.wall.cost, plan.tiles.length)))
+		return { ok: false, error: "Not enough resources." };
+	const buildings = batchOccupancyUpdates(world, () =>
+		plan.tiles
+			.map((tile) => createBuilding(world, playerId, "wall", tile.x, tile.y, true))
+			.filter((building): building is Building => Boolean(building)),
+	);
+	for (const building of buildings) {
+		building.startConstruction(Math.max(12, Math.floor(building.maxHp * 0.25)));
+		building.builderIds = builders.map((unit) => unit.id);
+	}
+	for (const unit of builders) {
+		const building = nearestBuilding(unit, buildings);
+		if (!building) continue;
+		setUnitCommand(world, unit, {
+			type: "build",
+			targetId: building.id,
+			path: null,
+			resourceKind: null,
+			gatherBuiltFarm: false,
+		});
+	}
+	return { ok: true, placed: buildings.length, skipped: plan.skipped };
+}
+
+function normalizeWallLineTiles(tiles: Vec2[]) {
+	const unique = new Map<string, Vec2>();
+	for (const tile of tiles) {
+		const placement = buildPlacement("wall", tile.x, tile.y);
+		const key = `${placement.x},${placement.y}`;
+		if (!unique.has(key)) unique.set(key, { x: placement.x, y: placement.y });
+	}
+	return [...unique.values()];
+}
+
+function planWallLine(
+	world: World,
+	playerId: PlayerId,
+	tiles: Vec2[],
+): { ok: true; tiles: Vec2[]; skipped: number } | { ok: false; error: string } {
+	const planned: Vec2[] = [];
+	let skipped = 0;
+	for (const tile of tiles) {
+		if (ownWallAt(world, playerId, tile.x, tile.y)) {
+			skipped += 1;
+			continue;
+		}
+		if (!canPlace(world, tile.x, tile.y, 1, 1, null))
+			return { ok: false, error: "Blocked tile." };
+		planned.push(tile);
+	}
+	return { ok: true, tiles: planned, skipped };
+}
+
+function instantBuildWallLine(
+	world: World,
+	playerId: PlayerId,
+	tiles: Vec2[],
+	skipped: number,
+): CommandResult {
+	const player = getOwn(world.players, playerId);
+	if (!player?.adminLevel)
+		return { ok: false, error: "Admin access is required." };
+	if (tiles.length === 0) return { ok: true, placed: 0, skipped };
+	const buildings = batchOccupancyUpdates(world, () =>
+		tiles
+			.map((tile) => createBuilding(world, playerId, "wall", tile.x, tile.y, true))
+			.filter((building): building is Building => Boolean(building)),
+	);
+	for (const building of buildings) {
+		building.markComplete();
+		building.hp = building.maxHp;
+		building.builderIds = [];
+	}
+	return { ok: true, placed: buildings.length, skipped };
+}
+
+function buildCapableUnits(world: World, playerId: PlayerId, unitIds: UnitId[]) {
+	return Object.values(world.units).filter(
+		(unit) =>
+			unit.ownerId === playerId &&
+			unitIds.includes(unit.id) &&
+			unitBehavior(unit).canBuild,
+	);
+}
+
+function nearestBuilding(unit: Unit, buildings: Building[]) {
+	let nearest: Building | null = null;
+	let nearestDistance = Infinity;
+	for (const building of buildings) {
+		const d = distance(unit, centerOf(building));
+		if (d >= nearestDistance) continue;
+		nearest = building;
+		nearestDistance = d;
+	}
+	return nearest;
+}
+
+function scaleCost(cost: ResourceCost, multiplier: number): ResourceCost {
+	const scaled: ResourceCost = {};
+	for (const [resource, amount] of Object.entries(cost) as [ResourceType, number][])
+		scaled[resource] = amount * multiplier;
+	return scaled;
+}
+
 function commandInstantBuild(
 	world: World,
 	playerId: PlayerId,
@@ -1922,7 +2158,7 @@ function commandInstantBuild(
 	)
 		return { ok: false, error: "Blocked tile." };
 	if (body.buildingType === "gate" && replacementWall)
-		delete world.buildings[replacementWall.id];
+		removeBuilding(world, replacementWall);
 	const building = createBuilding(
 		world,
 		playerId,
@@ -1967,7 +2203,7 @@ function replaceWallWithGate(
 	const cost = netCost(BUILDING_TYPES.gate.cost, refund);
 	if (!spend(player, cost))
 		return { ok: false, error: "Not enough resources." };
-	delete world.buildings[wall.id];
+	removeBuilding(world, wall);
 	const gate = createBuilding(world, playerId, "gate", wall.x, wall.y, true);
 	if (!gate) return { ok: false, error: "Could not place gate." };
 	gate.startConstruction(Math.max(12, Math.floor(gate.maxHp * 0.25)));
@@ -2048,7 +2284,7 @@ function commandDeleteBuilding(
 	if (!building || building.ownerId !== playerId)
 		return { ok: false, error: "Select one of your buildings." };
 	createRuin(world, building);
-	delete world.buildings[building.id];
+	removeBuilding(world, building);
 	for (const unit of Object.values(world.units)) {
 		if ("targetId" in unit.command && unit.command.targetId === building.id)
 			setUnitCommand(world, unit, { type: "idle" });
@@ -2197,6 +2433,18 @@ function formationSlotOffset(count: number, index: number) {
 	return isFinite(x) && isFinite(y) ? { x, y } : undefined;
 }
 
+function nearestCommandLandingPoint(
+	world: World,
+	point: { x: number; y: number },
+	preferFrom: Vec2,
+	reserved?: Set<string>,
+) {
+	return nearestWalkablePoint(world, point, reserved, {
+		avoidClutter: false,
+		preferFrom,
+	});
+}
+
 function formationSpacing(count: number) {
 	if (count >= 500) return 0.86;
 	if (count >= 220) return 0.82;
@@ -2210,12 +2458,14 @@ function nearestWalkablePoint(
 	world: World,
 	point: { x: number; y: number },
 	reserved?: Set<string>,
+	options: { avoidClutter?: boolean; preferFrom?: Vec2 } = {},
 ) {
 	const origin = {
 		x: clamp(Math.floor(point.x), 0, MAP_SIZE - 1),
 		y: clamp(Math.floor(point.y), 0, MAP_SIZE - 1),
 	};
 	let best: { x: number; y: number; score: number } | null = null;
+	const avoidClutter = options.avoidClutter ?? true;
 	for (let radius = 0; radius <= FORMATION_SEARCH_RADIUS; radius += 1) {
 		for (let y = origin.y - radius; y <= origin.y + radius; y += 1) {
 			for (let x = origin.x - radius; x <= origin.x + radius; x += 1) {
@@ -2224,13 +2474,13 @@ function nearestWalkablePoint(
 					Math.abs(y - origin.y) !== radius
 				)
 					continue;
-				if (!isAvailableFormationTile(world, x, y, reserved)) continue;
-				const score = formationTileScore(world, point, x, y);
-				if (!best || score < best.score) best = { x, y, score };
+					if (!isAvailableFormationTile(world, x, y, reserved)) continue;
+					const score = formationTileScore(world, point, x, y, avoidClutter, options.preferFrom);
+					if (!best || score < best.score) best = { x, y, score };
+				}
 			}
+			if (best && (!avoidClutter || formationTileClutter(world, best.x, best.y) === 0)) break;
 		}
-		if (best && formationTileClutter(world, best.x, best.y) === 0) break;
-	}
 	if (best) return reserveFormationPoint(best.x, best.y, reserved);
 	return {
 		x: clamp(point.x, 0.2, MAP_SIZE - 0.2),
@@ -2238,8 +2488,31 @@ function nearestWalkablePoint(
 	};
 }
 
-function formationTileScore(world: World, point: Vec2, x: number, y: number) {
-	return Math.hypot(x + 0.5 - point.x, y + 0.5 - point.y) + formationTileClutter(world, x, y);
+function formationTileScore(
+	world: World,
+	point: Vec2,
+	x: number,
+	y: number,
+	avoidClutter: boolean,
+	preferFrom?: Vec2,
+) {
+	return Math.hypot(x + 0.5 - point.x, y + 0.5 - point.y)
+		+ (avoidClutter ? formationTileClutter(world, x, y) : 0)
+		+ landingSidePenalty(point, x, y, preferFrom);
+}
+
+function landingSidePenalty(point: Vec2, x: number, y: number, preferFrom?: Vec2) {
+	if (!preferFrom) return 0;
+	const fromX = preferFrom.x - point.x;
+	const fromY = preferFrom.y - point.y;
+	const fromLength = Math.hypot(fromX, fromY);
+	if (fromLength <= 0.001) return 0;
+	const candidateX = x + 0.5 - point.x;
+	const candidateY = y + 0.5 - point.y;
+	const candidateLength = Math.hypot(candidateX, candidateY);
+	if (candidateLength <= 0.001) return 0;
+	const alignment = (fromX * candidateX + fromY * candidateY) / (fromLength * candidateLength);
+	return alignment < 0 ? -alignment * 0.75 : 0;
 }
 
 function formationTileClutter(world: World, x: number, y: number) {
@@ -2454,7 +2727,7 @@ function stepResourceDecay(world: World, dt: number) {
 		if (resource.stage !== "stump") continue;
 		resource.decay = (resource.decay || 0) + dt;
 		if (resource.decay >= STUMP_DECAY_SECONDS)
-			delete world.resources[resource.id];
+			removeResource(world, resource);
 	}
 }
 
@@ -2649,9 +2922,10 @@ function reachableGatherResourceForUnit(
 	unit: Unit,
 	resource: ResourceNode | Building,
 	cache?: GatherReachabilityCache,
+	reservedTargets?: ReadonlyMap<string, number>,
 ): ResourceNode | Building | null {
 	if (canReachGatherResource(world, unit, resource, cache)) return resource;
-	return findAlternateResource(world, unit, gatherResource(resource), resource, cache);
+	return findAlternateResource(world, unit, gatherResource(resource), resource, cache, reservedTargets);
 }
 
 function findAlternateResource(
@@ -2660,20 +2934,21 @@ function findAlternateResource(
 	resourceKind: ResourceType,
 	currentTarget: ResourceNode | Building,
 	cache?: GatherReachabilityCache,
+	reservedTargets?: ReadonlyMap<string, number>,
 ): ResourceNode | Building | null {
 	const cacheKey = gatherAlternateCacheKey(unit, resourceKind, currentTarget);
-	const cached = cache?.alternates.get(cacheKey);
+	const cached = reservedTargets ? undefined : cache?.alternates.get(cacheKey);
 	if (cached !== undefined) return cached;
 	const depot = nearestDepot(world, unit.ownerId, resourceKind, unit);
 	const currentPoint = isBuilding(currentTarget) ? centerOf(currentTarget) : currentTarget;
-	const candidates = rankedGatherResourceCandidates(world, unit, resourceKind, currentTarget, currentPoint, depot);
+	const candidates = rankedGatherResourceCandidates(world, unit, resourceKind, currentTarget, currentPoint, depot, reservedTargets);
 	for (const { candidate } of candidates) {
 		if (canReachGatherResource(world, unit, candidate, cache)) {
-			cache?.alternates.set(cacheKey, candidate);
+			if (!reservedTargets) cache?.alternates.set(cacheKey, candidate);
 			return candidate;
 		}
 	}
-	cache?.alternates.set(cacheKey, null);
+	if (!reservedTargets) cache?.alternates.set(cacheKey, null);
 	return null;
 }
 
@@ -2682,7 +2957,7 @@ function canReachGatherResource(world: World, unit: Unit, resource: ResourceNode
 	const cached = cache?.reachable.get(cacheKey);
 	if (cached !== undefined) return cached;
 	const point = isBuilding(resource) ? centerOf(resource) : resource;
-	const range = isBuilding(resource) ? resource.gatherRange : 1.1;
+	const range = isBuilding(resource) ? Math.max(resource.gatherRange, RESOURCE_GATHER_RANGE) : RESOURCE_GATHER_RANGE;
 	const reachable = hasPathToInteractionRange(world, unit, point, range);
 	cache?.reachable.set(cacheKey, reachable);
 	return reachable;
@@ -2710,17 +2985,20 @@ function findNextResourceNear(
 	resourceKind: ResourceType | null,
 	playerId: PlayerId,
 	assignedUnit: Unit | null = null,
+	reservedTargets: ReadonlyMap<string, number> | null = null,
 ): ResourceNode | Building | null {
 	if (!resourceKind) return null;
 	const RANGE = 30;
 	let best = null;
-	let bestDist = RANGE;
+	let bestScore = Infinity;
 	for (const r of Object.values(world.resources)) {
 		if (r.amount <= 0 || r.resource !== resourceKind) continue;
 		const d = distance(source, r);
-		if (d < bestDist) {
+		if (d > RANGE) continue;
+		const score = d + gatherReservationPenalty(reservedTargets, r);
+		if (score < bestScore) {
 			best = r;
-			bestDist = d;
+			bestScore = score;
 		}
 	}
 	for (const b of Object.values(world.buildings)) {
@@ -2730,11 +3008,13 @@ function findNextResourceNear(
 			b.gatherExhausted
 		)
 			continue;
-		if (!buildingHasGathererCapacity(world, b, assignedUnit)) continue;
+		if (!buildingHasGathererCapacity(world, b, assignedUnit, reservedTargets)) continue;
 		const d = distance(source, centerOf(b));
-		if (d < bestDist) {
+		if (d > RANGE) continue;
+		const score = d + gatherReservationPenalty(reservedTargets, b);
+		if (score < bestScore) {
 			best = b;
-			bestDist = d;
+			bestScore = score;
 		}
 	}
 	return best;
@@ -2747,13 +3027,14 @@ function rankedGatherResourceCandidates(
 	currentTarget: ResourceNode | Building,
 	currentPoint: Vec2,
 	depot: Building | null,
+	reservedTargets: ReadonlyMap<string, number> | undefined = undefined,
 ): RankedGatherCandidate[] {
 	const ranked: RankedGatherCandidate[] = [];
 	for (const resource of Object.values(world.resources)) {
 		if (resource.id === currentTarget.id || resource.amount <= 0 || resource.resource !== resourceKind) continue;
 		addRankedGatherCandidate(ranked, {
 			candidate: resource,
-			score: gatherRetargetScore(unit, resource, currentPoint, depot),
+			score: gatherRetargetScore(unit, resource, currentPoint, depot) + gatherReservationPenalty(reservedTargets, resource),
 		});
 	}
 	for (const building of Object.values(world.buildings)) {
@@ -2762,15 +3043,26 @@ function rankedGatherResourceCandidates(
 			building.canBeGatheredBy(unit.ownerId) &&
 			building.gatherResource === resourceKind &&
 			!building.gatherExhausted &&
-			buildingHasGathererCapacity(world, building, unit)
+			buildingHasGathererCapacity(world, building, unit, reservedTargets)
 		) {
 			addRankedGatherCandidate(ranked, {
 				candidate: building,
-				score: gatherRetargetScore(unit, centerOf(building), currentPoint, depot),
+				score: gatherRetargetScore(unit, centerOf(building), currentPoint, depot) + gatherReservationPenalty(reservedTargets, building),
 			});
 		}
 	}
 	return ranked.sort((a, b) => a.score - b.score);
+}
+
+function reserveGatherTarget(reservedTargets: Map<string, number>, target: ResourceNode | Building) {
+	reservedTargets.set(target.id, (reservedTargets.get(target.id) || 0) + 1);
+}
+
+function gatherReservationPenalty(
+	reservedTargets: ReadonlyMap<string, number> | null | undefined,
+	target: ResourceNode | Building,
+) {
+	return (reservedTargets?.get(target.id) || 0) * GATHER_ASSIGNMENT_SPREAD_PENALTY;
 }
 
 function gatherRetargetScore(unit: Unit, point: Vec2, currentPoint: Vec2, depot: Building | null) {
@@ -2968,9 +3260,10 @@ function buildingHasGathererCapacity(
 	world: World,
 	building: Building,
 	assignedUnit: Unit | null = null,
+	reservedTargets: ReadonlyMap<string, number> | null = null,
 ) {
 	return building.hasGathererCapacity(
-		gathererCountFor(world, building, assignedUnit),
+		gathererCountFor(world, building, assignedUnit) + (reservedTargets?.get(building.id) || 0),
 	);
 }
 
@@ -3166,7 +3459,7 @@ function damage(
 	if (target.kind === "building") {
 		emitActionSound(world, "buildingDestroyed", centerOf(target));
 		createRuin(world, target);
-		delete world.buildings[target.id];
+		removeBuilding(world, target);
 		if (target.type === "townCenter")
 			defeatPlayer(world, target.ownerId, attackerId);
 	} else {
@@ -3197,7 +3490,7 @@ function destroyPlayerStuff(world: World, playerId: PlayerId) {
 	for (const building of Object.values(world.buildings)) {
 		if (building.ownerId === playerId) {
 			createRuin(world, building);
-			delete world.buildings[building.id];
+			removeBuilding(world, building);
 		}
 	}
 }

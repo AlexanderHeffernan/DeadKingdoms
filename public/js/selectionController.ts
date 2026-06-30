@@ -1,6 +1,6 @@
 import { SCALE, TILE_H } from "./constants.js";
 import type { GameState, ViewState } from "./clientTypes.js";
-import { isoToScreen } from "./iso.js";
+import { isoToScreen, screenToIso } from "./iso.js";
 import { spriteMetrics } from "./sprites/spriteInfo.js";
 import type { SoundEffects } from "./sfx.js";
 import { unitBehaviorFor } from "../../src/shared/unitRegistry.js";
@@ -104,6 +104,7 @@ export class SelectionController {
 			const rect = this.renderedEntityRect(entity);
 			const inside = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 			if (!inside) continue;
+			if (this.isResourceSouthTileClick(entity, x, y)) continue;
 			const d = Math.hypot((rect.cx - x) / rect.width, (rect.cy - y) / rect.height);
 			if (d < bestDistance) {
 				best = entity;
@@ -111,6 +112,14 @@ export class SelectionController {
 			}
 		}
 		return best;
+	}
+
+	private isResourceSouthTileClick(entity: SelectableEntity, x: number, y: number) {
+		if (entity.kind !== "resource") return false;
+		const point = screenToIso(x, y, this.view.camera);
+		const visualTile = { x: Math.round(point.x), y: Math.round(point.y) };
+		const resourceTile = { x: Math.round(entity.x), y: Math.round(entity.y) };
+		return visualTile.x + visualTile.y > resourceTile.x + resourceTile.y;
 	}
 
 	private renderedEntityRect(entity: SelectableEntity) {
@@ -121,14 +130,16 @@ export class SelectionController {
 			: isoToScreen(entity.x + this.entityWidth(entity) / 2, entity.y + this.entityHeight(entity) / 2, this.view.camera);
 		const visualWidth = bounds.width * scale;
 		const visualHeight = bounds.height * scale;
-		const left = Math.round(center.x - visualWidth / 2);
-		const top = Math.round(center.y + (this.entityHeight(entity) * TILE_H * (this.view.camera.zoom || 1)) / 2 - visualHeight);
+		const footprintBottom = center.y + (this.entityHeight(entity) * TILE_H * (this.view.camera.zoom || 1)) / 2;
+		const left = Math.round(center.x - visualWidth / 2 - bounds.minX * scale);
+		const top = Math.round(footprintBottom - (bounds.maxY + 1) * scale);
 		const pad = this.hitPadding(entity);
+		const bottomPad = entity.kind === "resource" ? 0 : pad;
 		return {
 			left: left - pad,
 			right: left + visualWidth + pad,
 			top: top - pad,
-			bottom: top + visualHeight + pad,
+			bottom: top + visualHeight + bottomPad,
 			cx: left + visualWidth / 2,
 			cy: top + visualHeight / 2,
 			width: visualWidth,

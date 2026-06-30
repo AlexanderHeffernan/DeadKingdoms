@@ -1,4 +1,4 @@
-import type { AdminSnapshot, ServerPerfSample } from "../../../src/shared/types.js";
+import type { AdminSnapshot, ResourceType, ServerPerfSample } from "../../../src/shared/types.js";
 import { aliveTime, escapeHtml, formatClock, timeAgo } from "./dom.js";
 
 export class AdminDashboard {
@@ -29,8 +29,14 @@ export class AdminDashboard {
 	private readonly enableVisionButton: HTMLButtonElement;
 	private readonly enableSoundDebugButton: HTMLButtonElement;
 	private readonly enableZombieDebugButton: HTMLButtonElement;
+	private readonly enablePathDebugButton: HTMLButtonElement;
+	private readonly enablePathAvailabilityButton: HTMLButtonElement;
+	private readonly enableUnitTileButton: HTMLButtonElement;
 	private readonly spawnHordeButton: HTMLButtonElement;
 	private readonly grantSoldiersButton: HTMLButtonElement;
+	private readonly grantWoodButton: HTMLButtonElement;
+	private readonly grantFoodButton: HTMLButtonElement;
+	private readonly grantStoneButton: HTMLButtonElement;
 	private readonly invincibleButton: HTMLButtonElement;
 	private readonly noiseToolButton: HTMLButtonElement;
 	private readonly instantBuildButton: HTMLButtonElement;
@@ -77,8 +83,14 @@ export class AdminDashboard {
 		this.enableVisionButton = elements.enableVisionButton;
 		this.enableSoundDebugButton = elements.enableSoundDebugButton;
 		this.enableZombieDebugButton = elements.enableZombieDebugButton;
+		this.enablePathDebugButton = elements.enablePathDebugButton;
+		this.enablePathAvailabilityButton = elements.enablePathAvailabilityButton;
+		this.enableUnitTileButton = elements.enableUnitTileButton;
 		this.spawnHordeButton = elements.spawnHordeButton;
 		this.grantSoldiersButton = elements.grantSoldiersButton;
+		this.grantWoodButton = elements.grantWoodButton;
+		this.grantFoodButton = elements.grantFoodButton;
+		this.grantStoneButton = elements.grantStoneButton;
 		this.invincibleButton = elements.invincibleButton;
 		this.noiseToolButton = elements.noiseToolButton;
 		this.instantBuildButton = elements.instantBuildButton;
@@ -182,8 +194,14 @@ export class AdminDashboard {
 		this.enableVisionButton.addEventListener("click", () => this.runCommand(this.enableVisionButton, this.actions.enableFullMapVision));
 		this.enableSoundDebugButton.addEventListener("click", () => this.runCommand(this.enableSoundDebugButton, this.actions.enableSoundDebug));
 		this.enableZombieDebugButton.addEventListener("click", () => this.runCommand(this.enableZombieDebugButton, this.actions.enableZombieDebug));
+		this.enablePathDebugButton.addEventListener("click", () => this.runCommand(this.enablePathDebugButton, this.actions.togglePathDebug));
+		this.enablePathAvailabilityButton.addEventListener("click", () => this.runCommand(this.enablePathAvailabilityButton, this.actions.togglePathAvailabilityDebug));
+		this.enableUnitTileButton.addEventListener("click", () => this.runCommand(this.enableUnitTileButton, this.actions.toggleUnitTileDebug));
 		this.spawnHordeButton.addEventListener("click", () => this.runCommand(this.spawnHordeButton, this.actions.spawnHostileHorde));
 		this.grantSoldiersButton.addEventListener("click", () => this.runCommand(this.grantSoldiersButton, this.actions.grantSoldiers));
+		this.grantWoodButton.addEventListener("click", () => this.runCommand(this.grantWoodButton, () => this.actions.grantResources("wood")));
+		this.grantFoodButton.addEventListener("click", () => this.runCommand(this.grantFoodButton, () => this.actions.grantResources("food")));
+		this.grantStoneButton.addEventListener("click", () => this.runCommand(this.grantStoneButton, () => this.actions.grantResources("stone")));
 		this.invincibleButton.addEventListener("click", () => this.runCommand(this.invincibleButton, this.actions.toggleTownCenterInvincible));
 		this.noiseToolButton.addEventListener("click", async () => {
 			await this.runCommand(this.noiseToolButton, this.actions.toggleNoiseTool);
@@ -462,8 +480,14 @@ export type AdminDashboardElements = {
 	enableVisionButton: HTMLButtonElement;
 	enableSoundDebugButton: HTMLButtonElement;
 	enableZombieDebugButton: HTMLButtonElement;
+	enablePathDebugButton: HTMLButtonElement;
+	enablePathAvailabilityButton: HTMLButtonElement;
+	enableUnitTileButton: HTMLButtonElement;
 	spawnHordeButton: HTMLButtonElement;
 	grantSoldiersButton: HTMLButtonElement;
+	grantWoodButton: HTMLButtonElement;
+	grantFoodButton: HTMLButtonElement;
+	grantStoneButton: HTMLButtonElement;
 	invincibleButton: HTMLButtonElement;
 	noiseToolButton: HTMLButtonElement;
 	instantBuildButton: HTMLButtonElement;
@@ -481,11 +505,15 @@ export type AdminDashboardActions = {
 	enableFullMapVision: () => Promise<string>;
 	enableSoundDebug: () => Promise<string>;
 	enableZombieDebug: () => Promise<string>;
+	togglePathDebug: () => Promise<string>;
+	togglePathAvailabilityDebug: () => Promise<string>;
+	toggleUnitTileDebug: () => Promise<string>;
 	kickPlayer: (targetPlayerId: string) => Promise<string>;
 	banPlayer: (targetPlayerId: string) => Promise<string>;
 	unbanIp: (ipAddress: string) => Promise<string>;
 	spawnHostileHorde: () => Promise<string>;
 	grantSoldiers: () => Promise<string>;
+	grantResources: (resource: ResourceType | "stone") => Promise<string>;
 	toggleTownCenterInvincible: () => Promise<string>;
 	toggleNoiseTool: () => Promise<string>;
 	toggleInstantBuild: () => Promise<string>;

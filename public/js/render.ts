@@ -203,6 +203,8 @@ export class Renderer {
 		this.drawOccludedUnitOutlines(state, view, active);
 		this.hideAllEntitySprites(active);
 		this.hideUnusedSelectionSprites();
+		this.drawPathAvailabilityDebug(state, view);
+		this.drawUnitTileDebug(state, view);
 		this.drawPathDebug(state, view);
 		this.drawSoundDebug(state, view);
 		this.drawZombieDebug(state, view);
@@ -1213,26 +1215,78 @@ export class Renderer {
 		const zoom = view.camera.zoom || 1;
 		const lineWidth = Math.max(1, Math.round(2 * zoom));
 		for (const unit of Object.values(state.snapshot.units)) {
-			if (unit.ownerId !== state.playerId || !state.selectedIds.has(unit.id)) continue;
 			const path = unit.command?.path;
 			if (!path?.length) continue;
-			this.overlayLayer.lineStyle(lineWidth, 0x4fd8c8, 0.42);
+			const selected = state.selectedIds.has(unit.id);
+			this.overlayLayer.lineStyle(lineWidth, 0x4fd8c8, selected ? 0.62 : 0.32);
 			const start = isoToScreen(unit.x, unit.y, view.camera);
 			this.overlayLayer.moveTo(start.x, start.y);
 			for (const point of path) {
-				const screen = isoToScreen(point.x, point.y, view.camera);
+				const visualPoint = pathDebugVisualPoint(point);
+				const screen = isoToScreen(visualPoint.x, visualPoint.y, view.camera);
 				this.overlayLayer.lineTo(screen.x, screen.y);
 			}
-			const end = isoToScreen(path[path.length - 1]!.x, path[path.length - 1]!.y, view.camera);
+			const endPoint = pathDebugVisualPoint(path[path.length - 1]!);
+			const end = isoToScreen(endPoint.x, endPoint.y, view.camera);
 			this.overlayLayer.lineStyle();
-			this.overlayLayer.beginFill(0x4fd8c8, 0.75);
+			this.overlayLayer.beginFill(0x4fd8c8, selected ? 0.85 : 0.55);
 			this.overlayLayer.drawCircle(end.x, end.y, Math.max(2, 3 * zoom));
 			this.overlayLayer.endFill();
 		}
 		this.overlayLayer.lineStyle();
 	}
 
-		private drawZombieDebug(state: GameState, view: ViewState) {
+	private drawPathAvailabilityDebug(state: GameState, view: ViewState) {
+		const snapshot = state.snapshot;
+		if (!snapshot?.pathAvailabilityDebug) return;
+		const blocked = pathBlockedTiles(snapshot, state.playerId);
+		if (blocked.size === 0) return;
+		const bounds = visibleTileBounds(snapshot.map.size, view.camera, this.viewportWidth(), this.viewportHeight());
+		this.overlayLayer.lineStyle(Math.max(1, Math.round((view.camera.zoom || 1) * 0.8)), 0x6f1818, 0.55);
+		this.overlayLayer.beginFill(0xd83f34, 0.28);
+		for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+			for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+				if (!blocked.has(tileKey(x, y))) continue;
+				this.drawTileDiamond(x, y, view.camera);
+			}
+		}
+		this.overlayLayer.endFill();
+		this.overlayLayer.lineStyle();
+	}
+
+	private drawUnitTileDebug(state: GameState, view: ViewState) {
+		const snapshot = state.snapshot;
+		if (!snapshot?.unitTileDebug) return;
+		const tiles = new Set<string>();
+		for (const unit of Object.values(snapshot.units)) {
+			tiles.add(tileKey(Math.floor(unit.x), Math.floor(unit.y)));
+		}
+		if (tiles.size === 0) return;
+		this.overlayLayer.lineStyle(Math.max(1, Math.round((view.camera.zoom || 1) * 0.8)), 0x155e75, 0.72);
+		this.overlayLayer.beginFill(0x33c7f0, 0.24);
+		for (const key of tiles) {
+			const [x, y] = key.split(",").map(Number);
+			this.drawTileDiamond(x!, y!, view.camera);
+		}
+		this.overlayLayer.endFill();
+		this.overlayLayer.lineStyle();
+	}
+
+	private drawTileDiamond(x: number, y: number, camera: CameraState) {
+		// Match the client-side terrain/entity footprint art, which is drawn
+		// around the tile centre. The server pathing tile key remains unchanged.
+		const top = isoToScreen(x - 0.5, y - 0.5, camera);
+		const right = isoToScreen(x + 0.5, y - 0.5, camera);
+		const bottom = isoToScreen(x + 0.5, y + 0.5, camera);
+		const left = isoToScreen(x - 0.5, y + 0.5, camera);
+		this.overlayLayer.moveTo(top.x, top.y);
+		this.overlayLayer.lineTo(right.x, right.y);
+		this.overlayLayer.lineTo(bottom.x, bottom.y);
+		this.overlayLayer.lineTo(left.x, left.y);
+		this.overlayLayer.lineTo(top.x, top.y);
+	}
+
+	private drawZombieDebug(state: GameState, view: ViewState) {
 			if (!shouldDrawEntityDetails(view.camera)) return;
 			const zombies = Object.values(state.snapshot?.units || {}).filter((unit) => unit.type === "zombie" && unit.zombieDebugState);
 			if (!zombies.length) return;
@@ -2190,6 +2244,36 @@ function entityWidth(entity: { size?: number; width?: number }) {
 
 function entityHeight(entity: { size?: number; height?: number }) {
 	return entity.height ?? entity.size ?? 1;
+}
+
+function pathDebugVisualPoint(point: { x: number; y: number }) {
+	if (!isHalfTileCoordinate(point.x) || !isHalfTileCoordinate(point.y)) return point;
+	return { x: point.x - 0.5, y: point.y - 0.5 };
+}
+
+function isHalfTileCoordinate(value: number) {
+	return Math.abs(value - (Math.floor(value) + 0.5)) < 0.001;
+}
+
+function pathBlockedTiles(snapshot: ClientSnapshot, playerId: string | null) {
+	const blocked = new Set<string>();
+	for (const resource of Object.values(snapshot.resources)) {
+		blocked.add(tileKey(Math.round(resource.x), Math.round(resource.y)));
+	}
+	for (const building of Object.values(snapshot.buildings)) {
+		if (!building.walkBlocking || building.hp <= 0) continue;
+		if (building.type === "gate" && building.ownerId === playerId) continue;
+		for (let dy = 0; dy < entityHeight(building); dy += 1) {
+			for (let dx = 0; dx < entityWidth(building); dx += 1) {
+				blocked.add(tileKey(Math.floor(building.x) + dx, Math.floor(building.y) + dy));
+			}
+		}
+	}
+	return blocked;
+}
+
+function tileKey(x: number, y: number) {
+	return `${x},${y}`;
 }
 
 function wallLineTiles(start: { x: number; y: number }, end: { x: number; y: number }) {

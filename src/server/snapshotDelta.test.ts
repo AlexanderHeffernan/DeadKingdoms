@@ -57,6 +57,8 @@ function makeTestSnapshot(overrides: Partial<Snapshot>): Snapshot {
 		hornSounds: [],
 		soundDebug: null,
 		pathDebug: false,
+		pathAvailabilityDebug: false,
+		unitTileDebug: false,
 		serverPerf: null,
 		admin: null,
 		...overrides,

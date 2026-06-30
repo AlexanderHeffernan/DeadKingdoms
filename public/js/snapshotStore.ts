@@ -114,11 +114,13 @@ export class SnapshotStore {
 			dayNight: dayNightStateAt(0),
 			leaderboard: [],
 			notices: [],
-			hornSounds: [],
-			soundDebug: null,
-			pathDebug: false,
-			serverPerf: null,
-			admin: null,
+				hornSounds: [],
+				soundDebug: null,
+				pathDebug: false,
+				pathAvailabilityDebug: false,
+				unitTileDebug: false,
+				serverPerf: null,
+				admin: null,
 		});
 	}
 
@@ -153,10 +155,12 @@ export class SnapshotStore {
 			dayNight: delta.dayNight,
 			leaderboard: delta.leaderboard,
 			notices: delta.notices,
-			hornSounds: delta.hornSounds,
-			soundDebug: delta.soundDebug,
-			pathDebug: delta.pathDebug,
-			serverPerf: delta.serverPerf !== undefined ? delta.serverPerf : previous.serverPerf,
+				hornSounds: delta.hornSounds,
+				soundDebug: delta.soundDebug,
+				pathDebug: delta.pathDebug,
+				pathAvailabilityDebug: delta.pathAvailabilityDebug,
+				unitTileDebug: delta.unitTileDebug,
+				serverPerf: delta.serverPerf !== undefined ? delta.serverPerf : previous.serverPerf,
 			admin: delta.admin !== undefined ? delta.admin : previous.admin,
 		};
 	}

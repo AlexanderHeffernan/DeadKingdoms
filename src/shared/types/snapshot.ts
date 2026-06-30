@@ -252,6 +252,8 @@ export interface Snapshot {
 	hornSounds: HornSoundSource[];
 	soundDebug: SoundDebugSource[] | null;
 	pathDebug: boolean;
+	pathAvailabilityDebug: boolean;
+	unitTileDebug: boolean;
 	serverPerf: ServerPerfStats | null;
 	admin: AdminSnapshot | null;
 }
@@ -280,6 +282,8 @@ export interface SnapshotDelta {
 	hornSounds: HornSoundSource[];
 	soundDebug: SoundDebugSource[] | null;
 	pathDebug: boolean;
+	pathAvailabilityDebug: boolean;
+	unitTileDebug: boolean;
 	serverPerf?: ServerPerfStats | null;
 	admin?: AdminSnapshot | null;
 }

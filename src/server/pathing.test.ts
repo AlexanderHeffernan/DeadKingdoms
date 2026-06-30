@@ -72,6 +72,23 @@ function addUnits(world: World, units: Unit[]) {
 	for (const unit of units) world.units[unit.id] = unit;
 }
 
+function addTestPlayer(world: World, population = 1) {
+	world.players["p-test"] = {
+		id: "p-test",
+		name: "Tester",
+		color: "#ffffff",
+		resources: { wood: 0, food: 0, ore: 0 },
+		autoReplenishFarms: true,
+		explored: new Set(),
+		population,
+		popCap: Math.max(10, population),
+		workerCounts: { idle: 0, gathering: { wood: 0, food: 0, ore: 0 } },
+		defeated: false,
+		score: 0,
+		joinedAt: Date.now(),
+	} as never;
+}
+
 function distanceFrom(a: { x: number; y: number }, b: { x: number; y: number }) {
 	return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -634,6 +651,7 @@ test("zombie ignores non-wall buildings blocking a sound goal", () => {
 	const building = makeBuilding(10, 10, "b-sound-building");
 	let damagedTarget: Building | Unit | null = null;
 	let movementTarget: { x: number; y: number } | null = null;
+	let pathChecks = 0;
 	const behavior = new ZombieUnit();
 	const context = {
 		world,
@@ -647,7 +665,10 @@ test("zombie ignores non-wall buildings blocking a sound goal", () => {
 		},
 		moveAroundSmallObstacle: () => false,
 		moveZombieWithPath: () => false,
-		hasReasonablePathToTarget: () => false,
+		hasReasonablePathToTarget: () => {
+			pathChecks += 1;
+			return false;
+		},
 		blockingBuildingToward: () => building,
 		wallLikeBlockingBuildingToward: () => null,
 		damage: (target: Building | Unit) => {
@@ -659,6 +680,45 @@ test("zombie ignores non-wall buildings blocking a sound goal", () => {
 
 	assert.deepEqual(movementTarget, { x: 18.3, y: 10 });
 	assert.equal(damagedTarget, null);
+	assert.equal(pathChecks, 0);
+});
+
+test("zombie skips expensive path checks for sound targets without direct wall blockers", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-sound-cheap-open");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	zombie.hordeTarget = { x: 18.3, y: 10 };
+	zombie.zombieHordeSourceTarget = { x: 18.3, y: 10 };
+	zombie.zombieGoalKind = "sound";
+	let movementTarget: { x: number; y: number } | null = null;
+	let pathChecks = 0;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [],
+		nearestEnemy: () => null,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: (_unit: Unit, target: { x: number; y: number }) => {
+			movementTarget = target;
+			return false;
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasReasonablePathToTarget: () => {
+			pathChecks += 1;
+			return true;
+		},
+		blockingBuildingToward: () => null,
+		wallLikeBlockingBuildingToward: () => null,
+		damage: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.equal(pathChecks, 0);
+	assert.deepEqual(movementTarget, { x: 18.3, y: 10 });
 });
 
 test("zombie attacks a blocking building when limited pathing cannot progress toward reachable sound", () => {
@@ -815,6 +875,86 @@ test("zombie attacks a blocking building when a visible unit has no path around 
 	behavior.step(context, zombie, 0.1);
 
 	assert.equal(damagedTarget, wall);
+});
+
+test("zombie checks reachable paths before targeting nearby wall blockers", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-cheap-wall-blocker");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	const unit = makeUnit(18.3, 10, "u-behind-cheap-wall");
+	const wall = {
+		...makeBuilding(10, 10, "b-cheap-wall"),
+		type: "wall",
+		width: 1,
+		height: 1,
+		size: 1,
+		walkBlocking: true,
+	} as Building;
+	let movementTarget: { x: number; y: number } | null = null;
+	let pathChecks = 0;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [unit],
+		nearestEnemy: () => wall,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: (_unit: Unit, target: { x: number; y: number }) => {
+			movementTarget = target;
+			return false;
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasReasonablePathToTarget: () => {
+			pathChecks += 1;
+			return true;
+		},
+		wallLikeBlockingBuildingToward: () => wall,
+		blockingBuildingToward: () => wall,
+		damage: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.equal(pathChecks, 1);
+	assert.deepEqual(movementTarget, { x: unit.x, y: unit.y });
+});
+
+test("zombie skips expensive path checks for unobstructed visible units", () => {
+	const world = makeWorld();
+	const zombie = makeUnit(8, 10, "z-cheap-open-target");
+	zombie.type = "zombie";
+	zombie.ownerId = "zombies" as Unit["ownerId"];
+	const unit = makeUnit(18.3, 10, "u-open-target");
+	let movementTarget: { x: number; y: number } | null = null;
+	let pathChecks = 0;
+	const behavior = new ZombieUnit();
+	const context = {
+		world,
+		nearbyTargetUnits: () => [unit],
+		nearestEnemy: () => null,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		distance: distanceBetween,
+		moveZombieSteered: (_unit: Unit, target: { x: number; y: number }) => {
+			movementTarget = target;
+			return false;
+		},
+		moveAroundSmallObstacle: () => false,
+		moveZombieWithPath: () => false,
+		hasReasonablePathToTarget: () => {
+			pathChecks += 1;
+			return true;
+		},
+		wallLikeBlockingBuildingToward: () => null,
+		blockingBuildingToward: () => null,
+		damage: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, zombie, 0.1);
+
+	assert.equal(pathChecks, 0);
+	assert.deepEqual(movementTarget, { x: unit.x, y: unit.y });
 });
 
 test("zombie attacks a blocking building when only an unreasonable path reaches a visible unit", () => {
@@ -1608,6 +1748,44 @@ test("player move command settles around a blocked destination", () => {
 	assert.ok(distanceFrom(unit, { x: 24.5, y: 24.5 }) < 3);
 });
 
+test("move command keeps a single-unit landing beside a screen-horizontal wall line", () => {
+	const world = makeWorld([
+		{ x: 10, y: 10 },
+		{ x: 11, y: 9 },
+		{ x: 12, y: 8 },
+		{ x: 13, y: 7 },
+	]);
+	addTestPlayer(world);
+	const unit = makeUnit(11, 14, "u-screen-below-move");
+	addUnits(world, [unit]);
+
+	const result = issueWorldCommand(world, "p-test" as Unit["ownerId"], {
+		type: "move",
+		playerId: "p-test" as Unit["ownerId"],
+		unitIds: [unit.id],
+		x: 11,
+		y: 10.2,
+	});
+
+	assert.equal(result.ok, true);
+	assert.equal(unit.command.type, "move");
+	assert.ok(unit.command.moveGroupTarget);
+	assert.deepEqual(
+		{ x: Math.floor(unit.command.moveGroupTarget.x), y: Math.floor(unit.command.moveGroupTarget.y) },
+		{ x: 11, y: 10 },
+	);
+
+	let arrived = false;
+	for (let tick = 0; tick < 80; tick += 1) {
+		world.tick = tick;
+		if (unit.command.type === "move") arrived = movePlayerUnitWithPath(world, unit, unit.command, 0.32);
+		if (arrived) break;
+	}
+
+	assert.equal(arrived, true);
+	assert.ok(distanceFrom(unit, { x: 11, y: 10.2 }) < 1.4);
+});
+
 test("player interaction pathing approaches resources without entering the blocked resource tile", () => {
 	const world = makeWorld([{ x: 12, y: 12 }]);
 	const tree: ResourceNode = {
@@ -1636,6 +1814,75 @@ test("player interaction pathing approaches resources without entering the block
 	assert.notDeepEqual({ x: Math.floor(unit.x), y: Math.floor(unit.y) }, { x: 12, y: 12 });
 });
 
+test("villager gathers from screen-below a diagonal resource line", () => {
+	const world = makeWorld([
+		{ x: 10, y: 10 },
+		{ x: 11, y: 9 },
+		{ x: 12, y: 8 },
+	]);
+	const tree: ResourceNode = {
+		id: "r-screen-below-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 10,
+		y: 10,
+		amount: 100,
+		maxAmount: 100,
+	};
+	world.resources[tree.id] = tree;
+	world.resources["r-screen-below-neighbor-a" as ResourceNode["id"]] = {
+		...tree,
+		id: "r-screen-below-neighbor-a" as ResourceNode["id"],
+		x: 11,
+		y: 9,
+	};
+	world.resources["r-screen-below-neighbor-b" as ResourceNode["id"]] = {
+		...tree,
+		id: "r-screen-below-neighbor-b" as ResourceNode["id"],
+		x: 12,
+		y: 8,
+	};
+	const unit = makeUnit(11, 14, "u-screen-below-gather");
+	unit.command = { type: "gather", targetId: tree.id, resourceKind: "wood", progress: 0, path: null };
+	addUnits(world, [unit]);
+	const behavior = new VillagerUnit();
+	const context = {
+		world,
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		gatherTarget: (targetId: ResourceNode["id"]) => world.resources[targetId] || null,
+		gatherResource: () => "wood",
+		gatherTargetFor: () => ({ gatherAmountFor: (worker: { carryCapacity: number }) => worker.carryCapacity, gatherSecondsFor: () => 20 }),
+		gatherRange: () => 1.5,
+		isBuilding: (entity: unknown): entity is Building => !!entity && (entity as { kind?: string }).kind === "building",
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number }) => entity,
+		moveNearTarget: (movingUnit: Unit, command: UnitCommand, target: { x: number; y: number }, range: number, maxStep: number) =>
+			movePlayerUnitNearTarget(world, movingUnit, command, target, range, maxStep),
+		emitActionSound: () => {},
+		maybeAutoReplenishBuilding: () => {},
+		deleteResource: (resource: ResourceNode) => {
+			delete world.resources[resource.id];
+		},
+		makeStump: () => {},
+		nearestDepot: () => null,
+		depositResource: () => {},
+		findNextResource: () => null,
+		findAlternateResource: () => null,
+	} as unknown as UnitSimulationContext;
+
+	for (let tick = 0; tick < 80 && !unit.carried; tick += 1) {
+		world.tick = tick;
+		behavior.step(context, unit, 0.1);
+	}
+
+	assert.equal(unit.carried?.resource, "wood");
+	assert.notDeepEqual({ x: Math.floor(unit.x), y: Math.floor(unit.y) }, { x: tree.x, y: tree.y });
+	assert.ok(unit.x + unit.y > tree.x + tree.y);
+});
+
 test("player interaction pathing does not vibrate along dense resource edges", () => {
 	const blocked = [];
 	for (let x = 20; x <= 44; x += 1) blocked.push({ x, y: 30 });
@@ -1656,6 +1903,31 @@ test("player interaction pathing does not vibrate along dense resource edges", (
 
 	assert.equal(inRange, true);
 	assert.ok(distanceFrom(unit, target) <= 1.1);
+});
+
+test("player interaction pathing settles when resource contact tiles are blocked", () => {
+	const world = makeWorld([
+		{ x: 11, y: 12 },
+		{ x: 12, y: 12 },
+		{ x: 12, y: 11 },
+		{ x: 12, y: 13 },
+		{ x: 13, y: 12 },
+	]);
+	const target = { x: 12, y: 12 };
+	const unit = makeUnit(10.45, 12, "u-player-pocket-settle");
+	unit.command = { type: "gather", targetId: "r-pocket-tree" as ResourceNode["id"], resourceKind: "wood", progress: 0, path: null };
+	addUnits(world, [unit]);
+
+	let inRange = false;
+	for (let tick = 0; tick < 12; tick += 1) {
+		world.tick = tick;
+		inRange = movePlayerUnitNearTarget(world, unit, unit.command, target, 1.1, 0.32);
+		if (inRange) break;
+	}
+
+	assert.equal(inRange, true);
+	assert.ok(distanceFrom(unit, target) <= 1.8);
+	assert.notDeepEqual({ x: Math.floor(unit.x), y: Math.floor(unit.y) }, { x: 12, y: 12 });
 });
 
 test("villager gathering fills carried resources linearly", () => {
@@ -1707,6 +1979,302 @@ test("villager gathering fills carried resources linearly", () => {
 	assert.equal(unit.carried?.amount, 20);
 	assert.equal(tree.amount, 80);
 	assert.equal(unit.command.type === "gather" ? unit.command.progress : undefined, 0);
+});
+
+test("villager gathers within restored resource reach of footprint without center chasing", () => {
+	const tree: ResourceNode = {
+		id: "r-footprint-tree" as ResourceNode["id"],
+		kind: "resource",
+		type: "tree",
+		resource: "wood",
+		x: 12,
+		y: 12,
+		amount: 100,
+		maxAmount: 100,
+	};
+	const unit = makeUnit(10.95, 12, "u-footprint-gather");
+	unit.command = { type: "gather", targetId: tree.id, resourceKind: "wood", progress: 0, path: null };
+	const behavior = new VillagerUnit();
+	let movementCalls = 0;
+	const context = {
+		world: makeWorld(),
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		gatherTarget: () => tree,
+		gatherResource: () => "wood",
+		gatherTargetFor: () => ({ gatherAmountFor: (worker: { carryCapacity: number }) => worker.carryCapacity, gatherSecondsFor: () => 20 }),
+		gatherRange: () => 1.1,
+		isBuilding: (entity: unknown): entity is Building => !!entity && (entity as { kind?: string }).kind === "building",
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number }) => entity,
+		moveNearTarget: () => {
+			movementCalls += 1;
+			return false;
+		},
+		emitActionSound: () => {},
+		maybeAutoReplenishBuilding: () => {},
+		deleteResource: () => {},
+		makeStump: () => {},
+		nearestDepot: () => null,
+		depositResource: () => {},
+		findNextResource: () => null,
+		findAlternateResource: () => null,
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, unit, 1);
+
+	assert.equal(movementCalls, 0);
+	assert.ok((unit.carried?.amount || 0) > 0);
+	assert.deepEqual({ x: unit.x, y: unit.y }, { x: 10.95, y: 12 });
+});
+
+test("villager stops moving and builds within restored building reach of footprint", () => {
+	const building = makeBuilding(12, 12, "b-practical-build");
+	building.hp = 25;
+	const unit = makeUnit(10.5, 12, "u-practical-build");
+	unit.command = {
+		type: "build",
+		targetId: building.id,
+		resourceKind: null,
+		path: null,
+		moveStuckTicks: 4,
+	};
+	const behavior = new VillagerUnit();
+	let movementCalls = 0;
+	const context = {
+		world: makeWorld(),
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		buildingById: () => building,
+		isComplete: () => false,
+		assignPostBuildGather: () => {},
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		moveNearTarget: () => {
+			movementCalls += 1;
+			return false;
+		},
+		emitActionSound: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, unit, 0.1);
+
+	assert.equal(movementCalls, 0);
+	assert.ok(building.hp > 25);
+	assert.deepEqual({ x: unit.x, y: unit.y }, { x: 10.5, y: 12 });
+});
+
+test("villager below wall moves to build without center clipping", () => {
+	const wall = {
+		...makeBuilding(12, 12, "b-wall-below-build"),
+		type: "wall",
+		size: 1,
+		width: 1,
+		height: 1,
+	} as Building;
+	wall.hp = 25;
+	const unit = makeUnit(12, 15, "u-wall-below-build");
+	unit.command = { type: "build", targetId: wall.id, resourceKind: null, path: null };
+	const behavior = new VillagerUnit();
+	const movementTargets: Array<{ x: number; y: number; range: number }> = [];
+	const context = {
+		world: makeWorld(),
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		buildingById: () => wall,
+		isComplete: () => false,
+		assignPostBuildGather: () => {},
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		moveNearTarget: (_unit: Unit, _command: UnitCommand, target: { x: number; y: number }, range: number) => {
+			movementTargets.push({ ...target, range });
+			return false;
+		},
+		emitActionSound: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, unit, 0.1);
+
+	assert.equal(wall.hp, 25);
+	assert.equal(movementTargets.length, 1);
+	assert.equal(movementTargets[0]!.y, wall.y + 1.5);
+	assert.ok(movementTargets[0]!.range <= 0.55);
+});
+
+test("villager right of wall moves to build without center clipping", () => {
+	const wall = {
+		...makeBuilding(12, 12, "b-wall-right-build"),
+		type: "wall",
+		size: 1,
+		width: 1,
+		height: 1,
+	} as Building;
+	wall.hp = 25;
+	const unit = makeUnit(15, 12, "u-wall-right-build");
+	unit.command = { type: "build", targetId: wall.id, resourceKind: null, path: null };
+	const behavior = new VillagerUnit();
+	const movementTargets: Array<{ x: number; y: number; range: number }> = [];
+	const context = {
+		world: makeWorld(),
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		buildingById: () => wall,
+		isComplete: () => false,
+		assignPostBuildGather: () => {},
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		moveNearTarget: (_unit: Unit, _command: UnitCommand, target: { x: number; y: number }, range: number) => {
+			movementTargets.push({ ...target, range });
+			return false;
+		},
+		emitActionSound: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, unit, 0.1);
+
+	assert.equal(wall.hp, 25);
+	assert.equal(movementTargets.length, 1);
+	assert.equal(movementTargets[0]!.x, wall.x + 1.5);
+	assert.ok(movementTargets[0]!.range <= 0.55);
+});
+
+test("villager below wall clears stale movement path and builds without stepping", () => {
+	const wall = {
+		...makeBuilding(12, 12, "b-wall-below-settle"),
+		type: "wall",
+		size: 1,
+		width: 1,
+		height: 1,
+	} as Building;
+	wall.hp = 25;
+	const unit = makeUnit(12, 14, "u-wall-below-settle");
+	unit.command = {
+		type: "build",
+		targetId: wall.id,
+		resourceKind: null,
+		path: [{ x: 12.5, y: 13.5 }],
+		moveStuckTicks: 3,
+	};
+	const behavior = new VillagerUnit();
+	let movementCalls = 0;
+	const context = {
+		world: makeWorld(),
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		buildingById: () => wall,
+		isComplete: () => false,
+		assignPostBuildGather: () => {},
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		moveNearTarget: () => {
+			movementCalls += 1;
+			return false;
+		},
+		emitActionSound: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, unit, 0.1);
+
+	assert.equal(movementCalls, 0);
+	assert.ok(wall.hp > 25);
+	assert.equal(unit.command.path, null);
+	assert.equal(unit.command.moveStuckTicks, 0);
+	assert.deepEqual({ x: unit.x, y: unit.y }, { x: 12, y: 14 });
+});
+
+test("villager right of wall clears stale movement path and builds without stepping", () => {
+	const wall = {
+		...makeBuilding(12, 12, "b-wall-right-settle"),
+		type: "wall",
+		size: 1,
+		width: 1,
+		height: 1,
+	} as Building;
+	wall.hp = 25;
+	const unit = makeUnit(14, 12, "u-wall-right-settle");
+	unit.command = {
+		type: "build",
+		targetId: wall.id,
+		resourceKind: null,
+		path: [{ x: 13.5, y: 12.5 }],
+		moveStuckTicks: 3,
+	};
+	const behavior = new VillagerUnit();
+	let movementCalls = 0;
+	const context = {
+		world: makeWorld(),
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		buildingById: () => wall,
+		isComplete: () => false,
+		assignPostBuildGather: () => {},
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		moveNearTarget: () => {
+			movementCalls += 1;
+			return false;
+		},
+		emitActionSound: () => {},
+	} as unknown as UnitSimulationContext;
+
+	behavior.step(context, unit, 0.1);
+
+	assert.equal(movementCalls, 0);
+	assert.ok(wall.hp > 25);
+	assert.equal(unit.command.path, null);
+	assert.equal(unit.command.moveStuckTicks, 0);
+	assert.deepEqual({ x: unit.x, y: unit.y }, { x: 14, y: 12 });
+});
+
+test("villager approaches and settles below wall through real interaction pathing", () => {
+	const world = makeWorld([{ x: 12, y: 12 }]);
+	const wall = {
+		...makeBuilding(12, 12, "b-wall-below-real"),
+		type: "wall",
+		size: 1,
+		width: 1,
+		height: 1,
+		completed: false,
+	} as Building;
+	wall.hp = 25;
+	const unit = makeUnit(12, 15, "u-wall-below-real");
+	unit.command = { type: "build", targetId: wall.id, resourceKind: null, path: null };
+	world.buildings[wall.id] = wall;
+	addUnits(world, [unit]);
+	const behavior = new VillagerUnit();
+	const context = {
+		world,
+		setCommand: (movingUnit: Unit, command: UnitCommand) => {
+			movingUnit.command = command;
+		},
+		buildingById: () => wall,
+		isComplete: () => false,
+		assignPostBuildGather: () => {},
+		distance: distanceFrom,
+		centerOf: (entity: { x: number; y: number; size?: number }) => ({ x: entity.x + ((entity.size || 1) - 1) / 2, y: entity.y + ((entity.size || 1) - 1) / 2 }),
+		moveNearTarget: (movingUnit: Unit, command: UnitCommand, target: { x: number; y: number }, range: number, maxStep: number) =>
+			movePlayerUnitNearTarget(world, movingUnit, command, target, range, maxStep),
+		emitActionSound: () => {},
+	} as unknown as UnitSimulationContext;
+
+	for (let tick = 0; tick < 30 && wall.hp <= 25; tick += 1) {
+		world.tick = tick;
+		behavior.step(context, unit, 0.1);
+	}
+	const settled = { x: unit.x, y: unit.y };
+	behavior.step(context, unit, 0.1);
+
+	assert.ok(wall.hp > 25);
+	assert.equal(unit.command.path, null);
+	assert.deepEqual({ x: Math.round(unit.x), y: Math.round(unit.y) }, { x: Math.round(settled.x), y: Math.round(settled.y) });
+	assert.notDeepEqual({ x: Math.round(unit.x), y: Math.round(unit.y) }, { x: 12, y: 12 });
+	assert.ok(unit.y > wall.y + 0.5);
 });
 
 test("villager gathering retargets after a resource remains unreachable", () => {
@@ -1798,6 +2366,8 @@ test("gather command immediately retargets an unreachable resource", () => {
 	world.units[unit.id] = unit;
 	world.resources[blockedTree.id] = blockedTree;
 	world.resources[alternateTree.id] = alternateTree;
+	world._occupancy![blockedTree.y * MAP_SIZE + blockedTree.x] = 1;
+	world._occupancy![alternateTree.y * MAP_SIZE + alternateTree.x] = 1;
 	for (let dy = -1; dy <= 1; dy += 1) {
 		for (let dx = -1; dx <= 1; dx += 1) {
 			if (dx === 0 && dy === 0) continue;
@@ -1820,6 +2390,7 @@ test("gather command immediately retargets an unreachable resource", () => {
 				canAcceptResource: () => false,
 			} as unknown as Building;
 			world.buildings[wall.id] = wall;
+			world._occupancy![wall.y * MAP_SIZE + wall.x] = 1;
 		}
 	}
 
@@ -2096,6 +2667,7 @@ test("move command places formation slots outside dense resource clutter", () =>
 				maxAmount: 100,
 			};
 			world.resources[resource.id] = resource;
+			world._occupancy![y * MAP_SIZE + x] = 1;
 			blockedTiles.add(`${x},${y}`);
 			resourceIndex += 1;
 		}

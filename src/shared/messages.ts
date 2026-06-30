@@ -90,10 +90,12 @@ export function makeSnapshot(
 		dayNight,
 		leaderboard: world.leaderboard,
 		notices: world.notices.slice(-8),
-		hornSounds: hornSoundSources(world),
-		soundDebug: player?.soundDebug ? buildSoundDebugSources(world) : null,
-		pathDebug: player?.pathDebug === true,
-		serverPerf: admin?.serverPerf
+			hornSounds: hornSoundSources(world),
+			soundDebug: player?.soundDebug ? buildSoundDebugSources(world) : null,
+			pathDebug: player?.pathDebug === true,
+			pathAvailabilityDebug: player?.pathAvailabilityDebug === true,
+			unitTileDebug: player?.unitTileDebug === true,
+			serverPerf: admin?.serverPerf
 			? {
 				tps: world.serverPerf.tps,
 				tickMs: world.serverPerf.tickMs,

@@ -1,4 +1,4 @@
-import type { Building, BuildingId, CommandPayload, ResourceNode, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
+import type { Building, BuildingId, CommandPayload, ResourceNode, ResourceType, Ruin, Snapshot, Unit, UnitType } from "../../src/shared/types.js";
 
 export type ClientSnapshot = Omit<Snapshot, "buildings"> & {
 	buildings: Record<BuildingId, Building>;
@@ -59,11 +59,15 @@ export type UIActions = {
 	enableFullMapVision: () => Promise<string>;
 	enableSoundDebug: () => Promise<string>;
 	enableZombieDebug: () => Promise<string>;
+	togglePathDebug: () => Promise<string>;
+	togglePathAvailabilityDebug: () => Promise<string>;
+	toggleUnitTileDebug: () => Promise<string>;
 	kickPlayer: (targetPlayerId: string) => Promise<string>;
 	banPlayer: (targetPlayerId: string) => Promise<string>;
 	unbanIp: (ipAddress: string) => Promise<string>;
 	spawnHostileHorde: () => Promise<string>;
 	grantSoldiers: () => Promise<string>;
+	grantResources: (resource: ResourceType | "stone") => Promise<string>;
 	toggleTownCenterInvincible: () => Promise<string>;
 	toggleNoiseTool: () => Promise<string>;
 	toggleInstantBuild: () => Promise<string>;

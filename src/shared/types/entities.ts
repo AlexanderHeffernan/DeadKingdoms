@@ -62,6 +62,8 @@ export interface Player {
 	adminLevel?: AdminLevel;
 	soundDebug?: boolean;
 	pathDebug?: boolean;
+	pathAvailabilityDebug?: boolean;
+	unitTileDebug?: boolean;
 	zombieDebug?: boolean;
 	connection?: PlayerConnection;
 	_visCache?: VisibilityCache;

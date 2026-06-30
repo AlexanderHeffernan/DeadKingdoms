@@ -30,6 +30,7 @@ export interface ZombieHorde {
 export interface PathingWorldState {
 	occupancyVersion: number;
 	flowFields: Map<string, unknown>;
+	reasonableZombiePathFields?: Map<string, unknown>;
 	clearanceFields: Map<number, unknown>;
 	arrivalGroups: Map<string, unknown>;
 	hardBlockingTiles?: Set<number>;
@@ -53,6 +54,8 @@ export interface PathingWorldState {
 	resourceGridVersion?: number;
 	clearMovementLineCache?: Map<string, boolean>;
 	clearMovementLineCacheTick?: number;
+	occupancyBatchDepth?: number;
+	occupancyBatchChanged?: boolean;
 	pathRequestsThisTick: number;
 	lastRequestTick: number;
 }
