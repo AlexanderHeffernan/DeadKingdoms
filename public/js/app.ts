@@ -798,9 +798,8 @@ function connectEvents() {
 			connectEvents();
 			return;
 		}
-		if (!isSpectating() && (!state.playerId || !snap.players?.[state.playerId] || snap.players[state.playerId]!.defeated)) {
+		if (!isSpectating() && (!state.playerId || !snap.players?.[state.playerId])) {
 			resetToJoin("Your player is no longer available. Join again to restart.");
-			handleEliminated();
 			return;
 		}
 		snapshots.applyVisibility(snap);
@@ -842,11 +841,10 @@ async function leaveCurrentGame(message: string) {
 	}
 	state.snapshot = { ...state.snapshot, statistics: result.statistics };
 	handleEliminated();
-	if (activeSession) await activeSession.leave(credentials);
-	resetToJoin(message);
 }
 
 function handleEliminated() {
+	activeSession?.dispose();
 	if (eventStream) eventStream.close();
 	eventStream = null;
 	state.selectedIds.clear();
