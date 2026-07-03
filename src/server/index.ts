@@ -7,9 +7,15 @@ import { broadcast, createHandler } from "./http.js";
 import { GlobalLeaderboardStore } from "./globalLeaderboard.js";
 import type { Client } from "./http.js";
 import { ServerState } from "./serverState.js";
-import { addNotice, recordServerPerfPhase, stepWorld } from "./world.js";
+import { addNotice, configureSimulationServices, recordServerPerfPhase, stepWorld } from "./world.js";
+import { ZombieAiWorkerClient } from "./zombieAiWorkerClient.js";
+import { ZombieDirectorWorkerClient } from "./zombieDirectorWorkerClient.js";
 
 loadEnvFile();
+configureSimulationServices({
+	zombieAi: new ZombieAiWorkerClient(),
+	zombieDirector: new ZombieDirectorWorkerClient(),
+});
 
 const port = Number(process.env.PORT || 3000);
 const state = new ServerState();

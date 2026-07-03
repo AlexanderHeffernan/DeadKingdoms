@@ -13,9 +13,10 @@ export function makeSnapshot(
 	playerId: PlayerId | null = null,
 	sentExplored: Set<number> | null = null,
 	adminView: AdminView = "popup",
+	adminLevelOverride?: AdminLevel,
 ): Snapshot {
 	const player = playerId ? world.players[playerId] : null;
-	const admin = buildAdminSnapshot(world, player?.adminLevel, adminView);
+	const admin = buildAdminSnapshot(world, adminLevelOverride ?? player?.adminLevel, adminView);
 	const dayNight = dayNightStateFor(world);
 	const visible = playerId && !player?.godMode ? cachedVisibility(world, playerId) : null;
 	const visibleSet = visible ? visible.visible : null;
