@@ -556,7 +556,15 @@
 				<button id="deathHide" class="panel-close-button death-hide-button" type="button" aria-label="Hide results">X</button>
 				<p class="death-kicker">Your kingdom is</p>
 				<h2 id="deathTitle">Dead</h2>
-				<div id="deathStatistics" class="death-statistics"></div>
+				<nav class="death-tabs" aria-label="Death screen views">
+					<button id="deathSummaryTab" class="death-tab active" type="button">Summary</button>
+					<button id="deathScoreTab" class="death-tab" type="button">Score</button>
+				</nav>
+				<div id="deathSummaryView"><div id="deathStatistics" class="death-statistics"></div></div>
+				<div id="deathScoreView" class="hidden">
+					<div class="death-chart-heading"><h3>Score over time</h3><span id="deathFinalScore"></span></div>
+					<canvas id="deathScoreChart" class="death-score-chart" width="880" height="250"></canvas>
+				</div>
 				<div class="death-screen-actions">
 					<button id="deathPlayAgain" type="button">Play Again</button>
 					<button id="deathExit" class="death-exit-button" type="button">Exit to Main Menu</button>

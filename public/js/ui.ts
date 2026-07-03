@@ -122,6 +122,12 @@ export class UI {
 			mustGet("deathHide") as HTMLButtonElement,
 			mustGet("deathRestore") as HTMLButtonElement,
 			hoverCard,
+			mustGet("deathSummaryTab") as HTMLButtonElement,
+			mustGet("deathScoreTab") as HTMLButtonElement,
+			mustGet("deathSummaryView"),
+			mustGet("deathScoreView"),
+			mustGet("deathScoreChart") as HTMLCanvasElement,
+			mustGet("deathFinalScore"),
 		);
 	}
 

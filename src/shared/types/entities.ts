@@ -28,6 +28,7 @@ export interface PlayerStatisticsTracker {
 	recordBuildingLost(): void;
 	recordBuildingRazed(): void;
 	recordResourcesCollected(resource: ResourceType, amount: number): void;
+	recordScore(score: number): void;
 	advance(dt: number, idleVillagers: number): void;
 	finish(): void;
 	snapshot(): PlayerStatisticsSnapshot;

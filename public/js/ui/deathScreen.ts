@@ -16,11 +16,19 @@ export class DeathScreen {
 		hideButton: HTMLButtonElement,
 		private readonly restoreButton: HTMLButtonElement,
 		private readonly hoverCard: HoverCard,
+		private readonly summaryTab: HTMLButtonElement,
+		private readonly scoreTab: HTMLButtonElement,
+		private readonly summaryView: HTMLElement,
+		private readonly scoreView: HTMLElement,
+		private readonly scoreChart: HTMLCanvasElement,
+		private readonly finalScore: HTMLElement,
 	) {
 		playAgainButton.addEventListener("click", playAgain);
 		exitButton.addEventListener("click", exitToMenu);
 		hideButton.addEventListener("click", () => this.collapse());
 		this.restoreButton.addEventListener("click", () => this.expand());
+		this.summaryTab.addEventListener("click", () => this.selectTab("summary"));
+		this.scoreTab.addEventListener("click", () => this.selectTab("score"));
 	}
 
 	show(report: PlayerStatisticsSnapshot) {
@@ -46,6 +54,8 @@ export class DeathScreen {
 			]),
 		].join("");
 		this.attachTooltips();
+		this.drawScoreChart(report);
+		this.selectTab("summary");
 		this.panel.classList.remove("hidden");
 	}
 
@@ -75,6 +85,51 @@ export class DeathScreen {
 			row.addEventListener("mousemove", () => this.hoverCard.showInfo(row));
 			row.addEventListener("mouseleave", () => this.hoverCard.hide());
 		}
+	}
+
+	private selectTab(tab: "summary" | "score") {
+		const showSummary = tab === "summary";
+		this.summaryTab.classList.toggle("active", showSummary);
+		this.scoreTab.classList.toggle("active", !showSummary);
+		this.summaryView.classList.toggle("hidden", !showSummary);
+		this.scoreView.classList.toggle("hidden", showSummary);
+	}
+
+	private drawScoreChart(report: PlayerStatisticsSnapshot) {
+		const context = this.scoreChart.getContext("2d");
+		if (!context) return;
+		const samples = report.scoreHistory.length > 0 ? report.scoreHistory : [{ atSeconds: 0, score: 0 }];
+		const width = this.scoreChart.width;
+		const height = this.scoreChart.height;
+		const padding = 34;
+		const maxTime = Math.max(1, report.durationSeconds, ...samples.map((sample) => sample.atSeconds));
+		const maxScore = Math.max(1, ...samples.map((sample) => sample.score));
+		context.clearRect(0, 0, width, height);
+		context.strokeStyle = "#3a3027";
+		context.lineWidth = 2;
+		for (let line = 0; line <= 4; line += 1) {
+			const y = padding + ((height - padding * 2) * line) / 4;
+			context.beginPath();
+			context.moveTo(padding, y);
+			context.lineTo(width - padding, y);
+			context.stroke();
+		}
+		context.strokeStyle = "#e9bd59";
+		context.lineWidth = 4;
+		context.beginPath();
+		samples.forEach((sample, index) => {
+			const x = padding + (sample.atSeconds / maxTime) * (width - padding * 2);
+			const y = height - padding - (sample.score / maxScore) * (height - padding * 2);
+			if (index === 0) context.moveTo(x, y);
+			else context.lineTo(x, y);
+		});
+		context.stroke();
+		context.fillStyle = "#bdb3a3";
+		context.font = "16px sans-serif";
+		context.fillText("0", 10, height - padding + 5);
+		context.fillText(String(maxScore), 6, padding + 5);
+		context.fillText(this.duration(maxTime), width - 78, height - 8);
+		this.finalScore.textContent = `Final score: ${samples.at(-1)?.score ?? 0}`;
 	}
 
 	private duration(totalSeconds: number) {

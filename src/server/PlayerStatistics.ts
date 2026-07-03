@@ -3,6 +3,8 @@ import type { PlayerStatisticsSnapshot, PlayerStatisticsTracker, ResourceType } 
 import type { UnitBehavior } from "../shared/units/index.js";
 
 export class PlayerStatistics implements PlayerStatisticsTracker {
+	private static readonly scoreSampleIntervalMs = 5000;
+	private static readonly maxScoreSamples = 720;
 	private readonly startedAt = Date.now();
 	private readonly resourcesCollected = Object.fromEntries(RESOURCE_TYPES.map((resource) => [resource, 0])) as Record<ResourceType, number>;
 	private unitsKilled = 0;
@@ -16,6 +18,9 @@ export class PlayerStatistics implements PlayerStatisticsTracker {
 	private totalVillagerSeconds = 0;
 	private unidleVillagerSeconds = 0;
 	private finishedAt: number | null = null;
+	private readonly scoreHistory: PlayerStatisticsSnapshot["scoreHistory"] = [];
+	private latestScore = 0;
+	private lastScoreSampleAt = 0;
 
 	recordUnitCreated(unit: UnitBehavior) {
 		if (unit.countsAsVillager()) {
@@ -42,16 +47,28 @@ export class PlayerStatistics implements PlayerStatisticsTracker {
 		this.resourcesCollected[resource] += amount;
 	}
 
+	recordScore(score: number) {
+		if (this.finishedAt !== null) return;
+		this.latestScore = score;
+		const now = Date.now();
+		if (now - this.lastScoreSampleAt >= PlayerStatistics.scoreSampleIntervalMs) this.addScoreSample(now);
+	}
+
 	advance(dt: number, idleVillagers: number) {
 		if (this.finishedAt !== null || this.villagers === 0) return;
 		this.totalVillagerSeconds += this.villagers * dt;
 		this.unidleVillagerSeconds += Math.max(0, this.villagers - idleVillagers) * dt;
 	}
 
-	finish() { this.finishedAt ??= Date.now(); }
+	finish() {
+		if (this.finishedAt !== null) return;
+		this.finishedAt = Date.now();
+		this.addScoreSample(this.finishedAt);
+	}
 
 	snapshot(): PlayerStatisticsSnapshot {
 		return {
+			scoreHistory: this.scoreHistory.map((sample) => ({ ...sample })),
 			military: {
 				unitsKilled: this.unitsKilled,
 				unitsLost: this.unitsLost,
@@ -66,5 +83,15 @@ export class PlayerStatistics implements PlayerStatisticsTracker {
 			},
 			durationSeconds: Math.max(0, ((this.finishedAt ?? Date.now()) - this.startedAt) / 1000),
 		};
+	}
+
+	private addScoreSample(at: number) {
+		const last = this.scoreHistory.at(-1);
+		const previous = this.scoreHistory.at(-2);
+		const atSeconds = Math.max(0, (at - this.startedAt) / 1000);
+		if (last && previous && last.score === this.latestScore && previous.score === this.latestScore) last.atSeconds = atSeconds;
+		else this.scoreHistory.push({ atSeconds, score: this.latestScore });
+		this.lastScoreSampleAt = at;
+		if (this.scoreHistory.length > PlayerStatistics.maxScoreSamples) this.scoreHistory.shift();
 	}
 }

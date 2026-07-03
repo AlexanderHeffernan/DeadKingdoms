@@ -11,6 +11,7 @@ export interface Notice {
 }
 
 export interface PlayerStatisticsSnapshot {
+	scoreHistory: Array<{ atSeconds: number; score: number }>;
 	military: {
 		unitsKilled: number;
 		unitsLost: number;

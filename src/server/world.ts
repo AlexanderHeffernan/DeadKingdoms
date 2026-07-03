@@ -3616,6 +3616,7 @@ function recalcPlayer(world: World, playerId: PlayerId) {
 		world._globalLeaderboardDirtyPlayerIds[player.id] = true;
 	}
 	player.score = score;
+	player.statistics?.recordScore(score);
 }
 
 function isComplete(building: Building): boolean {

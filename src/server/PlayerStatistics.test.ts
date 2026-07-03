@@ -52,3 +52,11 @@ test("defeat cleanup does not count as combat loss", () => {
 
 	assert.equal(statistics.snapshot().military.unitsLost, 0);
 });
+
+test("records score history in the final report", () => {
+	const statistics = new PlayerStatistics();
+	statistics.recordScore(125);
+	statistics.finish();
+
+	assert.equal(statistics.snapshot().scoreHistory.at(-1)?.score, 125);
+});
