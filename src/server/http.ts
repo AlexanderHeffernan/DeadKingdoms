@@ -84,6 +84,23 @@ const COMMAND_TYPES: Record<CommandType, true> = {
 };
 
 const disconnectTimers = new WeakMap<World, Map<PlayerId, NodeJS.Timeout>>();
+const privateRooms = new Map<string, PrivateRoom>();
+
+type PrivateRoom = {
+	roomId: string;
+	hostToken: string;
+	createdAt: number;
+	offers: Map<string, PrivateOffer>;
+	answers: Map<string, unknown>;
+};
+
+type PrivateOffer = {
+	peerId: string;
+	name: string;
+	color: string;
+	offer: unknown;
+	createdAt: number;
+};
 
 export type Client = {
 	playerId: PlayerId | null;
@@ -150,6 +167,13 @@ export function createHandler(
 					globalLeaderboard,
 					url,
 				);
+				if (
+					url.pathname === "/api/private-rooms" ||
+					url.pathname.startsWith("/api/private-rooms/")
+				)
+					return await privateRoomSignal(req, res, url);
+				if (req.method === "POST" && url.pathname === "/api/private-admin-access")
+					return await validatePrivateAdminAccess(req, res);
 			const world = state.currentWorld();
 			if (req.method === "GET" && url.pathname === "/api/snapshot")
 				return world
@@ -276,6 +300,104 @@ async function globalLeaderboardSnapshot(
 				? { ...snapshot, playerId }
 				: snapshot,
 	});
+}
+
+async function privateRoomSignal(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	url: URL,
+) {
+	prunePrivateRooms();
+	if (req.method === "POST" && url.pathname === "/api/private-rooms") {
+		const roomId = privateRoomId();
+		const hostToken = newSessionToken();
+		privateRooms.set(roomId, {
+			roomId,
+			hostToken,
+			createdAt: Date.now(),
+			offers: new Map(),
+			answers: new Map(),
+		});
+		return json(res, { roomId, hostToken });
+	}
+
+	const match = /^\/api\/private-rooms\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?$/.exec(url.pathname);
+	const roomId = match?.[1] ? decodeURIComponent(match[1]) : "";
+	const action = match?.[2] ? decodeURIComponent(match[2]) : "";
+	const peerId = match?.[3] ? decodeURIComponent(match[3]) : "";
+	const room = privateRooms.get(roomId);
+	if (!room) return json(res, { ok: false, error: "Private room not found." }, 404);
+
+	if (req.method === "POST" && action === "offers") {
+		const body = (await readJson(req)) as {
+			peerId?: unknown;
+			name?: unknown;
+			color?: unknown;
+			offer?: unknown;
+		};
+		if (typeof body.peerId !== "string" || !body.peerId || !body.offer)
+			return json(res, { ok: false, error: "Invalid offer." }, 400);
+		room.offers.set(body.peerId, {
+			peerId: body.peerId,
+			name: typeof body.name === "string" ? body.name : "Private Player",
+			color: typeof body.color === "string" ? body.color : "#3a86ff",
+			offer: body.offer,
+			createdAt: Date.now(),
+		});
+		return json(res, { ok: true });
+	}
+
+	if (req.method === "GET" && action === "offers") {
+		if (url.searchParams.get("hostToken") !== room.hostToken)
+			return json(res, { ok: false, error: "Invalid private host token." }, 403);
+		return json(res, {
+			offers: [...room.offers.values()].map(({ createdAt, ...offer }) => offer),
+		});
+	}
+
+	if (req.method === "POST" && action === "answers") {
+		const body = (await readJson(req)) as {
+			hostToken?: unknown;
+			peerId?: unknown;
+			answer?: unknown;
+		};
+		if (body.hostToken !== room.hostToken)
+			return json(res, { ok: false, error: "Invalid private host token." }, 403);
+		if (typeof body.peerId !== "string" || !body.answer)
+			return json(res, { ok: false, error: "Invalid answer." }, 400);
+		room.answers.set(body.peerId, body.answer);
+		room.offers.delete(body.peerId);
+		return json(res, { ok: true });
+	}
+
+	if (req.method === "GET" && action === "answers" && peerId) {
+		const answer = room.answers.get(peerId);
+		if (!answer) return json(res, { ok: false, error: "Answer not ready." }, 404);
+		return json(res, { answer });
+	}
+
+	return json(res, { ok: false, error: "Unknown private room request." }, 404);
+}
+
+function prunePrivateRooms() {
+	const expiresBefore = Date.now() - 30 * 60_000;
+	for (const [roomId, room] of privateRooms) {
+		if (room.createdAt < expiresBefore) privateRooms.delete(roomId);
+	}
+}
+
+function privateRoomId() {
+	return randomBytes(6).toString("base64url");
+}
+
+async function validatePrivateAdminAccess(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+) {
+	const body = (await readJson(req)) as { secret?: unknown };
+	if (typeof body.secret !== "string" || !isAdminSecret(body.secret))
+		return json(res, { ok: false, error: "Invalid admin secret." }, 403);
+	return json(res, { ok: true });
 }
 
 function liveSnapshot(

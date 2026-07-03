@@ -162,6 +162,12 @@
 	text-shadow: 2px 2px 0 #11111e;
 }
 
+.home-play-actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+}
+
 .home-secondary-actions {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
