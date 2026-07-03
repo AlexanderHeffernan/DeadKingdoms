@@ -18,6 +18,20 @@ import type { UnitCommand } from "./unitCommands.js";
 import type { VisibilityCache } from "./visibility.js";
 import type { BuildingEntity, BuildingSnapshot } from "../buildings/base/index.js";
 import type { AdminLevel } from "./snapshot.js";
+import type { PlayerStatisticsSnapshot } from "./snapshot.js";
+import type { UnitBehavior } from "../units/index.js";
+
+export interface PlayerStatisticsTracker {
+	recordUnitCreated(unit: UnitBehavior): void;
+	recordUnitRemoved(unit: UnitBehavior, combatLoss: boolean): void;
+	recordUnitKilled(): void;
+	recordBuildingLost(): void;
+	recordBuildingRazed(): void;
+	recordResourcesCollected(resource: ResourceType, amount: number): void;
+	advance(dt: number, idleVillagers: number): void;
+	finish(): void;
+	snapshot(): PlayerStatisticsSnapshot;
+}
 
 export interface PlayerWorkerCounts {
 	idle: number;
@@ -57,6 +71,7 @@ export interface Player {
 	defeated: boolean;
 	score: number;
 	joinedAt: number;
+	statistics?: PlayerStatisticsTracker;
 	sessionToken?: string;
 	godMode?: boolean;
 	adminLevel?: AdminLevel;

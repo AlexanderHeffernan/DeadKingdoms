@@ -194,9 +194,7 @@
 				<div class="settings-dialog">
 					<header class="settings-header">
 						<h2 id="settingsTitle">Settings</h2>
-						<button id="settingsCloseButton" class="icon-button settings-close-button" type="button" aria-label="Close settings" title="Close settings">
-							<span aria-hidden="true">x</span>
-						</button>
+						<button id="settingsCloseButton" class="panel-close-button settings-close-button" type="button" aria-label="Close settings" title="Close settings">X</button>
 					</header>
 					<div class="settings-body">
 						<h3>Audio</h3>
@@ -553,6 +551,19 @@
 			<section id="trainingStatus" class="training-status hidden" aria-label="Current training"></section>
 			<section id="toast" class="toast"></section>
 		</main>
+		<section id="deathScreen" class="death-screen hidden" role="dialog" aria-labelledby="deathTitle">
+			<div class="death-screen-panel">
+				<button id="deathHide" class="panel-close-button death-hide-button" type="button" aria-label="Hide results">X</button>
+				<p class="death-kicker">Your kingdom is</p>
+				<h2 id="deathTitle">Dead</h2>
+				<div id="deathStatistics" class="death-statistics"></div>
+				<div class="death-screen-actions">
+					<button id="deathPlayAgain" type="button">Play Again</button>
+					<button id="deathExit" class="death-exit-button" type="button">Exit to Main Menu</button>
+				</div>
+			</div>
+		</section>
+		<button id="deathRestore" class="death-restore-button hidden" type="button">Show Results</button>
 
 		<script type="module" src="/js/app.js?v=3"></script>
 	</body>

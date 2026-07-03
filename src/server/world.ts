@@ -51,6 +51,7 @@ import { ZombieDirectorWorkerClient } from "./zombieDirectorWorkerClient.js";
 import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
 import { Logs } from "../shared/logs.js";
 import { DAY_NIGHT_CYCLE_SECONDS } from "../shared/dayNight.js";
+import { PlayerStatistics } from "./PlayerStatistics.js";
 import type {
 	BuildQueueItem,
 	Building,
@@ -205,6 +206,7 @@ export function addPlayer(
 		defeated: false,
 		score: 0,
 		joinedAt: Date.now(),
+		statistics: new PlayerStatistics(),
 	};
 
 	clearSpawnResources(
@@ -277,12 +279,15 @@ function clearSpawnZombies(world: World, x: number, y: number, radius: number) {
 
 export function removePlayer(world: World, playerId: PlayerId) {
 	const player = world.players[playerId];
-	if (!player) return;
+	if (!player) return null;
+	player.statistics?.finish();
+	const statistics = player.statistics?.snapshot() ?? null;
 	notice(world, `${player.name} left the world.`);
 	Logs.log(`${player.name} left the world.`);
 	destroyPlayerStuff(world, playerId);
 	delete world.players[playerId];
 	updateLeaderboard(world);
+	return statistics;
 }
 
 export function spawnZombieHorde(
@@ -494,8 +499,11 @@ export function stepWorld(world: World, dt: number) {
 				stepBuilding(world, context, building, dt);
 		});
 		profiler.measure("leaderboard", "Players/score", () => {
-			for (const playerId of Object.keys(world.players))
+			for (const playerId of Object.keys(world.players)) {
+				const player = world.players[playerId]!;
+				player.statistics?.advance(dt, player.workerCounts.idle);
 				recalcPlayer(world, playerId);
+			}
 			updateLeaderboard(world);
 		});
 	} finally {
@@ -923,6 +931,7 @@ function createSimulationContext(
 		makeStump,
 		depositResource: (ownerId, resource, amount) => {
 			world.players[ownerId]!.resources[resource] += amount;
+			world.players[ownerId]!.statistics?.recordResourcesCollected(resource, amount);
 		},
 		findNextBuildSite: (unit) => findNextBuildSite(world, unit),
 		assignPostBuildGather: (unit, resourceKind, builtFarm = null) =>
@@ -1547,11 +1556,14 @@ function createUnit(
 		selected: false,
 	};
 	world.units[unit.id] = unit;
+	world.players[ownerId]?.statistics?.recordUnitCreated(def);
 	addWorkerCommandCount(world, unit, unit.command);
 	return unit;
 }
 
-function removeUnit(world: World, unit: Unit) {
+function removeUnit(world: World, unit: Unit, combatLoss = false) {
+	const behavior = unitBehavior(unit);
+	world.players[unit.ownerId]?.statistics?.recordUnitRemoved(behavior, combatLoss);
 	removeWorkerCommandCount(world, unit, unit.command);
 	delete world.units[unit.id];
 }
@@ -3457,6 +3469,9 @@ function damage(
 		return;
 	}
 	if (target.kind === "building") {
+		world.players[target.ownerId]?.statistics?.recordBuildingLost();
+		if (attackerId !== target.ownerId)
+			world.players[attackerId]?.statistics?.recordBuildingRazed();
 		emitActionSound(world, "buildingDestroyed", centerOf(target));
 		createRuin(world, target);
 		removeBuilding(world, target);
@@ -3466,7 +3481,9 @@ function damage(
 		const shouldTurn =
 			attackerId === ZOMBIE_OWNER_ID &&
 			target.ownerId !== ZOMBIE_OWNER_ID;
-		removeUnit(world, target);
+		if (attackerId !== target.ownerId)
+			world.players[attackerId]?.statistics?.recordUnitKilled();
+		removeUnit(world, target, true);
 		if (shouldTurn) createCorpse(world, target);
 	}
 }
@@ -3475,6 +3492,7 @@ function defeatPlayer(world: World, playerId: PlayerId, attackerId: PlayerId) {
 	const player = world.players[playerId];
 	if (!player || player.defeated) return;
 	player.defeated = true;
+	player.statistics?.finish();
 	const attacker = world.players[attackerId];
 	notice(
 		world,

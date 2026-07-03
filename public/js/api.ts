@@ -1,4 +1,4 @@
-import type { CommandPayload, CommandResult, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId, ResourceType } from "../../src/shared/types.js";
+import type { CommandPayload, CommandResult, GlobalLeaderboardEntry, LeaderboardPreviewSnapshot, PlayerId, PlayerStatisticsSnapshot, ResourceType } from "../../src/shared/types.js";
 
 export type SessionCredentials = {
 	playerId: PlayerId;
@@ -60,7 +60,11 @@ export async function sendCommand(payload: CommandPayload, sessionToken: string)
 }
 
 export async function leave(credentials: SessionCredentials) {
-	return post("/api/leave", credentials);
+	return post("/api/leave", credentials) as Promise<{
+		ok: boolean;
+		statistics?: PlayerStatisticsSnapshot | null;
+		error?: string;
+	}>;
 }
 
 export async function enableAdminAccess(credentials: SessionCredentials, secret: string) {

@@ -9,12 +9,14 @@ import { ResourcePanel } from "./ui/resources.js";
 import { TrainingStatusPanel } from "./ui/trainingStatus.js";
 import { TopPanel } from "./ui/topPanel.js";
 import type { ActionHotkeys } from "./actionHotkeys.js";
+import { DeathScreen } from "./ui/deathScreen.js";
 
 export class UI {
 	private readonly state: GameState;
 	private readonly components: GameUiComponent[];
 	private readonly toast: HTMLElement;
 	private lastToast = "";
+	private readonly deathScreen: DeathScreen;
 
 	constructor(state: GameState, actions: UIActions, actionHotkeys: ActionHotkeys) {
 		this.state = state;
@@ -110,11 +112,24 @@ export class UI {
 			new BottomPanel(state, actions, mustGet("selection"), mustGet("actions"), hoverCard, actionHotkeys),
 		];
 		this.toast = mustGet("toast");
+		this.deathScreen = new DeathScreen(
+			mustGet("deathScreen"),
+			mustGet("deathStatistics"),
+			mustGet("deathPlayAgain") as HTMLButtonElement,
+			actions.respawn,
+			mustGet("deathExit") as HTMLButtonElement,
+			actions.exitToMenu,
+			mustGet("deathHide") as HTMLButtonElement,
+			mustGet("deathRestore") as HTMLButtonElement,
+			hoverCard,
+		);
 	}
 
 	render() {
 		const snapshot = this.state.snapshot;
 		if (!snapshot) return;
+		if (snapshot.statistics) this.deathScreen.show(snapshot.statistics);
+		else this.deathScreen.hide();
 		for (const component of this.components) component.render(snapshot);
 		const notice = snapshot.notices.at(-1)?.text || "";
 		if (notice && notice !== this.lastToast) this.showToast(notice);
