@@ -1,4 +1,3 @@
-import { performance } from "node:perf_hooks";
 import {
 	ACTION_SOUND_DEFS,
 	COLORS,
@@ -42,12 +41,11 @@ import {
 import { PlayerUnitPathfinder } from "./playerUnitPathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
-import { ZombieAiWorkerClient } from "./zombieAiWorkerClient.js";
 import type {
 	ZombieAiAttackIntent,
 	ZombieAiStep,
 } from "./zombieAiWorkerProtocol.js";
-import { ZombieDirectorWorkerClient } from "./zombieDirectorWorkerClient.js";
+import { stepZombieDirector } from "./zombieDirector.js";
 import { ZOMBIE_OWNER_ID, zombieSpawnPolicy } from "./zombieSpawning.js";
 import { Logs } from "../shared/logs.js";
 import { DAY_NIGHT_CYCLE_SECONDS } from "../shared/dayNight.js";
@@ -129,8 +127,58 @@ const ZOMBIE_MID_CADENCE_TICKS = 3;
 const ZOMBIE_FAR_CADENCE_TICKS = 8;
 const ZOMBIE_CADENCE_FIELD_CELL_SIZE = 4;
 const ZOMBIE_CADENCE_FIELD_REBUILD_TICKS = 4;
-const zombieAiWorker = new ZombieAiWorkerClient();
-const zombieDirector = new ZombieDirectorWorkerClient();
+export type ZombieAiService = {
+	step(
+		world: World,
+		dt: number,
+		zombies: ZombieAiStep[],
+		applyAttack: (attack: ZombieAiAttackIntent) => void,
+		profiler: ZombieAiStepProfiler | null,
+	): boolean;
+};
+
+export type ZombieAiStepProfiler = {
+	measure<T>(name: string, label: string, count: number, work: () => T): T;
+};
+
+export type ZombieDirectorService = {
+	step(world: World, dt: number): void;
+};
+
+export type SimulationServices = {
+	zombieAi: ZombieAiService;
+	zombieDirector: ZombieDirectorService;
+};
+
+const directZombieAi: ZombieAiService = {
+	step() {
+		return false;
+	},
+};
+
+const directZombieDirector: ZombieDirectorService = {
+	step(world, dt) {
+		stepZombieDirector(world, dt);
+		world._zombieWorkerPerf = {
+			enabled: false,
+			pending: false,
+			lastDurationMs: 0,
+			lastCompletedTick: world.tick,
+			lastAppliedTick: world.tick,
+			failures: 0,
+			mode: "fallback",
+		};
+	},
+};
+
+let simulationServices: SimulationServices = {
+	zombieAi: directZombieAi,
+	zombieDirector: directZombieDirector,
+};
+
+export function configureSimulationServices(services: Partial<SimulationServices>) {
+	simulationServices = { ...simulationServices, ...services };
+}
 
 export function createWorld(): World {
 	const startedAt = Date.now();
@@ -480,7 +528,7 @@ export function stepWorld(world: World, dt: number) {
 			stepSpawner(context, zombieSpawnPolicy, dt),
 		);
 		profiler.measure("zombieDirector", "Zombie director", () =>
-			zombieDirector.step(world, dt),
+			simulationServices.zombieDirector.step(world, dt),
 		);
 		profiler.measure("decay", "Decay", () => {
 			stepActionNoises(world, dt);
@@ -588,7 +636,7 @@ function stepUnits(
 		else behavior.step(context, step.unit, step.dt);
 	}
 	if (
-		!zombieAiWorker.step(
+		!simulationServices.zombieAi.step(
 			world,
 			dt,
 			zombieSteps,

@@ -1,4 +1,4 @@
-import { getChangelog, getStatus, join, type ServerStatus } from "./api.js";
+import { getChangelog, getStatus, type ServerStatus } from "./api.js";
 import type { ChangelogEntry } from "./api.js";
 import { escapeHtml } from "./ui/dom.js";
 import villagerBaseUrl from "./sprites/villager_base.png";
@@ -43,10 +43,9 @@ type HowToPlayItem = {
 };
 
 type JoinResult = {
-	playerId: string;
-	sessionToken: string;
 	name: string;
 	color: string;
+	mode: "public" | "private";
 };
 
 const CONTRIBUTORS: ContributorCredit[] = [
@@ -122,14 +121,19 @@ export class HomeScreen {
 	private readonly joinButton = this.joinForm?.querySelector(
 		"button[type='submit']",
 	) as HTMLButtonElement | null;
+	private readonly privateButton = document.getElementById(
+		"privateGameButton",
+	) as HTMLButtonElement | null;
 	private readonly joinNotice = document.getElementById("joinNotice");
 	private latestStatus: ServerStatus | null = null;
 	private statusFull = false;
+	private joining = false;
 
 	constructor(
-		private readonly onJoined: (result: JoinResult) => void,
+		private readonly onJoinRequested: (result: JoinResult) => void,
 		private readonly onBeforeJoin: () => void,
 		private readonly showToast: (message: string) => void,
+		private readonly privateRoomId: string | null = null,
 	) {}
 
 	wireDom() {
@@ -157,6 +161,10 @@ export class HomeScreen {
 			"submit",
 			(event) => void this.join(event),
 		);
+		if (this.privateButton) {
+			if (this.privateRoomId) this.privateButton.textContent = "Join Private";
+			this.privateButton.addEventListener("click", () => this.joinPrivate());
+		}
 		document
 			.getElementById("howToPlayButton")
 			?.addEventListener("click", () => this.openModal("howToPlayModal"));
@@ -277,29 +285,50 @@ export class HomeScreen {
 		resetStatus?.classList.toggle("hidden", !!message);
 	}
 
-	private async join(event: SubmitEvent) {
+	setJoining(joining: boolean) {
+		this.joining = joining;
+		if (this.joinButton) {
+			this.joinButton.disabled = joining || this.statusFull;
+			this.joinButton.textContent = joining ? "Joining..." : "Public Game";
+		}
+		if (this.privateButton) {
+			this.privateButton.disabled = joining;
+			this.privateButton.textContent = joining
+				? "Joining..."
+				: this.privateRoomId
+					? "Join Private"
+					: "Private Game";
+		}
+	}
+
+	private join(event: SubmitEvent) {
 		event.preventDefault();
+		if (this.joining) return;
 		if (this.statusFull) {
 			this.showNotice("The world is full. Try again soon.");
 			return;
 		}
+		this.requestJoin("public");
+	}
+
+	private joinPrivate() {
+		if (this.joining) return;
+		this.requestJoin("private");
+	}
+
+	private requestJoin(mode: JoinResult["mode"]) {
+		this.setJoining(true);
 		this.onBeforeJoin();
 		this.showNotice("");
 		const name = this.nameInput?.value.trim() ?? "";
 		const color = this.colorInput?.value || "";
-		const result = await join(name, color);
-		if (!result.ok || !result.playerId || !result.sessionToken) {
-			this.showNotice(result.error || "Could not join.");
-			return;
-		}
 		this.showNotice("");
 		localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
 		localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, color);
-		this.onJoined({
-			playerId: result.playerId,
-			sessionToken: result.sessionToken,
+		this.onJoinRequested({
 			name,
 			color,
+			mode,
 		});
 	}
 
@@ -429,8 +458,12 @@ export class HomeScreen {
 	private setJoinButtonFull(full: boolean) {
 		this.statusFull = full;
 		if (!this.joinButton) return;
-		this.joinButton.disabled = full;
-		this.joinButton.textContent = full ? "World Full" : "Play Game";
+		this.joinButton.disabled = this.joining || full;
+		this.joinButton.textContent = this.joining
+			? "Joining..."
+			: full
+				? "World Full"
+				: "Public Game";
 	}
 
 	private formatResetStatus(status: ServerStatus) {

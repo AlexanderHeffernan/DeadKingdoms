@@ -41,7 +41,10 @@
 						/>
 					</span>
 				</label>
-				<button type="submit">Play Game</button>
+				<div class="home-play-actions">
+					<button id="publicGameButton" type="submit">Public Game</button>
+					<button id="privateGameButton" type="button">Private Game</button>
+				</div>
 				<div class="home-secondary-actions">
 					<button id="homeLeaderboardButton" class="home-secondary-button" type="button">Leaderboard</button>
 					<button id="howToPlayButton" class="home-secondary-button" type="button">How To Play</button>
@@ -166,6 +169,7 @@
 					>
 						<img class="banner-image-icon" src="/sprites/ui/settings/settings.png" alt="" aria-hidden="true" />
 					</button>
+					<button id="privateInviteButton" class="home-secondary-button hidden" type="button" title="Copy private invite link">Invite</button>
 					<button id="leaveButton" class="icon-button leave-button" type="button" aria-label="Leave game" title="Leave game">
 						<img class="banner-image-icon" src="/sprites/ui/settings/bannerIcons/exit.png" alt="" aria-hidden="true" />
 					</button>
