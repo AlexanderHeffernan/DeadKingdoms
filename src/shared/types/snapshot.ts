@@ -10,6 +10,23 @@ export interface Notice {
 	at: number;
 }
 
+export interface PlayerStatisticsSnapshot {
+	scoreHistory: Array<{ atSeconds: number; score: number }>;
+	military: {
+		unitsKilled: number;
+		unitsLost: number;
+		buildingsRazed: number;
+		buildingsLost: number;
+		largestArmy: number;
+	};
+	economy: {
+		resourcesCollected: Record<ResourceType, number>;
+		villagerHigh: number;
+		villagerUtilisation: number;
+	};
+	durationSeconds: number;
+}
+
 /** Public leaderboard row derived from player state. */
 export interface LeaderboardEntry {
 	id: PlayerId;
@@ -256,6 +273,7 @@ export interface Snapshot {
 	unitTileDebug: boolean;
 	serverPerf: ServerPerfStats | null;
 	admin: AdminSnapshot | null;
+	statistics: PlayerStatisticsSnapshot | null;
 }
 
 export interface SnapshotEntityDelta<T> {
@@ -286,6 +304,7 @@ export interface SnapshotDelta {
 	unitTileDebug: boolean;
 	serverPerf?: ServerPerfStats | null;
 	admin?: AdminSnapshot | null;
+	statistics?: PlayerStatisticsSnapshot | null;
 }
 
 export type SnapshotMessage = Snapshot | SnapshotDelta;

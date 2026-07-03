@@ -821,7 +821,8 @@ export function makeSnapshotDelta(
 			pathAvailabilityDebug: current.pathAvailabilityDebug,
 			unitTileDebug: current.unitTileDebug,
 			...(JSON.stringify(previous.serverPerf) !== JSON.stringify(current.serverPerf) ? { serverPerf: current.serverPerf } : {}),
-		...(JSON.stringify(previous.admin) !== JSON.stringify(current.admin) ? { admin: current.admin } : {}),
+			...(JSON.stringify(previous.admin) !== JSON.stringify(current.admin) ? { admin: current.admin } : {}),
+			...(JSON.stringify(previous.statistics) !== JSON.stringify(current.statistics) ? { statistics: current.statistics } : {}),
 	};
 }
 
@@ -1628,8 +1629,8 @@ async function leaveGame(
 		force: true,
 	});
 	await globalLeaderboard.countDeadKingdom();
-	removePlayer(world, auth.playerId);
-	json(res, { ok: true });
+	const statistics = removePlayer(world, auth.playerId);
+	json(res, { ok: true, statistics });
 }
 
 function streamEvents(

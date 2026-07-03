@@ -143,6 +143,14 @@ const ui = new UI(state, {
 		await leave(credentials);
 		window.location.reload();
 	},
+	async exitToMenu() {
+		const credentials = currentCredentials();
+		try {
+			if (credentials) await leave(credentials);
+		} finally {
+			resetToJoin("");
+		}
+	},
 	async disableAdminMode() {
 		const credentials = currentCredentials();
 		if (!credentials) return "No active player.";
@@ -549,6 +557,7 @@ function showPrivateInviteButton(visible: boolean) {
 function enterGame() {
 	document.getElementById("join")!.classList.add("hidden");
 	document.getElementById("game")?.classList.remove("hidden");
+	document.getElementById("game")?.classList.remove("dead");
 	renderer.resize();
 	music.start();
 	connectEvents();
@@ -589,7 +598,7 @@ async function startSession(request: { name: string; color: string; mode: "publi
 }
 
 function onDevShortcutKeyDown(event: KeyboardEvent) {
-	if (!currentCredentials()) return;
+	if (!currentCredentials() || isDead()) return;
 	if (event.key.length !== 1) return;
 	devCommandInput = `${devCommandInput}${event.key}`.slice(-DEV_COMMAND_BUFFER_LENGTH);
 	void maybeEnableAdminAccess();
@@ -790,11 +799,16 @@ function connectEvents() {
 			return;
 		}
 		if (!isSpectating() && (!state.playerId || !snap.players?.[state.playerId] || snap.players[state.playerId]!.defeated)) {
+			resetToJoin("Your player is no longer available. Join again to restart.");
 			handleEliminated();
 			return;
 		}
 		snapshots.applyVisibility(snap);
 		state.snapshot = snap;
+		if (state.playerId != null && snap.players[state.playerId]!.defeated) {
+			handleEliminated();
+			return;
+		}
 		adminDiagnosticsVisible = snap.admin !== null;
 		if (snap.admin !== null) adminAccessEnabled = true;
 		if (adminDiagnosticsVisible) maybeReportPing(Math.max(0, Date.now() - snap.now));
@@ -815,12 +829,32 @@ function maybeReportPing(pingMs: number) {
 
 async function leaveCurrentGame(message: string) {
 	const credentials = currentCredentials();
+	if (!credentials || !state.snapshot) {
+		resetToJoin(message);
+		return;
+	}
+	if (eventStream) eventStream.close();
+	eventStream = null;
+	const result = await leave(credentials);
+	if (!result.ok || !result.statistics) {
+		resetToJoin(result.error || message);
+		return;
+	}
+	state.snapshot = { ...state.snapshot, statistics: result.statistics };
+	handleEliminated();
 	if (activeSession) await activeSession.leave(credentials);
 	resetToJoin(message);
 }
 
 function handleEliminated() {
-	resetToJoin("You were eliminated. Join again to restart.");
+	if (eventStream) eventStream.close();
+	eventStream = null;
+	state.selectedIds.clear();
+	view.buildMode = null;
+	view.rallyModeBuildingId = null;
+	document.getElementById("game")?.classList.add("dead");
+	ui.render();
+	sfx.reset();
 }
 
 function resetToJoin(message: string) {
@@ -842,6 +876,7 @@ function resetToJoin(message: string) {
 	sfx.reset();
 	centered = false;
 	document.getElementById("game")?.classList.add("hidden");
+	document.getElementById("game")?.classList.remove("dead");
 	document.getElementById("join")?.classList.remove("hidden");
 	home.setJoining(false);
 	const notice = document.getElementById("joinNotice");
@@ -1133,6 +1168,7 @@ async function placeWallLine() {
 }
 
 async function issue(payload: ClientCommand, options: { silent?: boolean } = {}) {
+	if (isDead()) return { ok: false, error: "Player unavailable." };
 	const credentials = currentCredentials();
 	if (!credentials || !activeSession) return { ok: false };
 	const result = await activeSession.issue({ ...payload, playerId: credentials.playerId } as unknown as CommandPayload, credentials.sessionToken);
@@ -1142,6 +1178,10 @@ async function issue(payload: ClientCommand, options: { silent?: boolean } = {})
 		sfx.play(result.error?.includes("Population") ? "population_blocked" : "ui_error");
 	}
 	return result;
+}
+
+function isDead() {
+	return state.snapshot?.statistics !== null && state.snapshot?.statistics !== undefined;
 }
 
 function errorMessage(result: { ok: boolean; error?: string }) {
@@ -1163,7 +1203,7 @@ function pruneEffects() {
 
 function onKeyDown(event: KeyboardEvent) {
 	sfx.unlock();
-	if (actionHotkeys.handleKeyDown(event)) return;
+	if (!isDead() && actionHotkeys.handleKeyDown(event)) return;
 	if (document.getElementById("game")?.classList.contains("hidden") || (event.target as HTMLElement)?.matches?.("input, button")) return;
 	const key = event.key.toLowerCase();
 	if (key === "escape") {

@@ -108,6 +108,7 @@ export function makeSnapshot(
 			}
 			: null,
 		admin,
+		statistics: player?.defeated ? player.statistics?.snapshot() ?? null : null,
 	};
 }
 

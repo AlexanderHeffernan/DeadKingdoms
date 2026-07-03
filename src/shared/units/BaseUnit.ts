@@ -33,6 +33,7 @@ export type UnitClass<T extends BaseUnit = BaseUnit> = {
 	readonly canBuild: boolean;
 	readonly canAutoAcquireTargets: boolean;
 	readonly carryCapacity: number;
+
 	readonly trainShortcut?: string | undefined;
 };
 
@@ -204,6 +205,12 @@ export interface UnitBehavior {
 	readonly canAutoAcquireTargets: boolean;
 	readonly carryCapacity: number;
 
+	/** Whether this archetype contributes to villager economy statistics. */
+	countsAsVillager(): boolean;
+
+	/** Whether this archetype contributes to army-size statistics. */
+	countsAsMilitary(): boolean;
+
 	/** Persistent noise this unit emits for zombie attraction. */
 	soundLevel(): number;
 
@@ -263,6 +270,9 @@ export abstract class BaseUnit implements UnitBehavior {
 	public get canBuild() { return (this.constructor as UnitClass).canBuild; }
 	public get canAutoAcquireTargets() { return (this.constructor as UnitClass).canAutoAcquireTargets; }
 	public get carryCapacity() { return (this.constructor as UnitClass).carryCapacity; }
+
+	public countsAsVillager() { return this.canGather; }
+	public countsAsMilitary() { return !this.canGather; }
 
 	/** Optional keyboard shortcut used by production-building train actions. */
 	public get trainShortcut() {

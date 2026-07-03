@@ -9,6 +9,7 @@ const ZOMBIE_SIDEWAYS_PROGRESS_TOLERANCE = 0.015;
 const ZOMBIE_MID_LOCAL_TARGET_SCAN_TICKS = 3;
 
 export class ZombieUnit extends BaseUnit {
+	public override countsAsMilitary() { return false; }
 	public static readonly type = "zombie";
 	public static readonly label = "Zombie";
 	public static readonly sprite = "zombie_def";

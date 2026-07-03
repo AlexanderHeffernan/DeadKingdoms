@@ -44,16 +44,6 @@
 	text-shadow: 2px 2px 0 #0b0908;
 }
 
-.settings-close-button span {
-	display: grid;
-	place-items: center;
-	width: 100%;
-	height: 100%;
-	color: #e9bd59;
-	font-size: 16px;
-	line-height: 1;
-}
-
 .settings-body {
 	display: grid;
 	gap: 10px;

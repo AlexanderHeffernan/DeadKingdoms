@@ -121,6 +121,7 @@ export class SnapshotStore {
 				unitTileDebug: false,
 				serverPerf: null,
 				admin: null,
+				statistics: null,
 		});
 	}
 
@@ -161,7 +162,8 @@ export class SnapshotStore {
 				pathAvailabilityDebug: delta.pathAvailabilityDebug,
 				unitTileDebug: delta.unitTileDebug,
 				serverPerf: delta.serverPerf !== undefined ? delta.serverPerf : previous.serverPerf,
-			admin: delta.admin !== undefined ? delta.admin : previous.admin,
+				admin: delta.admin !== undefined ? delta.admin : previous.admin,
+				statistics: delta.statistics !== undefined ? delta.statistics : previous.statistics,
 		};
 	}
 

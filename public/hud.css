@@ -675,3 +675,257 @@
 	transform: scale(0.75);
 	transform-origin: center;
 }
+
+.death-screen {
+	position: fixed;
+	inset: 0;
+	z-index: 1000;
+	display: grid;
+	place-items: center;
+	box-sizing: border-box;
+	padding: 32px;
+	background: rgb(8 8 8 / 0.62);
+	pointer-events: none;
+}
+
+.death-screen.hidden { display: none; }
+
+.death-screen-panel {
+	position: relative;
+	width: min(980px, calc(100vw - 64px));
+	box-sizing: border-box;
+	padding: 38px;
+	border: 4px solid #5f4a32;
+	border-right-color: #211914;
+	border-bottom-color: #211914;
+	background: #0f0d0a;
+	box-shadow:
+		0 0 0 3px #080808,
+		0 0 0 7px rgb(83 73 90 / 0.38),
+		12px 12px 0 rgb(0 0 0 / 0.68);
+	image-rendering: pixelated;
+	pointer-events: auto;
+}
+
+.game.dead .hud.bottom,
+.game.dead #trainingStatus,
+.game.dead #tutorialPanel,
+.game.dead #adminPanel,
+.game.dead #adminFullscreen,
+.game.dead #adminRestoreButton {
+	display: none !important;
+}
+
+.game.dead #leaveButton { display: none; }
+.game.dead .population-icon-button { pointer-events: none; }
+
+.death-screen-panel h2 {
+	margin: 0 0 28px;
+	color: #e8dcc5;
+	font-size: 48px;
+	text-transform: uppercase;
+	text-shadow: 3px 3px 0 #0b0908;
+}
+
+.death-kicker {
+	margin: 0 0 4px;
+	color: #b79a5f;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	text-shadow: 2px 2px 0 #0b0908;
+}
+
+.death-statistics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 28px; }
+
+.death-tabs {
+	display: flex;
+	gap: 22px;
+	margin: 0 0 22px;
+	border-bottom: 2px solid #3a3027;
+}
+
+.death-screen-panel .death-tab {
+	min-width: 0;
+	margin: 0 0 -2px;
+	padding: 8px 3px 10px;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	box-shadow: none;
+	background: transparent;
+	color: #8f877a;
+	font-size: var(--ui-text-md);
+	text-transform: none;
+	text-shadow: none;
+}
+
+.death-screen-panel .death-tab.active {
+	border-bottom-color: #e9bd59;
+	background: transparent;
+	color: #e9bd59;
+}
+
+.death-screen-panel .death-tab:hover,
+.death-screen-panel .death-tab:focus-visible {
+	background: transparent;
+	color: #e8dcc5;
+	transform: none;
+}
+
+.death-screen-panel .death-tab:active {
+	background: transparent;
+	transform: none;
+	box-shadow: none;
+}
+
+#deathSummaryView.hidden,
+#deathScoreView.hidden { display: none; }
+
+.death-chart-heading {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	margin-bottom: 12px;
+}
+
+.death-chart-heading h3 { margin: 0; color: #e9bd59; text-transform: uppercase; }
+.death-chart-heading span { color: #e8dcc5; }
+
+.death-score-chart {
+	display: block;
+	width: 100%;
+	height: 250px;
+	box-sizing: border-box;
+	margin-bottom: 28px;
+	border: 3px solid #5f4a32;
+	border-right-color: #211914;
+	border-bottom-color: #211914;
+	background: #191713;
+}
+.death-stat-section {
+	padding: 14px;
+	border: 3px solid #5f4a32;
+	border-right-color: #211914;
+	border-bottom-color: #211914;
+	background: #191713;
+	box-shadow: 5px 5px 0 rgb(0 0 0 / 0.5);
+}
+
+.death-stat-section h3 { margin: 0 0 12px; color: #e9bd59; text-transform: uppercase; text-shadow: 2px 2px 0 #0b0908; }
+.death-stat-row { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid #3a3027; cursor: help; }
+.death-stat-row:last-child { border-bottom: 0; }
+.death-stat-row span { color: #bdb3a3; white-space: nowrap; }
+.death-stat-row strong { color: #e8dcc5; }
+.death-screen-panel button {
+	min-width: 180px;
+	padding: 14px 22px;
+	border: 4px solid #8aa4bf;
+	border-right-color: #102034;
+	border-bottom-color: #102034;
+	background: #213a55;
+	box-shadow:
+		0 0 0 3px #080808,
+		0 0 0 7px rgb(33 58 85 / 0.58),
+		8px 8px 0 rgb(0 0 0 / 0.62);
+	color: #f0edf6;
+	font: inherit;
+	font-weight: 700;
+	text-transform: uppercase;
+	text-shadow: 2px 2px 0 #11111e;
+	cursor: pointer;
+}
+
+.death-screen-panel button:hover,
+.death-screen-panel button:focus-visible {
+	background: #2b4a6a;
+	color: #fff;
+	outline: none;
+	transform: translate(-2px, -2px);
+}
+
+.death-screen-panel button:active {
+	transform: translate(2px, 2px);
+	box-shadow:
+		0 0 0 3px #080808,
+		0 0 0 7px rgb(33 58 85 / 0.4),
+		4px 4px 0 rgb(0 0 0 / 0.66);
+}
+
+.death-screen-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 20px;
+}
+
+.death-screen-panel .death-exit-button {
+	border-color: #6f5d40;
+	border-right-color: #211914;
+	border-bottom-color: #211914;
+	background: #191713;
+	color: #e9bd59;
+	box-shadow:
+		0 0 0 3px #080808,
+		0 0 0 6px rgb(83 73 90 / 0.36),
+		8px 8px 0 rgb(0 0 0 / 0.58);
+}
+
+.death-screen-panel .death-exit-button:hover,
+.death-screen-panel .death-exit-button:focus-visible {
+	background: #242019;
+	color: #ffe0a0;
+}
+
+.death-screen-panel .death-hide-button {
+	position: absolute;
+	top: 14px;
+	right: 14px;
+	min-width: 42px;
+	padding: 7px 10px;
+	border-color: #6f5d40;
+	border-right-color: #211914;
+	border-bottom-color: #211914;
+	background: #191713;
+	box-shadow: 4px 4px 0 rgb(0 0 0 / 0.58);
+	color: #e9bd59;
+	text-shadow: none;
+}
+
+.death-screen-panel .death-hide-button:hover,
+.death-screen-panel .death-hide-button:focus-visible {
+	background: #242019;
+	color: #ffe0a0;
+}
+
+.death-restore-button {
+	position: fixed;
+	left: 24px;
+	bottom: 24px;
+	z-index: 1001;
+	padding: 12px 18px;
+	border: 4px solid #8aa4bf;
+	border-right-color: #102034;
+	border-bottom-color: #102034;
+	background: #213a55;
+	box-shadow: 7px 7px 0 rgb(0 0 0 / 0.62);
+	color: #f0edf6;
+	font: inherit;
+	text-transform: uppercase;
+	cursor: pointer;
+}
+
+.death-restore-button.hidden { display: none; }
+
+.death-restore-button:hover,
+.death-restore-button:focus-visible {
+	background: #2b4a6a;
+	color: #fff;
+	outline: none;
+	transform: translate(-2px, -2px);
+}
+
+.death-restore-button:active {
+	transform: translate(2px, 2px);
+	box-shadow:
+		0 0 0 3px #080808,
+		0 0 0 7px rgb(33 58 85 / 0.4),
+		4px 4px 0 rgb(0 0 0 / 0.66);
+}

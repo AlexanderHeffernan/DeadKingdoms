@@ -61,6 +61,7 @@ function makeTestSnapshot(overrides: Partial<Snapshot>): Snapshot {
 		unitTileDebug: false,
 		serverPerf: null,
 		admin: null,
+		statistics: null,
 		...overrides,
 	};
 }
