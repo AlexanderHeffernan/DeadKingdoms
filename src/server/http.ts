@@ -85,11 +85,16 @@ const COMMAND_TYPES: Record<CommandType, true> = {
 
 const disconnectTimers = new WeakMap<World, Map<PlayerId, NodeJS.Timeout>>();
 const privateRooms = new Map<string, PrivateRoom>();
+const PRIVATE_ROOM_MAX_AGE_MS = 30 * 60_000;
+const PRIVATE_ROOM_STALE_HOST_MS = 15_000;
+setInterval(() => prunePrivateRooms(), 5000).unref();
 
 type PrivateRoom = {
 	roomId: string;
 	hostToken: string;
 	createdAt: number;
+	lastHostSeenAt: number;
+	playerCount: number;
 	offers: Map<string, PrivateOffer>;
 	answers: Map<string, unknown>;
 };
@@ -174,6 +179,10 @@ export function createHandler(
 					return await privateRoomSignal(req, res, url);
 				if (req.method === "POST" && url.pathname === "/api/private-admin-access")
 					return await validatePrivateAdminAccess(req, res);
+				if (req.method === "POST" && url.pathname === "/api/admin-overview")
+					return await adminOverview(req, res, state);
+				if (req.method === "GET" && url.pathname === "/api/admin/spectate-public")
+					return await spectatePublic(req, res, state, url);
 			const world = state.currentWorld();
 			if (req.method === "GET" && url.pathname === "/api/snapshot")
 				return world
@@ -315,6 +324,8 @@ async function privateRoomSignal(
 			roomId,
 			hostToken,
 			createdAt: Date.now(),
+			lastHostSeenAt: Date.now(),
+			playerCount: 1,
 			offers: new Map(),
 			answers: new Map(),
 		});
@@ -350,6 +361,10 @@ async function privateRoomSignal(
 	if (req.method === "GET" && action === "offers") {
 		if (url.searchParams.get("hostToken") !== room.hostToken)
 			return json(res, { ok: false, error: "Invalid private host token." }, 403);
+		room.lastHostSeenAt = Date.now();
+		const playerCount = Number(url.searchParams.get("playerCount"));
+		if (Number.isFinite(playerCount) && playerCount >= 1)
+			room.playerCount = Math.floor(playerCount);
 		return json(res, {
 			offers: [...room.offers.values()].map(({ createdAt, ...offer }) => offer),
 		});
@@ -380,14 +395,75 @@ async function privateRoomSignal(
 }
 
 function prunePrivateRooms() {
-	const expiresBefore = Date.now() - 30 * 60_000;
+	const expiresBefore = Date.now() - PRIVATE_ROOM_MAX_AGE_MS;
+	const staleHostBefore = Date.now() - PRIVATE_ROOM_STALE_HOST_MS;
 	for (const [roomId, room] of privateRooms) {
-		if (room.createdAt < expiresBefore) privateRooms.delete(roomId);
+		if (room.createdAt < expiresBefore || room.lastHostSeenAt < staleHostBefore)
+			privateRooms.delete(roomId);
 	}
 }
 
 function privateRoomId() {
 	return randomBytes(6).toString("base64url");
+}
+
+async function adminOverview(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	state: ServerState,
+) {
+	prunePrivateRooms();
+	const body = (await readJson(req)) as { secret?: unknown };
+	if (typeof body.secret !== "string" || !isAdminSecret(body.secret))
+		return json(res, { ok: false, error: "Invalid admin secret." }, 403);
+	const world = state.currentWorld();
+	const now = Date.now();
+	return json(res, {
+		ok: true,
+		publicGame: world
+			? {
+				active: true,
+				players: Object.values(world.players).filter((player) => !player.defeated).length,
+				startedAt: world.startedAt ?? null,
+				ageMs: world.startedAt ? now - world.startedAt : null,
+				tps: world.serverPerf.tps,
+				tickMs: world.serverPerf.tickMs,
+				tick: world.tick,
+			}
+			: { active: false },
+		privateGames: [...privateRooms.values()].map((room) => ({
+			roomId: room.roomId,
+			createdAt: room.createdAt,
+			lastHostSeenAt: room.lastHostSeenAt,
+			ageMs: now - room.createdAt,
+			playerCount: room.playerCount,
+			pendingJoins: room.offers.size,
+		})),
+	});
+}
+
+async function spectatePublic(
+	req: import("node:http").IncomingMessage,
+	res: import("node:http").ServerResponse,
+	state: ServerState,
+	url: URL,
+) {
+	const secret = url.searchParams.get("secret");
+	if (!secret || !isAdminSecret(secret)) return invalidSession(res);
+	const world = state.currentWorld();
+	if (!world) return worldUnavailable(res);
+	res.writeHead(200, {
+		...securityHeaders(),
+		"Content-Type": "text/event-stream",
+		"Cache-Control": "no-cache",
+		Connection: "keep-alive",
+	});
+	const timer = setInterval(() => {
+		if (res.writableEnded || res.destroyed) return;
+		const snapshot = makeSnapshot(world, null, null, adminViewFromParam(url.searchParams.get("adminView")), "admin");
+		res.write(`data: ${JSON.stringify(snapshot)}\n\n`);
+	}, 1000 / 10);
+	req.on("close", () => clearInterval(timer));
 }
 
 async function validatePrivateAdminAccess(

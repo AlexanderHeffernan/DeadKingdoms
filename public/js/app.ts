@@ -16,7 +16,7 @@ import { SnapshotStore } from "./snapshotStore.js";
 import { SnapshotPreview } from "./snapshotPreview.js";
 import { GlobalLeaderboardModal } from "./globalLeaderboardModal.js";
 import { HomeScreen } from "./homeScreen.js";
-import { pendingPrivateRoomId, PrivateClientGameSession, PrivateHostGameSession, PublicGameSession, type GameSession } from "./gameSession.js";
+import { pendingPrivateRoomId, PrivateClientGameSession, PrivateHostGameSession, PublicGameSession, PublicSpectatorGameSession, type GameSession } from "./gameSession.js";
 import { SelectionController } from "./selectionController.js";
 import { BuildPlacement } from "./buildPlacement.js";
 import { TutorialController } from "./tutorial/tutorialController.js";
@@ -90,6 +90,8 @@ const renderer = new Renderer(canvas, { minimap, sizeMode: "viewport" });
 let eventStream: EventSource | null = null;
 let activeSession: GameSession | null = null;
 let activePrivateInviteUrl: string | null = null;
+let homeAdminInput = "";
+let homeAdminSecret: string | null = null;
 let devCommandInput = "";
 let adminAccessEnabled = false;
 let godModeCheckPending = false;
@@ -483,6 +485,7 @@ canvas.addEventListener("wheel", (event) => {
 });
 window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keydown", onDevShortcutKeyDown);
+window.addEventListener("keydown", onHomeAdminKeyDown);
 minimap.addEventListener("mousedown", (event) => moveCameraFromMinimap(event));
 minimap.addEventListener("mousemove", (event) => {
 	if (event.buttons === 1) moveCameraFromMinimap(event);
@@ -594,6 +597,113 @@ function onDevShortcutKeyDown(event: KeyboardEvent) {
 	void maybeSpawnZombieHorde();
 }
 
+function onHomeAdminKeyDown(event: KeyboardEvent) {
+	if (document.getElementById("join")?.classList.contains("hidden")) return;
+	if (event.key.length !== 1) return;
+	homeAdminInput = `${homeAdminInput}${event.key}`.slice(-DEV_COMMAND_BUFFER_LENGTH);
+	void maybeOpenHomeAdmin(homeAdminInput);
+}
+
+async function maybeOpenHomeAdmin(secret: string) {
+	const overview = await fetchAdminOverview(secret);
+	if (!overview.ok) return;
+	homeAdminSecret = secret;
+	renderHomeAdmin(overview);
+}
+
+async function fetchAdminOverview(secret: string): Promise<AdminOverviewResult> {
+	try {
+		const res = await fetch("/api/admin-overview", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ secret }),
+		});
+		return await res.json() as AdminOverviewResult;
+	} catch {
+		return { ok: false, error: "Could not load admin overview." };
+	}
+}
+
+function renderHomeAdmin(overview: Extract<AdminOverviewResult, { ok: true }>) {
+	const panel = ensureHomeAdminPanel();
+	const publicGame = overview.publicGame.active
+		? `<tr><td>Public</td><td>${overview.publicGame.players} players</td><td>${formatMs(overview.publicGame.ageMs ?? 0)}</td><td>${overview.publicGame.tps.toFixed(1)}</td><td><button type="button" data-spectate-public="true">Spectate</button></td></tr>`
+		: `<tr><td>Public</td><td colspan="3">No active public game</td><td></td></tr>`;
+	const privateRows = overview.privateGames.length
+		? overview.privateGames.map((game) => `<tr><td>${game.roomId}</td><td>${game.playerCount} players · ${game.pendingJoins} pending</td><td>${formatMs(game.ageMs)}</td><td>${formatMs(Date.now() - game.lastHostSeenAt)} ago</td><td></td></tr>`).join("")
+		: `<tr><td colspan="5">No private rooms are currently registered.</td></tr>`;
+	panel.innerHTML = `
+		<div class="home-admin-dialog">
+			<header>
+				<h2>Admin Overview</h2>
+				<button type="button" data-home-admin-close="true">X</button>
+			</header>
+			<h3>Public Game</h3>
+			<table><tbody>${publicGame}</tbody></table>
+			<h3>Private Games</h3>
+			<table>
+				<thead><tr><th>Invite</th><th>Players</th><th>Age</th><th>Host Seen</th><th></th></tr></thead>
+				<tbody>${privateRows}</tbody>
+			</table>
+		</div>
+	`;
+	panel.classList.remove("hidden");
+	panel.querySelector("[data-home-admin-close]")?.addEventListener("click", () => panel.classList.add("hidden"));
+	panel.querySelector("[data-spectate-public]")?.addEventListener("click", () => void startSpectating("public"));
+}
+
+function ensureHomeAdminPanel() {
+	let panel = document.getElementById("homeAdminPanel");
+	if (panel) return panel;
+	panel = document.createElement("section");
+	panel.id = "homeAdminPanel";
+	panel.className = "home-admin-panel hidden";
+	document.body.append(panel);
+	return panel;
+}
+
+async function startSpectating(kind: "public") {
+	if (!homeAdminSecret) return;
+	document.getElementById("homeAdminPanel")?.classList.add("hidden");
+	activeSession?.dispose();
+	const session: GameSession = new PublicSpectatorGameSession(homeAdminSecret);
+	activeSession = session;
+	const joined = await session.join({ name: "Admin Spectator", color: "#ffffff" });
+	if (!joined.ok) {
+		ui.showToast(joined.error);
+		return;
+	}
+	state.playerId = joined.result.playerId;
+	state.sessionToken = joined.result.sessionToken;
+	enterGame();
+}
+
+function formatMs(ms: number) {
+	const seconds = Math.max(0, Math.floor(ms / 1000));
+	const minutes = Math.floor(seconds / 60);
+	const hours = Math.floor(minutes / 60);
+	if (hours) return `${hours}h ${minutes % 60}m`;
+	if (minutes) return `${minutes}m`;
+	return `${seconds}s`;
+}
+
+type AdminOverviewResult =
+	| { ok: false; error?: string }
+	| {
+		ok: true;
+		publicGame:
+			| { active: false }
+			| { active: true; players: number; startedAt: number | null; ageMs: number | null; tps: number; tickMs: number; tick: number };
+		privateGames: Array<{
+			roomId: string;
+			createdAt: number;
+			ageMs: number;
+			lastHostSeenAt: number;
+			playerCount: number;
+			pendingJoins: number;
+		}>;
+	};
+
 async function maybeEnableAdminAccess() {
 	const credentials = currentCredentials();
 	if (godModeCheckPending || !credentials || devCommandInput.length < 3) return;
@@ -679,7 +789,7 @@ function connectEvents() {
 			connectEvents();
 			return;
 		}
-		if (!state.playerId || !snap.players?.[state.playerId] || snap.players[state.playerId]!.defeated) {
+		if (!isSpectating() && (!state.playerId || !snap.players?.[state.playerId] || snap.players[state.playerId]!.defeated)) {
 			handleEliminated();
 			return;
 		}
@@ -752,13 +862,20 @@ function centerOnTownOnce() {
 function centerOnTown(once = true) {
 	if (!state.snapshot) return;
 	if (once && centered) return;
-	const town = Object.values(state.snapshot.buildings).find((building) => building.ownerId === state.playerId && building.type === "townCenter");
+	const town = Object.values(state.snapshot.buildings).find((building) => (
+		building.type === "townCenter" &&
+		(isSpectating() || building.ownerId === state.playerId)
+	));
 	if (!town) return;
 	const screen = isoToScreen(town.x + (town.size - 1) / 2, town.y + (town.size - 1) / 2, { x: 0, y: 0, zoom: view.camera.zoom });
 	view.camera.x = window.innerWidth / 2 - screen.x;
 	view.camera.y = window.innerHeight / 2 - screen.y;
 	clampCamera();
 	centered = true;
+}
+
+function isSpectating() {
+	return activeSession?.mode === "public-spectator";
 }
 
 function drawLoop() {

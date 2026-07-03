@@ -4,7 +4,7 @@ import type { CommandPayload, CommandResult, PlayerId, ResourceType, SnapshotMes
 import { addPlayer, command, createWorld, emitDevBang, grantPlayerResource, grantPlayerSoldiers, setWorldTimeOfDay, spawnZombieHorde, stepWorld, toggleTownCenterInvincibility } from "../../src/server/world.js";
 import { join as joinPublicGame, leave, sendCommand, type SessionCredentials } from "./api.js";
 
-export type GameMode = "public" | "private-host" | "private-client";
+export type GameMode = "public" | "private-host" | "private-client" | "public-spectator";
 
 export type JoinOptions = {
 	name: string;
@@ -112,7 +112,7 @@ export class PrivateHostGameSession implements GameSession {
 	private stepAccumulatorMs = 0;
 	private onSnapshot: SnapshotHandler | null = null;
 	private sentExplored = new Set<number>();
-	private peers = new Map<string, PrivatePeer>();
+	private peers = new Map<string, PrivateConnectionPeer>();
 	private room: PrivateRoom | null = null;
 	inviteUrl?: string | undefined;
 
@@ -284,6 +284,7 @@ export class PrivateHostGameSession implements GameSession {
 		this.stepAccumulatorMs = 0;
 		for (const peer of this.peers.values()) peer.close();
 		this.peers.clear();
+		this.room = null;
 	}
 
 	private step() {
@@ -308,8 +309,8 @@ export class PrivateHostGameSession implements GameSession {
 		const poll = async () => {
 			if (!this.room || !this.world) return;
 			try {
-				const offers = await listPrivateOffers(this.room);
-				for (const offer of offers) {
+				const offers = await listPrivateOffers(this.room, this.playerCount());
+				for (const offer of offers.offers) {
 					if (this.peers.has(offer.peerId)) continue;
 					const peerPlayerId = addPlayer(this.world, offer.name, offer.color);
 					const peer = new PrivatePeer(
@@ -408,6 +409,11 @@ export class PrivateHostGameSession implements GameSession {
 		}
 		player.adminLevel = "admin";
 		return { ok: true, adminLevel: player.adminLevel, enabled: true };
+	}
+
+	private playerCount() {
+		if (!this.world) return 1;
+		return Object.values(this.world.players).filter((player) => !player.defeated).length;
 	}
 }
 
@@ -585,6 +591,46 @@ export class PrivateClientGameSession implements GameSession {
 	}
 }
 
+export class PublicSpectatorGameSession implements GameSession {
+	readonly mode = "public-spectator" as const;
+	private eventStream: EventSource | null = null;
+
+	constructor(private readonly secret: string) {}
+
+	async join(options: JoinOptions) {
+		return {
+			ok: true as const,
+			result: {
+				playerId: "__spectator" as PlayerId,
+				sessionToken: this.secret,
+				name: options.name,
+				color: options.color,
+				mode: this.mode,
+			},
+		};
+	}
+
+	connect(onSnapshot: SnapshotHandler, onNotice: NoticeHandler) {
+		this.eventStream?.close();
+		this.eventStream = new EventSource(`/api/admin/spectate-public?secret=${encodeURIComponent(this.secret)}&adminView=popup`);
+		this.eventStream.onmessage = (event) => onSnapshot(JSON.parse(event.data) as SnapshotMessage);
+		this.eventStream.onerror = () => onNotice("Spectator connection interrupted.");
+	}
+
+	async issue(): Promise<CommandResult> {
+		return { ok: false, error: "Spectators cannot issue player commands." };
+	}
+
+	async leave() {
+		this.dispose();
+	}
+
+	dispose() {
+		this.eventStream?.close();
+		this.eventStream = null;
+	}
+}
+
 type PrivateWireMessage =
 	| { type: "welcome"; credentials: SessionCredentials }
 	| { type: "snapshot"; message: SnapshotMessage }
@@ -603,6 +649,11 @@ type PrivateOffer = {
 	name: string;
 	color: string;
 	offer: RTCSessionDescriptionInit;
+};
+
+type PrivateConnectionPeer = {
+	sendSnapshot(world: World): void;
+	close(): void;
 };
 
 class PrivatePeer {
@@ -720,11 +771,11 @@ async function validatePrivateAdminSecret(secret: string): Promise<PrivateAdminR
 	return result.ok ? { ok: true } : { ok: false, error: result.error || "Invalid admin secret." };
 }
 
-async function listPrivateOffers(room: PrivateRoom): Promise<PrivateOffer[]> {
-	const res = await fetch(`/api/private-rooms/${encodeURIComponent(room.roomId)}/offers?hostToken=${encodeURIComponent(room.hostToken)}`);
-	if (!res.ok) return [];
+async function listPrivateOffers(room: PrivateRoom, playerCount: number): Promise<{ offers: PrivateOffer[] }> {
+	const res = await fetch(`/api/private-rooms/${encodeURIComponent(room.roomId)}/offers?hostToken=${encodeURIComponent(room.hostToken)}&playerCount=${encodeURIComponent(String(playerCount))}`);
+	if (!res.ok) return { offers: [] };
 	const body = await res.json() as { offers?: PrivateOffer[] };
-	return body.offers ?? [];
+	return { offers: body.offers ?? [] };
 }
 
 async function postPrivateOffer(roomId: string, offer: PrivateOffer) {
