@@ -15,4 +15,6 @@ export class TownCenter extends ProductionDepotBuilding {
 	static readonly populationCapacity = 5;
 	static readonly trains = [VillagerUnit] as const;
 	static readonly accepts = ["wood", "food", "ore"] as const;
+
+	override get manuallyDeletable() { return false; }
 }

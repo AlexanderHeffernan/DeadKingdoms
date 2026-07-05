@@ -2343,6 +2343,8 @@ function commandDeleteBuilding(
 	const building = getOwn(world.buildings, body.buildingId);
 	if (!building || building.ownerId !== playerId)
 		return { ok: false, error: "Select one of your buildings." };
+	if (!building.manuallyDeletable)
+		return { ok: false, error: `${building.label} cannot be manually deleted.` };
 	createRuin(world, building);
 	removeBuilding(world, building);
 	for (const unit of Object.values(world.units)) {
