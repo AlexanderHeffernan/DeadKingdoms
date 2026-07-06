@@ -621,7 +621,7 @@
 .how-to-sprite-flag {
 	width: 100%;
 	height: 100%;
-	background: #d8574f;
+	background: var(--flag-color, #d8574f);
 	mask: var(--flag-url) center / contain no-repeat;
 	-webkit-mask: var(--flag-url) center / contain no-repeat;
 }
