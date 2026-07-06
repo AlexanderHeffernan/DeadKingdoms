@@ -16,6 +16,7 @@ export type CommandType =
 	| "instantBuild"
 	| "finishBuild"
 	| "deleteBuilding"
+	| "deleteUnit"
 	| "setRallyPoint"
 	| "train"
 	| "attack"
@@ -64,6 +65,11 @@ export interface DeleteBuildingPayload extends CommandBase {
 	buildingId: BuildingId;
 }
 
+export interface DeleteUnitPayload extends CommandBase {
+	type: "deleteUnit";
+	unitIds: UnitId[];
+}
+
 export interface SetRallyPointPayload extends CommandBase, Vec2 {
 	type: "setRallyPoint";
 	buildingId: BuildingId;
@@ -110,6 +116,7 @@ export type CommandPayload =
 | InstantBuildPayload
 | FinishBuildPayload
 | DeleteBuildingPayload
+| DeleteUnitPayload
 | SetRallyPointPayload
 | TrainPayload
 | AttackPayload

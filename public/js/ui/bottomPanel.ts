@@ -194,6 +194,11 @@ export class BottomPanel implements GameUiComponent {
 			if (!building.manuallyDeletable) continue;
 			actions.push(new ButtonAction({ spriteName: "ruin", label: `Delete ${label(building.type)}`, cost: {}, shortcut: "Del", run: () => this.actions.deleteBuilding(building.id) }));
 		}
+		if (ownedUnits.length > 0) {
+			const unitIds = ownedUnits.map((unit) => unit.id);
+			const unitLabel = ownedUnits.length === 1 ? label(ownedUnits[0]!.type) : `${ownedUnits.length} units`;
+			actions.push(new ButtonAction({ spriteName: ownedUnits[0]!.type, label: `Delete ${unitLabel}`, cost: {}, shortcut: "Del", run: () => this.actions.deleteUnits(unitIds) }));
+		}
 		this.renderActionSet(actions);
 	}
 

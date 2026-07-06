@@ -53,6 +53,7 @@ export type UIActions = {
 	toggleAutoFarm: () => void;
 	replenishFarm: (farmId: string) => void;
 	deleteBuilding: (buildingId: string) => void;
+	deleteUnits: (unitIds: string[]) => void;
 	setRallyMode: (buildingId: string) => void;
 	respawn: () => Promise<void>;
 	exitToMenu: () => Promise<void>;

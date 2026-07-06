@@ -74,6 +74,7 @@ const COMMAND_TYPES: Record<CommandType, true> = {
 	instantBuild: true,
 	finishBuild: true,
 	deleteBuilding: true,
+	deleteUnit: true,
 	setRallyPoint: true,
 	train: true,
 	attack: true,
@@ -1468,6 +1469,14 @@ function validateCommandPayload(
 			return {
 				ok: true,
 				command: { type, playerId, buildingId: buildingId.value },
+			};
+		}
+		case "deleteUnit": {
+			const unitIds = validateUnitIds(body.unitIds);
+			if (!unitIds.ok) return unitIds;
+			return {
+				ok: true,
+				command: { type, playerId, unitIds: unitIds.value },
 			};
 		}
 		case "setRallyPoint": {

@@ -813,6 +813,7 @@ const COMMAND_HANDLERS: { [K in CommandPayload["type"]]: CommandHandler<K> } = {
 	instantBuild: commandInstantBuild,
 	finishBuild: commandFinishBuild,
 	deleteBuilding: commandDeleteBuilding,
+	deleteUnit: commandDeleteUnit,
 	setRallyPoint: commandSetRallyPoint,
 	train: commandTrain,
 	attack: commandAttack,
@@ -2349,6 +2350,24 @@ function commandDeleteBuilding(
 	removeBuilding(world, building);
 	for (const unit of Object.values(world.units)) {
 		if ("targetId" in unit.command && unit.command.targetId === building.id)
+			setUnitCommand(world, unit, { type: "idle" });
+	}
+	return { ok: true };
+}
+
+function commandDeleteUnit(
+	world: World,
+	playerId: PlayerId,
+	body: Extract<CommandPayload, { type: "deleteUnit" }>,
+): CommandResult {
+	const units = [...new Set(body.unitIds)]
+		.map((unitId) => getOwn(world.units, unitId))
+		.filter((unit): unit is Unit => unit !== undefined && unit.ownerId === playerId);
+	if (units.length === 0) return { ok: false, error: "Select one of your units." };
+	const removedUnitIds = new Set(units.map((unit) => unit.id));
+	for (const unit of units) removeUnit(world, unit);
+	for (const unit of Object.values(world.units)) {
+		if ("targetId" in unit.command && removedUnitIds.has(unit.command.targetId))
 			setUnitCommand(world, unit, { type: "idle" });
 	}
 	return { ok: true };
