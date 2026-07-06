@@ -37,6 +37,7 @@ export abstract class Building implements BuildingEntity {
 	get vision() { return this.definition.vision; }
 	get sound() { return this.definition.sound; }
 	get walkBlocking() { return this.definition.walkBlocking ?? true; }
+	get manuallyDeletable() { return true; }
 	get populationCapacity() { return this.definition.populationCapacity ?? 0; }
 	get gatherResource() { return this.definition.gatherResource ?? null; }
 	get gatherAmount() { return this.definition.gatherAmount ?? 0; }
@@ -68,6 +69,7 @@ export abstract class Building implements BuildingEntity {
 			hp: this.hp,
 			maxHp: this.maxHp,
 			completed: this.completed,
+			manuallyDeletable: this.manuallyDeletable,
 			repairPaidUntilHp: this.repairPaidUntilHp,
 			vision: this.vision,
 			builderIds: this.builderIds,

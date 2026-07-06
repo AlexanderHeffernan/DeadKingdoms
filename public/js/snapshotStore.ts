@@ -81,6 +81,7 @@ export class SnapshotStore {
 					hp: 1,
 					maxHp: 1,
 					completed: true,
+					manuallyDeletable: true,
 					repairPaidUntilHp: undefined,
 					builderIds: [],
 					queue: [],

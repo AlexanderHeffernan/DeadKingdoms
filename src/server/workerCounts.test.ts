@@ -95,6 +95,23 @@ test("wall line placement batches occupancy invalidation", () => {
 		assert.equal(world._occupancy?.[tile.y * MAP_SIZE + tile.x], 1);
 });
 
+test("players cannot manually delete their town center", () => {
+	const world = createWorld();
+	const playerId = addPlayer(world, "Town Center Test", "#ffffff");
+	const townCenter = Object.values(world.buildings).find((building) => building.ownerId === playerId && building.type === "townCenter")!;
+
+	const result = command(world, playerId, {
+		type: "deleteBuilding",
+		playerId,
+		buildingId: townCenter.id,
+	});
+
+	assert.equal(result.ok, false);
+	assert.equal(world.buildings[townCenter.id], townCenter);
+	assert.equal(townCenter.manuallyDeletable, false);
+	assert.equal(townCenter.serialize().manuallyDeletable, false);
+});
+
 test("depot gather command spreads villagers across nearby resources", () => {
 	const world = createWorld();
 	const playerId = addPlayer(world, "Depot Spread Test", "#ffffff");

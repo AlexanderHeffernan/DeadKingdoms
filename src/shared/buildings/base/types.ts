@@ -19,6 +19,7 @@ export type BuildingSnapshot = {
 	hp: number;
 	maxHp: number;
 	completed: boolean;
+	manuallyDeletable: boolean;
 	repairPaidUntilHp: number | undefined;
 	vision?: number | undefined;
 	builderIds: UnitId[];
@@ -89,6 +90,7 @@ export interface BuildingEntity extends GatherTarget {
 	readonly vision: number;
 	readonly sound: number;
 	readonly walkBlocking: boolean;
+	readonly manuallyDeletable: boolean;
 	readonly populationCapacity: number;
 	readonly gatherResource: ResourceType | null;
 	readonly gatherAmount: number;

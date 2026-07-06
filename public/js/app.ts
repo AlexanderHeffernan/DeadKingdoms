@@ -1241,8 +1241,10 @@ function onKeyDown(event: KeyboardEvent) {
 	}
 }
 
+
 function deleteSelectedOwnedEntity() {
-	const building = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId);
+	const building = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId && entity.manuallyDeletable);
+
 	if (building) issue({ type: "deleteBuilding", buildingId: building.id }).then((result) => {
 		sfx.play(result.ok ? "building_destroyed" : "ui_error", { point: building });
 	});

@@ -40,6 +40,7 @@ type HowToPlayItem = {
 	body: string;
 	baseUrl: string;
 	flagUrl?: string;
+	flagColor?: string;
 };
 
 type JoinResult = {
@@ -99,6 +100,13 @@ const HOW_TO_PLAY_ITEMS: HowToPlayItem[] = [
 		body: "Vision drops after dusk, so walls, towers, scouts, and fallback plans matter more as the map gets dark.",
 		baseUrl: pillarBaseUrl,
 		flagUrl: pillarFlagUrl,
+	},
+	{
+		title: "Watch your rivals.",
+		body: "Other kingdoms can contest resources, raid exposed workers, and break defenses while the undead keep everyone under pressure.",
+		baseUrl: soldierBaseUrl,
+		flagUrl: soldierFlagUrl,
+		flagColor: "#3a86ff",
 	},
 	{
 		title: "Score is power.",
@@ -365,7 +373,7 @@ export class HomeScreen {
 			<p>
 				<span class="how-to-sprite">
 					<img class="how-to-sprite-base" src="${item.baseUrl}" alt="" />
-					${item.flagUrl ? `<span class="how-to-sprite-flag" style="--flag-url: url('${item.flagUrl}')"></span>` : ""}
+					${item.flagUrl ? `<span class="how-to-sprite-flag" style="--flag-url: url('${item.flagUrl}'); --flag-color: ${item.flagColor || "#d8574f"}"></span>` : ""}
 				</span>
 				<span><strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.body)}</span>
 			</p>
