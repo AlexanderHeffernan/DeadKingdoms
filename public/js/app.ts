@@ -132,6 +132,10 @@ const ui = new UI(state, {
 	deleteBuilding(buildingId) {
 		issue({ type: "deleteBuilding", buildingId }).then((result) => sfx.play(result.ok ? "building_destroyed" : "ui_error"));
 	},
+	deleteUnits(unitIds) {
+		const point = state.snapshot?.units[unitIds[0]!];
+		issue({ type: "deleteUnit", unitIds }).then((result) => sfx.play(result.ok ? "unit_death_human" : "ui_error", { point }));
+	},
 	setRallyMode(buildingId) {
 		view.rallyModeBuildingId = buildingId;
 		ui.showToast("Choose a rally point.");
@@ -1229,7 +1233,7 @@ function onKeyDown(event: KeyboardEvent) {
 		ui.render();
 		return;
 	}
-	if (key === "delete" || key === "backspace") return deleteSelectedBuilding();
+	if (key === "delete" || key === "backspace") return deleteSelectedOwnedEntity();
 	if (key === ".") {
 		selection.selectIdleWorkers();
 		ui.render();
@@ -1237,11 +1241,19 @@ function onKeyDown(event: KeyboardEvent) {
 	}
 }
 
-function deleteSelectedBuilding() {
+function deleteSelectedOwnedEntity() {
 	const building = [...state.selectedIds].map((id) => state.snapshot?.buildings[id]).find((entity) => entity?.ownerId === state.playerId);
 	if (building) issue({ type: "deleteBuilding", buildingId: building.id }).then((result) => {
 		sfx.play(result.ok ? "building_destroyed" : "ui_error", { point: building });
 	});
+	else {
+		const units = [...state.selectedIds]
+			.map((id) => state.snapshot?.units[id])
+			.filter((entity): entity is Unit => entity !== undefined && entity.ownerId === state.playerId);
+		if (units.length > 0) issue({ type: "deleteUnit", unitIds: units.map((unit) => unit.id) }).then((result) => {
+			sfx.play(result.ok ? "unit_death_human" : "ui_error", { point: units[0] });
+		});
+	}
 }
 
 function selectedProductionBuilding() {
