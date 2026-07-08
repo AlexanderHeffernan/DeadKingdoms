@@ -19,6 +19,8 @@ import { HomeScreen } from "./homeScreen.js";
 import { pendingPrivateRoomId, PrivateClientGameSession, PrivateHostGameSession, PublicGameSession, PublicSpectatorGameSession, type GameSession } from "./gameSession.js";
 import { SelectionController } from "./selectionController.js";
 import { BuildPlacement } from "./buildPlacement.js";
+import type { GameSettings, GameSettingsMetadata } from "../../src/shared/gameSettings.js";
+import { GameSettingsForm } from "./ui/gameSettingsForm.js";
 import { TutorialController } from "./tutorial/tutorialController.js";
 import type { Building, BuildingType, CommandPayload, Corpse, EntityId, ResourceNode, ResourceType, SnapshotMessage, Unit, UnitType } from "../../src/shared/types.js";
 import type { SessionCredentials } from "./api.js";
@@ -102,6 +104,7 @@ let smoothedFps = 60;
 let lastPingReportAt = 0;
 let adminDiagnosticsVisible = false;
 let adminView: "closed" | "popup" | "overview" | "performance" | "performancePaused" | "players" | "logs" | "devCommands" | "bans" = "closed";
+let privateMapSizeLogged = false;
 const ui = new UI(state, {
 	setBuildMode(type) {
 		view.buildMode = type;
@@ -568,14 +571,14 @@ function enterGame() {
 	tutorial.start();
 }
 
-async function startSession(request: { name: string; color: string; mode: "public" | "private" }) {
+async function startSession(request: { name: string; color: string; mode: "public" | "private"; settings?: GameSettings }) {
 	activeSession?.dispose();
 	const privateRoomId = pendingPrivateRoomId();
 	const session: GameSession = request.mode === "public"
 		? new PublicGameSession()
 		: privateRoomId
 			? new PrivateClientGameSession(privateRoomId)
-			: new PrivateHostGameSession();
+			: new PrivateHostGameSession(request.settings);
 	activeSession = session;
 	const joined = await session.join({ name: request.name, color: request.color });
 	if (!joined.ok) {
@@ -624,12 +627,12 @@ async function maybeOpenHomeAdmin(secret: string) {
 	renderHomeAdmin(overview);
 }
 
-async function fetchAdminOverview(secret: string): Promise<AdminOverviewResult> {
+async function fetchAdminOverview(secret: string, settingsPatch?: Partial<GameSettings>): Promise<AdminOverviewResult> {
 	try {
 		const res = await fetch("/api/admin-overview", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ secret }),
+			body: JSON.stringify({ secret, ...(settingsPatch ? { settingsPatch } : {}) }),
 		});
 		return await res.json() as AdminOverviewResult;
 	} catch {
@@ -640,7 +643,7 @@ async function fetchAdminOverview(secret: string): Promise<AdminOverviewResult> 
 function renderHomeAdmin(overview: Extract<AdminOverviewResult, { ok: true }>) {
 	const panel = ensureHomeAdminPanel();
 	const publicGame = overview.publicGame.active
-		? `<tr><td>Public</td><td>${overview.publicGame.players} players</td><td>${formatMs(overview.publicGame.ageMs ?? 0)}</td><td>${overview.publicGame.tps.toFixed(1)}</td><td><button type="button" data-spectate-public="true">Spectate</button></td></tr>`
+		? `<tr><td>Public</td><td>${overview.publicGame.players}/${overview.publicGame.maxPlayers} players</td><td>${formatMs(overview.publicGame.ageMs ?? 0)}</td><td>${overview.publicGame.tps.toFixed(1)}</td><td><button type="button" data-spectate-public="true">Spectate</button></td></tr>`
 		: `<tr><td>Public</td><td colspan="3">No active public game</td><td></td></tr>`;
 	const privateRows = overview.privateGames.length
 		? overview.privateGames.map((game) => `<tr><td>${game.roomId}</td><td>${game.playerCount} players · ${game.pendingJoins} pending</td><td>${formatMs(game.ageMs)}</td><td>${formatMs(Date.now() - game.lastHostSeenAt)} ago</td><td></td></tr>`).join("")
@@ -658,9 +661,26 @@ function renderHomeAdmin(overview: Extract<AdminOverviewResult, { ok: true }>) {
 				<thead><tr><th>Invite</th><th>Players</th><th>Age</th><th>Host Seen</th><th></th></tr></thead>
 				<tbody>${privateRows}</tbody>
 			</table>
+			<h3>Public Settings</h3>
+			<div id="homeAdminSettings"></div>
 		</div>
 	`;
 	panel.classList.remove("hidden");
+	const settingsContainer = document.getElementById("homeAdminSettings");
+	if (settingsContainer) {
+		const homeAdminSettingsForm = new GameSettingsForm(settingsContainer);
+		homeAdminSettingsForm.render(overview.settings.metadata, {
+			title: "Next Public Game",
+			values: overview.settings.pending,
+			currentValues: overview.settings.current,
+			submitLabel: "Apply Next Reset",
+			onSubmit: async (patch) => {
+				if (!homeAdminSecret) return;
+				const updated = await fetchAdminOverview(homeAdminSecret, patch);
+				if (updated.ok) renderHomeAdmin(updated);
+			},
+		});
+	}
 	panel.querySelector("[data-home-admin-close]")?.addEventListener("click", () => panel.classList.add("hidden"));
 	panel.querySelector("[data-spectate-public]")?.addEventListener("click", () => void startSpectating("public"));
 }
@@ -706,7 +726,12 @@ type AdminOverviewResult =
 		ok: true;
 		publicGame:
 			| { active: false }
-			| { active: true; players: number; startedAt: number | null; ageMs: number | null; tps: number; tickMs: number; tick: number };
+			| { active: true; players: number; maxPlayers: number; startedAt: number | null; ageMs: number | null; tps: number; tickMs: number; tick: number };
+		settings: {
+			metadata: GameSettingsMetadata;
+			current: GameSettings | null;
+			pending: GameSettings;
+		};
 		privateGames: Array<{
 			roomId: string;
 			createdAt: number;
@@ -808,6 +833,10 @@ function connectEvents() {
 		}
 		snapshots.applyVisibility(snap);
 		state.snapshot = snap;
+		if (activeSession?.mode === "private-host" && !privateMapSizeLogged) {
+			privateMapSizeLogged = true;
+			console.log(`Private map: ${snap.map.size} x ${snap.map.size} tiles.`);
+		}
 		if (state.playerId != null && snap.players[state.playerId]!.defeated) {
 			handleEliminated();
 			return;
@@ -873,6 +902,7 @@ function resetToJoin(message: string) {
 	adminDiagnosticsVisible = false;
 	adminAccessEnabled = false;
 	adminView = "closed";
+	privateMapSizeLogged = false;
 	state.selectedIds.clear();
 	state.effects = [];
 	sfx.reset();

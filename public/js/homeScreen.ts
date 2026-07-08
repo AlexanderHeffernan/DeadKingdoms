@@ -1,6 +1,8 @@
 import { getChangelog, getStatus, type ServerStatus } from "./api.js";
 import type { ChangelogEntry } from "./api.js";
+import { gameSettingsRegistry, type GameSettings } from "../../src/shared/gameSettings.js";
 import { escapeHtml } from "./ui/dom.js";
+import { GameSettingsForm } from "./ui/gameSettingsForm.js";
 import villagerBaseUrl from "./sprites/villager_base.png";
 import villagerFlagUrl from "./sprites/villager_flag.png";
 import houseBaseUrl from "./sprites/house_base.png";
@@ -47,6 +49,7 @@ type JoinResult = {
 	name: string;
 	color: string;
 	mode: "public" | "private";
+	settings?: GameSettings;
 };
 
 const CONTRIBUTORS: ContributorCredit[] = [
@@ -136,6 +139,7 @@ export class HomeScreen {
 	private latestStatus: ServerStatus | null = null;
 	private statusFull = false;
 	private joining = false;
+	private privateSettingsForm: GameSettingsForm | null = null;
 
 	constructor(
 		private readonly onJoinRequested: (result: JoinResult) => void,
@@ -321,10 +325,14 @@ export class HomeScreen {
 
 	private joinPrivate() {
 		if (this.joining) return;
+		if (!this.privateRoomId) {
+			this.openPrivateSettings();
+			return;
+		}
 		this.requestJoin("private");
 	}
 
-	private requestJoin(mode: JoinResult["mode"]) {
+	private requestJoin(mode: JoinResult["mode"], settings?: GameSettings) {
 		this.setJoining(true);
 		this.onBeforeJoin();
 		this.showNotice("");
@@ -337,7 +345,56 @@ export class HomeScreen {
 			name,
 			color,
 			mode,
+			settings,
 		});
+	}
+
+	private openPrivateSettings() {
+		const panel = this.ensurePrivateSettingsPanel();
+		const container = panel.querySelector<HTMLElement>("[data-private-settings-form]");
+		if (!container) return;
+		this.privateSettingsForm = new GameSettingsForm(container);
+		this.privateSettingsForm.render(gameSettingsRegistry.metadata("privateHost"), {
+			title: "",
+			values: gameSettingsRegistry.defaults(),
+		});
+		panel.classList.remove("hidden");
+		panel.querySelectorAll("[data-private-settings-cancel]").forEach((button) => {
+			if (button instanceof HTMLButtonElement)
+				button.onclick = () => panel.classList.add("hidden");
+		});
+		const startButton = panel.querySelector("[data-private-settings-start]");
+		if (startButton instanceof HTMLButtonElement) startButton.onclick = () => {
+			const settings = gameSettingsRegistry.merge(
+				gameSettingsRegistry.defaults(),
+				this.privateSettingsForm?.valuePatch() ?? {},
+			);
+			panel.classList.add("hidden");
+			this.requestJoin("private", settings);
+		};
+	}
+
+	private ensurePrivateSettingsPanel() {
+		let panel = document.getElementById("privateSettingsModal");
+		if (panel) return panel;
+		panel = document.createElement("section");
+		panel.id = "privateSettingsModal";
+		panel.className = "private-settings-modal hidden";
+		panel.innerHTML = `
+			<div class="private-settings-dialog">
+				<header>
+					<h2>Private Game</h2>
+					<button type="button" data-private-settings-cancel="true" aria-label="Close private game settings">X</button>
+				</header>
+				<div class="private-settings-body" data-private-settings-form="true"></div>
+				<div class="private-settings-actions">
+					<button type="button" data-private-settings-cancel="true">Cancel</button>
+					<button type="button" data-private-settings-start="true">Start Private Game</button>
+				</div>
+			</div>
+		`;
+		document.body.append(panel);
+		return panel;
 	}
 
 	private renderCredits() {

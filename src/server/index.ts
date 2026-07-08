@@ -1,6 +1,7 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
 import { TICK_MS } from "../shared/config.js";
+import { gameSettingsRegistry } from "../shared/gameSettings.js";
 import { Logs } from "../shared/logs.js";
 import { ChangelogStore } from "./changelog.js";
 import { broadcast, createHandler } from "./http.js";
@@ -18,7 +19,7 @@ configureSimulationServices({
 });
 
 const port = Number(process.env.PORT || 3000);
-const state = new ServerState();
+const state = new ServerState(gameSettingsRegistry.fromEnv(process.env));
 const globalLeaderboard = new GlobalLeaderboardStore();
 const changelog = new ChangelogStore(new URL("../../public/changelog.json", import.meta.url));
 globalLeaderboard.setPerfSink((name, label, ms) => {

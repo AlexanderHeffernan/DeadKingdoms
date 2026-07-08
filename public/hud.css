@@ -336,10 +336,12 @@
 }
 
 .toast {
-	position: absolute;
+	position: fixed;
 	left: 50%;
 	top: 16px;
 	transform: translateX(-50%);
+	z-index: 120;
+	max-width: min(360px, calc(100vw - 36px));
 	color: #f4efe6;
 	background: rgb(10 10 14 / 0.94);
 	border: 3px solid #5f4a32;
@@ -350,6 +352,7 @@
 		6px 6px 0 rgb(0 0 0 / 0.62);
 	padding: 8px 12px;
 	opacity: 0;
+	pointer-events: none;
 	transition: opacity 160ms ease;
 }
 

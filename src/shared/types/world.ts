@@ -1,6 +1,7 @@
 import type { Building, Corpse, Player, ResourceNode, Ruin, Unit } from "./entities.js";
 import type { BuildingId, CorpseId, MapDef, PlayerId, ResourceId, RuinId, UnitId, Vec2 } from "./core.js";
 import type { AdminLogEntry, LeaderboardEntry, Notice, ServerPerfSample, ServerPerfStats, ServerPerfUnitAiStats, ServerPerfWorkerStats, ServerPerfZombieStats, ServerPerfZombieWorkerStats } from "./snapshot.js";
+import type { GameSettings } from "../gameSettings.js";
 
 export interface ActionNoise extends Vec2 {
 	id: string;
@@ -72,6 +73,7 @@ export interface ZombieCadenceFieldState {
 /** Authoritative server-side simulation state for one running arena. */
 export interface World {
 	map: MapDef;
+	settings?: GameSettings;
 	players: Record<PlayerId, Player>;
 	units: Record<UnitId, Unit>;
 	buildings: Record<BuildingId, Building>;

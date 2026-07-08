@@ -228,6 +228,237 @@
 	font-size: 22px;
 }
 
+.game-settings-form {
+	display: grid;
+	gap: 14px;
+	color: #cfc7b7;
+	text-shadow: 2px 2px 0 #0b0908;
+}
+
+.game-settings-form section {
+	border: 0;
+	display: grid;
+	gap: 10px;
+	margin: 0;
+	min-width: 0;
+	padding: 0;
+}
+
+.game-settings-form h2 {
+	color: #f4efe6;
+	font-size: var(--ui-text-xl);
+	font-weight: 400;
+	margin: 0;
+	margin-bottom: 8px;
+	padding: 0;
+	text-shadow: 2px 2px 0 #0b0908;
+}
+
+.game-setting-field {
+	align-items: center;
+	background: rgb(8 8 8 / 0.48);
+	border: 3px solid #5f4a32;
+	border-bottom-color: #211914;
+	border-right-color: #211914;
+	display: grid;
+	gap: 12px;
+	grid-template-columns: minmax(0, 1fr) minmax(120px, 180px);
+	min-height: 60px;
+	padding: 8px 10px;
+}
+
+.game-setting-field > span {
+	display: grid;
+	gap: 3px;
+}
+
+.game-setting-field small,
+.game-setting-field em {
+	color: #827665;
+	font-style: normal;
+}
+
+.game-setting-field strong {
+	color: #e9bd59;
+	font-weight: 400;
+}
+
+.game-setting-field input,
+.game-setting-field select {
+	background: #0f0d0a;
+	border: 4px solid #5f4a32;
+	border-bottom-color: #211914;
+	border-right-color: #211914;
+	box-shadow: none;
+	color: #e8dcc5;
+	image-rendering: pixelated;
+	min-width: 0;
+	outline: none;
+	padding: 8px 10px;
+}
+
+.game-setting-field select {
+	appearance: none;
+	background:
+		linear-gradient(45deg, transparent 50%, #e9bd59 50%) calc(100% - 16px) 50% / 7px 7px no-repeat,
+		linear-gradient(135deg, #e9bd59 50%, transparent 50%) calc(100% - 10px) 50% / 7px 7px no-repeat,
+		#0f0d0a;
+	padding-right: 30px;
+}
+
+.game-setting-field:focus-within {
+	border-color: #8aa4bf;
+	box-shadow:
+		0 0 0 2px #080808,
+		0 0 0 5px rgb(33 58 85 / 0.5);
+}
+
+.game-setting-field:focus-within input,
+.game-setting-field:focus-within select {
+	border-color: #b79a5f;
+	border-bottom-color: #4a3322;
+	border-right-color: #4a3322;
+}
+
+.game-setting-resource-grid {
+	display: grid;
+	gap: 6px;
+}
+
+.game-setting-resource-grid label {
+	align-items: center;
+	display: grid;
+	gap: 6px;
+	grid-template-columns: 52px minmax(70px, 1fr);
+	color: #b79a5f;
+}
+
+.private-settings-modal {
+	background: rgb(0 0 0 / 0.72);
+	inset: 0;
+	position: fixed;
+	z-index: 30;
+}
+
+.private-settings-dialog {
+	background: rgb(10 10 14 / 0.97);
+	border: 4px solid #5f4a32;
+	border-bottom-color: #211914;
+	border-right-color: #211914;
+	box-shadow:
+		0 0 0 3px #080808,
+		0 0 0 7px rgb(83 73 90 / 0.38),
+		12px 12px 0 rgb(0 0 0 / 0.66);
+	color: #e8dcc5;
+	display: flex;
+	flex-direction: column;
+	left: 50%;
+	height: min(760px, 88vh);
+	max-width: 720px;
+	overflow: hidden;
+	padding: 20px;
+	position: absolute;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	text-shadow: 2px 2px 0 #0b0908;
+	width: min(720px, calc(100vw - 28px));
+}
+
+.private-settings-dialog header {
+	align-items: center;
+	border-bottom: 3px solid #211914;
+	display: flex;
+	flex: 0 0 auto;
+	justify-content: space-between;
+	margin: -2px -2px 14px;
+	padding: 0 0 12px;
+}
+
+.private-settings-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	padding: 0 6px 18px 0;
+}
+
+.private-settings-dialog h2 {
+	color: #e9bd59;
+	margin: 0;
+	text-transform: uppercase;
+}
+
+.private-settings-dialog .game-settings-form h2,
+.home-admin-dialog .game-settings-form h2 {
+	color: #f4efe6;
+	font-size: var(--ui-text-xl);
+	font-weight: 400;
+	text-transform: none;
+}
+
+.private-settings-actions {
+	background: rgb(10 10 14 / 0.97);
+	border-top: 3px solid #211914;
+	display: flex;
+	flex: 0 0 auto;
+	gap: 10px;
+	justify-content: flex-end;
+	margin: 0 -2px -2px;
+	padding: 14px 0 0;
+}
+
+.private-settings-actions button,
+.game-settings-form button {
+	border: 4px solid #8aa4bf;
+	border-bottom-color: #102034;
+	border-right-color: #102034;
+	background: #213a55;
+	box-shadow:
+		0 0 0 3px #080808,
+		0 0 0 7px rgb(33 58 85 / 0.48),
+		8px 8px 0 rgb(0 0 0 / 0.58);
+	color: #f0edf6;
+	cursor: pointer;
+	font: inherit;
+	padding: 10px 14px;
+	text-shadow: 2px 2px 0 #11111e;
+	text-transform: uppercase;
+}
+
+.private-settings-dialog header button,
+.private-settings-actions button:first-child {
+	border-color: #6f5d40;
+	border-bottom-color: #211914;
+	border-right-color: #211914;
+	background: #191713;
+	color: #e9bd59;
+}
+
+.private-settings-actions button:hover,
+.private-settings-actions button:focus-visible,
+.game-settings-form button:hover,
+.game-settings-form button:focus-visible,
+.private-settings-dialog header button:hover,
+.private-settings-dialog header button:focus-visible {
+	outline: none;
+	transform: translate(-2px, -2px);
+}
+
+.private-settings-actions button:hover,
+.private-settings-actions button:focus-visible,
+.game-settings-form button:hover,
+.game-settings-form button:focus-visible {
+	background: #2b4a6a;
+	color: #ffffff;
+}
+
+.private-settings-dialog header button:hover,
+.private-settings-dialog header button:focus-visible,
+.private-settings-actions button:first-child:hover,
+.private-settings-actions button:first-child:focus-visible {
+	background: #242019;
+	color: #ffe0a0;
+}
+
 .home-secondary-actions {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
