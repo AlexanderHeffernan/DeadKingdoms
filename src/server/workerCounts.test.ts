@@ -6,7 +6,7 @@ import { createBuilding as createBuildingInstance } from "../shared/buildings/in
 
 test("worker counts update as villagers change commands", () => {
 	const world = createWorld();
-	const playerId = addPlayer(world, "Counter Test", "#ffffff");
+	const playerId = addTestPlayer(world, "Counter Test");
 	const player = world.players[playerId]!;
 	const villagers = Object.values(world.units)
 	.filter((unit) => unit.ownerId === playerId && unit.type === "villager")
@@ -43,7 +43,7 @@ test("worker counts update as villagers change commands", () => {
 
 test("dev resource grants add to player stockpiles", () => {
 	const world = createWorld();
-	const playerId = addPlayer(world, "Grant Test", "#ffffff");
+	const playerId = addTestPlayer(world, "Grant Test");
 	const player = world.players[playerId]!;
 
 	const total = grantPlayerResource(world, playerId, "ore", 1000);
@@ -54,7 +54,7 @@ test("dev resource grants add to player stockpiles", () => {
 
 test("building placement updates occupancy and pathing version immediately", () => {
 	const world = createWorld();
-	const playerId = addPlayer(world, "Build Occupancy Test", "#ffffff");
+	const playerId = addTestPlayer(world, "Build Occupancy Test");
 	const villager = Object.values(world.units).find((unit) => unit.ownerId === playerId && unit.type === "villager")!;
 	const placement = findBuildPlacement(world, villager.x, villager.y);
 	const beforeVersion = world._pathing?.occupancyVersion ?? 0;
@@ -75,7 +75,7 @@ test("building placement updates occupancy and pathing version immediately", () 
 
 test("wall line placement batches occupancy invalidation", () => {
 	const world = createWorld();
-	const playerId = addPlayer(world, "Wall Line Batch Test", "#ffffff");
+	const playerId = addTestPlayer(world, "Wall Line Batch Test");
 	const villager = Object.values(world.units).find((unit) => unit.ownerId === playerId && unit.type === "villager")!;
 	grantPlayerResource(world, playerId, "ore", 1000);
 	const tiles = findWallLinePlacement(world, 12);
@@ -97,7 +97,7 @@ test("wall line placement batches occupancy invalidation", () => {
 
 test("players cannot manually delete their town center", () => {
 	const world = createWorld();
-	const playerId = addPlayer(world, "Town Center Test", "#ffffff");
+	const playerId = addTestPlayer(world, "Town Center Test");
 	const townCenter = Object.values(world.buildings).find((building) => building.ownerId === playerId && building.type === "townCenter")!;
 
 	const result = command(world, playerId, {
@@ -114,7 +114,7 @@ test("players cannot manually delete their town center", () => {
 
 test("depot gather command spreads villagers across nearby resources", () => {
 	const world = createWorld();
-	const playerId = addPlayer(world, "Depot Spread Test", "#ffffff");
+	const playerId = addTestPlayer(world, "Depot Spread Test");
 	const villagers = Object.values(world.units)
 		.filter((unit) => unit.ownerId === playerId && unit.type === "villager")
 		.slice(0, 3);
@@ -161,6 +161,12 @@ function findBuildPlacement(world: ReturnType<typeof createWorld>, originX: numb
 		}
 	}
 	throw new Error("Could not find build placement.");
+}
+
+function addTestPlayer(world: ReturnType<typeof createWorld>, name: string) {
+	const result = addPlayer(world, name, "#ffffff");
+	assert.equal(result.ok, true);
+	return result.playerId;
 }
 
 function findWallLinePlacement(world: ReturnType<typeof createWorld>, length: number) {

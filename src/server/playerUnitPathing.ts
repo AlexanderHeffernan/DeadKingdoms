@@ -1,4 +1,3 @@
-import { MAP_SIZE } from "../shared/config.js";
 import type { PathNode, ResourceNode, Unit, UnitCommand, Vec2, World } from "../shared/types.js";
 import { clamp, distance, moveToward } from "./math.js";
 import { MinPriorityQueue } from "./utils/MinPriorityQueue.js";
@@ -126,7 +125,7 @@ function shouldDeployFormation(unit: Unit, command: Extract<UnitCommand, { type:
 }
 
 function directTarget(world: World, unit: Unit, target: Vec2, finalTarget: Vec2): SteeringTarget {
-	const tile = worldTile(target);
+	const tile = worldTile(world, target);
 	if (isWalkableForUnit(world, unit, tile.x, tile.y) && hasClearMovementLine(world, unit, target)) {
 		return { target, base: target, field: null, finalTarget };
 	}
@@ -135,9 +134,9 @@ function directTarget(world: World, unit: Unit, target: Vec2, finalTarget: Vec2)
 }
 
 function fieldTarget(world: World, unit: Unit, field: FlowField, finalTarget: Vec2): SteeringTarget {
-	const unitTile = worldTile(unit);
-	const current = tileId(unitTile.x, unitTile.y);
-	if (!isInMap(unitTile.x, unitTile.y) || field.distance[current] === FLOW_UNREACHED) {
+	const unitTile = worldTile(world, unit);
+	const current = tileId(world, unitTile.x, unitTile.y);
+	if (!isInMap(world, unitTile.x, unitTile.y) || field.distance[current] === FLOW_UNREACHED) {
 		const fallback = nearestReachablePointToward(world, unit, field, finalTarget);
 		return { target: fallback, base: fallback, field, finalTarget };
 	}
@@ -147,7 +146,7 @@ function fieldTarget(world: World, unit: Unit, field: FlowField, finalTarget: Ve
 		if (candidate < 0 || candidate === next) break;
 		next = candidate;
 	}
-	const base = tileCenterById(next);
+	const base = tileCenterById(world, next);
 	return { target: base, base, field, finalTarget };
 }
 
@@ -165,13 +164,13 @@ function applyGroupLane(world: World, unit: Unit, command: Extract<UnitCommand, 
 		x: target.target.x + (-dy / length) * offset,
 		y: target.target.y + (dx / length) * offset,
 	};
-	const tile = worldTile(laneTarget);
+	const tile = worldTile(world, laneTarget);
 	if (!isWalkableForUnit(world, unit, tile.x, tile.y) || !hasClearMovementLine(world, unit, laneTarget)) return target;
 	return { ...target, target: laneTarget };
 }
 
 function hasNearbyHardObstacle(world: World, unit: Unit, radius: number): boolean {
-	const tile = worldTile(unit);
+	const tile = worldTile(world, unit);
 	for (let y = tile.y - radius; y <= tile.y + radius; y += 1) {
 		for (let x = tile.x - radius; x <= tile.x + radius; x += 1) {
 			if (isHardOccupied(world, unit, x, y)) return true;
@@ -247,12 +246,12 @@ function bestSteeringCandidate(
 
 function immediateFlowStepTarget(world: World, unit: Unit, field: FlowField | null, maxStep: number): Vec2 | null {
 	if (!field) return null;
-	const tile = worldTile(unit);
-	if (!isInMap(tile.x, tile.y)) return null;
-	const current = tileId(tile.x, tile.y);
+	const tile = worldTile(world, unit);
+	if (!isInMap(world, tile.x, tile.y)) return null;
+	const current = tileId(world, tile.x, tile.y);
 	const next = bestFlowStep(world, unit, field, current);
 	if (next < 0 || next === current) return null;
-	const target = tileCenterById(next);
+	const target = tileCenterById(world, next);
 	return candidateStep(world, unit, target, maxStep, "flow") ? target : null;
 }
 
@@ -302,7 +301,7 @@ function localFlowRecoveryTarget(
 	beforeCost: number,
 	beforeGoalDistance: number,
 ): Vec2 | null {
-	const unitTile = worldTile(unit);
+	const unitTile = worldTile(world, unit);
 	let best: { target: Vec2; score: number } | null = null;
 	for (const direction of FLOW_DIRECTIONS) {
 		const x = unitTile.x + direction.x;
@@ -325,7 +324,7 @@ function movementBlocked(world: World, unit: Unit, before: Vec2) {
 }
 
 function canUseMovementWaypoint(world: World, unit: Unit, point: Vec2, mode: "tight" | "flow"): boolean {
-	const tile = worldTile(point);
+	const tile = worldTile(world, point);
 	if (!isWalkableForUnit(world, unit, tile.x, tile.y)) return false;
 	if (mode === "flow") return true;
 	return hasClearMovementLine(world, unit, point);
@@ -355,12 +354,12 @@ function steeringAngleOffsets(preferredSide: number, mode: "tight" | "flow") {
 }
 
 function escapeOccupiedTile(world: World, unit: Unit, target: Vec2, maxStep: number): boolean {
-	const tile = worldTile(unit);
+	const tile = worldTile(world, unit);
 	if (!isHardOccupied(world, unit, tile.x, tile.y)) return false;
 	for (const direction of escapeDirections(unit, target)) {
 		const before = { x: unit.x, y: unit.y };
 		moveToward(unit, { x: unit.x + direction.x, y: unit.y + direction.y }, maxStep);
-		const escaped = worldTile(unit);
+		const escaped = worldTile(world, unit);
 		if (!isHardOccupied(world, unit, escaped.x, escaped.y)) return true;
 		unit.x = before.x;
 		unit.y = before.y;
@@ -452,27 +451,27 @@ function isMovingCommand(command: UnitCommand): boolean {
 
 function interactionFlowField(world: World, unit: Unit, target: Vec2, range: number): FlowField {
 	const goals = interactionGoalIds(world, unit, target, range);
-	return multiGoalFlowField(world, unit, goals, `player-interaction:${unit.ownerId}:${ownGateSignature(world)}:${worldTile(target).x},${worldTile(target).y}:${Math.ceil(range * 10)}`);
+	return multiGoalFlowField(world, unit, goals, `player-interaction:${unit.ownerId}:${ownGateSignature(world)}:${worldTile(world, target).x},${worldTile(world, target).y}:${Math.ceil(range * 10)}`);
 }
 
 function interactionGoalIds(world: World, unit: Unit, target: Vec2, range: number): number[] {
-	const origin = worldTile(target);
+	const origin = worldTile(world, target);
 	const searchRadius = Math.max(1, Math.ceil(range) + INTERACTION_GOAL_PADDING);
 	const goals: number[] = [];
 	for (let y = origin.y - searchRadius; y <= origin.y + searchRadius; y += 1) {
 		for (let x = origin.x - searchRadius; x <= origin.x + searchRadius; x += 1) {
 			if (!isWalkableForUnit(world, unit, x, y)) continue;
 			if (distance(tileCenter({ x, y }), target) > range) continue;
-			goals.push(tileId(x, y));
+			goals.push(tileId(world, x, y));
 		}
 	}
 	if (goals.length > 0) return goals;
 	const nearest = nearestWalkableAround(world, target, unit);
-	return [tileId(nearest.x, nearest.y)];
+	return [tileId(world, nearest.x, nearest.y)];
 }
 
 function flowField(world: World, unit: Unit, goal: { x: number; y: number }, clearancePenalty: number): FlowField {
-	const goalId = tileId(goal.x, goal.y);
+	const goalId = tileId(world, goal.x, goal.y);
 	return multiGoalFlowField(world, unit, [goalId], `player:${unit.ownerId}:${ownGateSignature(world)}:${goalId}:${clearancePenalty}`, clearancePenalty);
 }
 
@@ -488,15 +487,16 @@ function multiGoalFlowField(world: World, unit: Unit, goals: number[], cacheKeyP
 }
 
 function buildFlowField(world: World, unit: Unit, goals: number[], clearancePenalty: number): FlowField {
-	const distanceGrid = new Uint32Array(MAP_SIZE * MAP_SIZE);
+	const size = mapSize(world);
+	const distanceGrid = new Uint32Array(size * size);
 	distanceGrid.fill(FLOW_UNREACHED);
-	const next = new Int32Array(MAP_SIZE * MAP_SIZE);
+	const next = new Int32Array(size * size);
 	next.fill(-1);
 	const open = new MinPriorityQueue<{ id: number; cost: number }>((node) => node.cost);
 	for (const goal of goals) {
-		if (goal < 0 || goal >= MAP_SIZE * MAP_SIZE) continue;
-		const x = goal % MAP_SIZE;
-		const y = Math.floor(goal / MAP_SIZE);
+		if (goal < 0 || goal >= size * size) continue;
+		const x = goal % size;
+		const y = Math.floor(goal / size);
 		if (!isWalkableForUnit(world, unit, x, y)) continue;
 		distanceGrid[goal] = 0;
 		next[goal] = goal;
@@ -507,8 +507,8 @@ function buildFlowField(world: World, unit: Unit, goals: number[], clearancePena
 		const currentNode = open.pop()!;
 		const current = currentNode.id;
 		if (currentNode.cost !== distanceGrid[current]) continue;
-		const x = current % MAP_SIZE;
-		const y = Math.floor(current / MAP_SIZE);
+		const x = current % size;
+		const y = Math.floor(current / size);
 		for (const direction of FLOW_DIRECTIONS) {
 			touchFlowNeighbor(world, unit, distanceGrid, next, open, current, x + direction.x, y + direction.y, direction.cost, clearancePenalty);
 		}
@@ -529,10 +529,11 @@ function touchFlowNeighbor(
 	clearancePenalty: number,
 ) {
 	if (!isWalkableForUnit(world, unit, x, y)) return;
-	const currentX = current % MAP_SIZE;
-	const currentY = Math.floor(current / MAP_SIZE);
+	const size = mapSize(world);
+	const currentX = current % size;
+	const currentY = Math.floor(current / size);
 	if (x !== currentX && y !== currentY && (!isWalkableForUnit(world, unit, x, currentY) || !isWalkableForUnit(world, unit, currentX, y))) return;
-	const id = tileId(x, y);
+	const id = tileId(world, x, y);
 	const nextDistance = distanceGrid[current]! + stepCost + obstaclePenalty(world, x, y, clearancePenalty);
 	if (nextDistance >= distanceGrid[id]!) return;
 	distanceGrid[id] = nextDistance;
@@ -552,8 +553,9 @@ const FLOW_DIRECTIONS = [
 ] as const;
 
 function bestFlowStep(world: World, unit: Unit, field: FlowField, current: number): number {
-	const x = current % MAP_SIZE;
-	const y = Math.floor(current / MAP_SIZE);
+	const size = mapSize(world);
+	const x = current % size;
+	const y = Math.floor(current / size);
 	let best = field.next[current]!;
 	let bestDistance = best >= 0 ? field.distance[best]! : FLOW_UNREACHED;
 	for (const direction of FLOW_DIRECTIONS) {
@@ -561,7 +563,7 @@ function bestFlowStep(world: World, unit: Unit, field: FlowField, current: numbe
 		const ny = y + direction.y;
 		if (!isWalkableForUnit(world, unit, nx, ny)) continue;
 		if (direction.x !== 0 && direction.y !== 0 && (!isWalkableForUnit(world, unit, nx, y) || !isWalkableForUnit(world, unit, x, ny))) continue;
-		const id = tileId(nx, ny);
+		const id = tileId(world, nx, ny);
 		const d = field.distance[id]!;
 		if (d < bestDistance) {
 			best = id;
@@ -572,7 +574,7 @@ function bestFlowStep(world: World, unit: Unit, field: FlowField, current: numbe
 }
 
 function nearestReachablePointToward(world: World, unit: Unit, field: FlowField, target: Vec2): Vec2 {
-	const start = worldTile(unit);
+	const start = worldTile(world, unit);
 	let best = nearestWalkableAround(world, unit, unit);
 	let bestScore = Infinity;
 	for (let radius = 1; radius <= NEAREST_WALKABLE_RADIUS; radius += 1) {
@@ -580,7 +582,7 @@ function nearestReachablePointToward(world: World, unit: Unit, field: FlowField,
 			for (let x = start.x - radius; x <= start.x + radius; x += 1) {
 				if (Math.abs(x - start.x) !== radius && Math.abs(y - start.y) !== radius) continue;
 				if (!isWalkableForUnit(world, unit, x, y)) continue;
-				const id = tileId(x, y);
+				const id = tileId(world, x, y);
 				const fieldDistance = field.distance[id]!;
 				if (fieldDistance === FLOW_UNREACHED) continue;
 				const center = tileCenter({ x, y });
@@ -700,7 +702,7 @@ function trackInteractionProgress(
 		resetInteractionProgress(command);
 		return;
 	}
-	const key = interactionProgressKey(target, range);
+	const key = interactionProgressKey(world, target, range);
 	if (command.interactionTargetKey !== key) {
 		command.interactionTargetKey = key;
 		delete command.interactionBestCost;
@@ -721,8 +723,8 @@ function interactionProgressCost(world: World, unit: Unit, field: FlowField, fal
 	return Math.ceil(fallbackDistance * FLOW_BASE_COST);
 }
 
-function interactionProgressKey(target: Vec2, range: number): string {
-	const tile = worldTile(target);
+function interactionProgressKey(world: World, target: Vec2, range: number): string {
+	const tile = worldTile(world, target);
 	return `${tile.x},${tile.y}:${Math.ceil(range * 10)}`;
 }
 
@@ -756,7 +758,7 @@ function nearestWalkablePointAround(world: World, target: Vec2, unit: Unit): Vec
 }
 
 function nearestWalkableAround(world: World, target: Vec2, unit: Unit) {
-	const origin = worldTile(target);
+	const origin = worldTile(world, target);
 	if (isWalkableForUnit(world, unit, origin.x, origin.y)) return origin;
 	let best = origin;
 	let bestDistance = Infinity;
@@ -774,25 +776,26 @@ function nearestWalkableAround(world: World, target: Vec2, unit: Unit) {
 		}
 		if (bestDistance < Infinity) return best;
 	}
+	const size = mapSize(world);
 	return {
-		x: clamp(origin.x, 0, MAP_SIZE - 1),
-		y: clamp(origin.y, 0, MAP_SIZE - 1),
+		x: clamp(origin.x, 0, size - 1),
+		y: clamp(origin.y, 0, size - 1),
 	};
 }
 
 function hasClearMovementLine(world: World, unit: Unit, point: Vec2): boolean {
 	const cache = clearMovementLineCache(world);
-	const cacheKey = clearMovementLineCacheKey(unit, point);
+	const cacheKey = clearMovementLineCacheKey(world, unit, point);
 	const cached = cache.get(cacheKey);
 	if (cached !== undefined) return cached;
 	const dx = point.x - unit.x;
 	const dy = point.y - unit.y;
 	const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / CLEAR_LINE_SAMPLE_STEP));
-	let previousTile = worldTile(unit);
+	let previousTile = worldTile(world, unit);
 	for (let i = 1; i <= steps; i += 1) {
 		const x = unit.x + (dx * i) / steps;
 		const y = unit.y + (dy * i) / steps;
-		const tile = worldTile({ x, y });
+		const tile = worldTile(world, { x, y });
 		if (!isWalkableForUnit(world, unit, tile.x, tile.y) || !canStepBetweenTiles(world, unit, previousTile.x, previousTile.y, tile.x, tile.y)) {
 			cache.set(cacheKey, false);
 			return false;
@@ -807,13 +810,13 @@ function hardBlockedAlongSegment(world: World, unit: Unit, from: Vec2, to: Vec2)
 	const dx = to.x - from.x;
 	const dy = to.y - from.y;
 	const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / CLEAR_LINE_SAMPLE_STEP));
-	let previousTile = worldTile(from);
+	let previousTile = worldTile(world, from);
 	for (let i = 1; i <= steps; i += 1) {
 		const point = {
 			x: from.x + (dx * i) / steps,
 			y: from.y + (dy * i) / steps,
 		};
-		const tile = worldTile(point);
+		const tile = worldTile(world, point);
 		if (isHardOccupied(world, unit, tile.x, tile.y)) return true;
 		if (!canStepBetweenTiles(world, unit, previousTile.x, previousTile.y, tile.x, tile.y)) return true;
 		previousTile = tile;
@@ -821,9 +824,9 @@ function hardBlockedAlongSegment(world: World, unit: Unit, from: Vec2, to: Vec2)
 	return false;
 }
 
-function clearMovementLineCacheKey(unit: Unit, point: Vec2): string {
-	const unitTile = worldTile(unit);
-	const pointTile = worldTile(point);
+function clearMovementLineCacheKey(world: World, unit: Unit, point: Vec2): string {
+	const unitTile = worldTile(world, unit);
+	const pointTile = worldTile(world, point);
 	return `player:${unit.ownerId}:${unitTile.x},${unitTile.y}:${pointTile.x},${pointTile.y}`;
 }
 
@@ -842,18 +845,19 @@ function isHardOccupied(world: World, unit: Unit, x: number, y: number): boolean
 }
 
 function isWalkableForUnit(world: World, unit: Unit, x: number, y: number): boolean {
-	if (!isInMap(x, y)) return false;
+	if (!isInMap(world, x, y)) return false;
 	return !occupied(world, x, y) || isOwnGateTile(world, unit, x, y);
 }
 
 function occupied(world: World, x: number, y: number): boolean {
 	if (!world._occupancy) return false;
-	if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) return true;
-	return world._occupancy[y * MAP_SIZE + x] === 1;
+	const size = mapSize(world);
+	if (x < 0 || y < 0 || x >= size || y >= size) return true;
+	return world._occupancy[y * size + x] === 1;
 }
 
 function isOwnGateTile(world: World, unit: Unit, x: number, y: number) {
-	return ownGateTiles(world).get(unit.ownerId)?.has(tileId(x, y)) ?? false;
+	return ownGateTiles(world).get(unit.ownerId)?.has(tileId(world, x, y)) ?? false;
 }
 
 function ownGateTiles(world: World): Map<string, Set<number>> {
@@ -877,7 +881,7 @@ function ownGateTiles(world: World): Map<string, Set<number>> {
 			for (let dx = 0; dx < building.width; dx += 1) {
 				const x = building.x + dx;
 				const y = building.y + dy;
-				if (isInMap(x, y)) tiles.add(tileId(x, y));
+				if (isInMap(world, x, y)) tiles.add(tileId(world, x, y));
 			}
 		}
 	}
@@ -927,9 +931,9 @@ function pathingState(world: World) {
 
 function flowCostAt(world: World, field: FlowField | null, point: Vec2): number {
 	if (!field) return 0;
-	const tile = worldTile(point);
-	if (!isInMap(tile.x, tile.y)) return FLOW_UNREACHED;
-	return field.distance[tileId(tile.x, tile.y)]!;
+	const tile = worldTile(world, point);
+	if (!isInMap(world, tile.x, tile.y)) return FLOW_UNREACHED;
+	return field.distance[tileId(world, tile.x, tile.y)]!;
 }
 
 function unitLane(unit: Unit, crowd: number): number {
@@ -991,21 +995,28 @@ function tileCenter(tile: { x: number; y: number }): Vec2 {
 	return { x: tile.x + 0.5, y: tile.y + 0.5 };
 }
 
-function tileCenterById(id: number): Vec2 {
-	return tileCenter({ x: id % MAP_SIZE, y: Math.floor(id / MAP_SIZE) });
+function tileCenterById(world: World, id: number): Vec2 {
+	const size = mapSize(world);
+	return tileCenter({ x: id % size, y: Math.floor(id / size) });
 }
 
-function worldTile(point: Vec2): { x: number; y: number } {
+function worldTile(world: World, point: Vec2): { x: number; y: number } {
+	const size = mapSize(world);
 	return {
-		x: clamp(Math.floor(point.x), 0, MAP_SIZE - 1),
-		y: clamp(Math.floor(point.y), 0, MAP_SIZE - 1),
+		x: clamp(Math.floor(point.x), 0, size - 1),
+		y: clamp(Math.floor(point.y), 0, size - 1),
 	};
 }
 
-function tileId(x: number, y: number): number {
-	return y * MAP_SIZE + x;
+function tileId(world: World, x: number, y: number): number {
+	return y * mapSize(world) + x;
 }
 
-function isInMap(x: number, y: number) {
-	return x >= 0 && y >= 0 && x < MAP_SIZE && y < MAP_SIZE;
+function isInMap(world: World, x: number, y: number) {
+	const size = mapSize(world);
+	return x >= 0 && y >= 0 && x < size && y < size;
+}
+
+function mapSize(world: World) {
+	return world.map.size;
 }

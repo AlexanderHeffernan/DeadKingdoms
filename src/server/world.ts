@@ -1,13 +1,13 @@
 import {
 	ACTION_SOUND_DEFS,
 	COLORS,
-	MAP_SIZE,
 	RESOURCE_DEFS,
 	RESOURCE_TYPES,
 	STARTING_RESOURCES,
 	STARTING_UNITS,
 	TICK_RATE,
 } from "../shared/config.js";
+import { gameSettingsRegistry, type GameSettings, type GameSettingsAccessor } from "../shared/gameSettings.js";
 import {
 	BUILDING_TYPES,
 	createBuilding as createBuildingInstance,
@@ -180,10 +180,12 @@ export function configureSimulationServices(services: Partial<SimulationServices
 	simulationServices = { ...simulationServices, ...services };
 }
 
-export function createWorld(): World {
+export function createWorld(settings: GameSettingsAccessor | Partial<GameSettings> = {}): World {
+	const normalizedSettings = gameSettingsRegistry.resolve(settings);
 	const startedAt = Date.now();
 	const world: World = {
-		map: { size: MAP_SIZE },
+		map: { size: normalizedSettings.mapSize },
+		settings: normalizedSettings,
 		players: createRecord(),
 		units: createRecord(),
 		buildings: createRecord(),
@@ -211,6 +213,14 @@ function createRecord<T>(): Record<string, T> {
 	return Object.create(null) as Record<string, T>;
 }
 
+function settingsFor(world: World) {
+	return world.settings ?? gameSettingsRegistry.defaults();
+}
+
+function mapSize(world: World) {
+	return world.map.size || settingsFor(world).mapSize;
+}
+
 export function shiftWorldTime(world: World, hours: number) {
 	world.timeOffsetSeconds = (world.timeOffsetSeconds || 0) + hours * 60 * 60;
 	for (const player of Object.values(world.players)) delete player._visCache;
@@ -229,14 +239,20 @@ export function setWorldTimeOfDay(world: World, progress: number) {
 	for (const player of Object.values(world.players)) delete player._visCache;
 }
 
+export type AddPlayerResult =
+	| { ok: true; playerId: PlayerId }
+	| { ok: false; error: string };
+
 export function addPlayer(
 	world: World,
 	name: string,
 	requestedColor: string | null = null,
-): PlayerId {
+): AddPlayerResult {
 	const activeCount = Object.values(world.players).filter(
 		(p) => !p.defeated,
 	).length;
+	if (activeCount >= settingsFor(world).maxPlayers)
+		return { ok: false, error: "Server is full." };
 	const playerId = id("p");
 	const spawn = chooseSpawn(world, activeCount);
 	const color: string =
@@ -283,7 +299,7 @@ export function addPlayer(
 	Logs.log(`${world.players[playerId]!.name} joined the world.`);
 	recalcPlayer(world, playerId);
 	updateLeaderboard(world);
-	return playerId;
+	return { ok: true, playerId };
 }
 
 export function addAdminLog(
@@ -405,7 +421,8 @@ export function toggleTownCenterInvincibility(
 
 /** Dev tool: emits a one-off loud "bang" at a map point so zombies are drawn to it. */
 export function emitDevBang(world: World, x: number, y: number): void {
-	const point = { x: clamp(x, 0, MAP_SIZE), y: clamp(y, 0, MAP_SIZE) };
+	const size = mapSize(world);
+	const point = { x: clamp(x, 0, size), y: clamp(y, 0, size) };
 	const existing = world.actionNoises.find(
 		(noise) => noise.action === "devBang",
 	);
@@ -443,7 +460,7 @@ function playerSpawnCenter(world: World, playerId: PlayerId) {
 	);
 	return unit
 		? { x: unit.x, y: unit.y }
-		: { x: MAP_SIZE / 2, y: MAP_SIZE / 2 };
+		: { x: mapSize(world) / 2, y: mapSize(world) / 2 };
 }
 
 function soldierGrantPoint(
@@ -460,9 +477,10 @@ function soldierGrantPoint(
 		y: origin.y + 3 + row * spacing,
 	};
 	if (isWalkable(world, Math.floor(base.x), Math.floor(base.y))) {
+		const size = mapSize(world);
 		return {
-			x: clamp(base.x, 0.2, MAP_SIZE - 0.2),
-			y: clamp(base.y, 0.2, MAP_SIZE - 0.2),
+			x: clamp(base.x, 0.2, size - 0.2),
+			y: clamp(base.y, 0.2, size - 0.2),
 		};
 	}
 	for (let radius = 1; radius <= 12; radius += 1) {
@@ -476,24 +494,26 @@ function soldierGrantPoint(
 			}
 		}
 	}
+	const size = mapSize(world);
 	return {
-		x: clamp(origin.x, 0.2, MAP_SIZE - 0.2),
-		y: clamp(origin.y, 0.2, MAP_SIZE - 0.2),
+		x: clamp(origin.x, 0.2, size - 0.2),
+		y: clamp(origin.y, 0.2, size - 0.2),
 	};
 }
 
 function randomZombieHordePoint(world: World): { x: number; y: number } {
+	const size = mapSize(world);
 	for (let attempt = 0; attempt < 20; attempt += 1) {
 		const point = {
-			x: randomInt(1, MAP_SIZE - 2) + 0.5,
-			y: randomInt(1, MAP_SIZE - 2) + 0.5,
+			x: randomInt(1, size - 2) + 0.5,
+			y: randomInt(1, size - 2) + 0.5,
 		};
 		if (isWalkable(world, Math.floor(point.x), Math.floor(point.y)))
 			return point;
 	}
 	return {
-		x: randomInt(1, MAP_SIZE - 2) + 0.5,
-		y: randomInt(1, MAP_SIZE - 2) + 0.5,
+		x: randomInt(1, size - 2) + 0.5,
+		y: randomInt(1, size - 2) + 0.5,
 	};
 }
 
@@ -514,6 +534,7 @@ export function command(
 }
 
 export function stepWorld(world: World, dt: number) {
+	dt *= settingsFor(world).gameSpeed;
 	const tickStartedAt = performance.now();
 	const profiling = hasAdminViewer(world);
 	updateServerTps(world, tickStartedAt);
@@ -1041,8 +1062,9 @@ class ZombieUpdateCadence {
 			return cached;
 		}
 		const watchedPoints = this.collectWatchedPoints();
-		const width = Math.ceil(MAP_SIZE / ZOMBIE_CADENCE_FIELD_CELL_SIZE);
-		const height = Math.ceil(MAP_SIZE / ZOMBIE_CADENCE_FIELD_CELL_SIZE);
+		const size = mapSize(this.world);
+		const width = Math.ceil(size / ZOMBIE_CADENCE_FIELD_CELL_SIZE);
+		const height = Math.ceil(size / ZOMBIE_CADENCE_FIELD_CELL_SIZE);
 		const field = new Uint8Array(width * height);
 		field.fill(ZOMBIE_FAR_CADENCE_TICKS);
 		for (const point of watchedPoints)
@@ -1133,7 +1155,7 @@ class ZombieUpdateCadence {
 }
 
 function rebuildOccupancy(world: World) {
-	const size = MAP_SIZE;
+	const size = mapSize(world);
 	const previous = world._occupancy ? world._occupancy.slice() : null;
 	if (!world._occupancy || world._occupancy.length !== size * size) {
 		world._occupancy = new Uint8Array(size * size);
@@ -1163,7 +1185,8 @@ function rebuildOccupancy(world: World) {
 }
 
 function ensureOccupancy(world: World) {
-	if (!world._occupancy || world._occupancy.length !== MAP_SIZE * MAP_SIZE)
+	const size = mapSize(world);
+	if (!world._occupancy || world._occupancy.length !== size * size)
 		rebuildOccupancy(world);
 }
 
@@ -1194,15 +1217,16 @@ function markResourceOccupancy(world: World, resource: ResourceNode, occupied: b
 }
 
 function markOccupancyFootprint(world: World, footprint: Footprint, occupiedValue: boolean) {
-	if (!world._occupancy || world._occupancy.length !== MAP_SIZE * MAP_SIZE) return;
+	const size = mapSize(world);
+	if (!world._occupancy || world._occupancy.length !== size * size) return;
 	const value = occupiedValue ? 1 : 0;
 	let changed = false;
 	for (let dy = 0; dy < footprintHeight(footprint); dy += 1) {
 		for (let dx = 0; dx < footprintWidth(footprint); dx += 1) {
 			const x = Math.floor(footprint.x) + dx;
 			const y = Math.floor(footprint.y) + dy;
-			if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) continue;
-			const index = y * MAP_SIZE + x;
+			if (x < 0 || y < 0 || x >= size || y >= size) continue;
+			const index = y * size + x;
 			if (world._occupancy[index] === value) continue;
 			world._occupancy[index] = value;
 			changed = true;
@@ -1269,8 +1293,9 @@ function occupancyChanged(previous: Uint8Array, next: Uint8Array) {
 
 function occupied(world: World, x: number, y: number): boolean {
 	if (!world._occupancy) return false;
-	if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) return true;
-	return world._occupancy[y * MAP_SIZE + x] === 1;
+	const size = mapSize(world);
+	if (x < 0 || y < 0 || x >= size || y >= size) return true;
+	return world._occupancy[y * size + x] === 1;
 }
 
 function seedResources(world: World) {
@@ -1280,38 +1305,44 @@ function seedResources(world: World) {
 		world,
 		placement,
 		"ore",
-		ORE_VEIN_COUNT,
+		scaledResourceCount(world, "ore", ORE_VEIN_COUNT),
 		() => 5 + Math.floor(Math.random() * 4),
 	);
 	seedResourcePiles(
 		world,
 		placement,
 		"berry",
-		BERRY_PATCH_COUNT,
+		scaledResourceCount(world, "food", BERRY_PATCH_COUNT),
 		() => 4 + Math.floor(Math.random() * 4),
 	);
 }
 
 function seedTrees(world: World, placement: ResourcePlacementTracker) {
+	const forestCount = scaledResourceCount(world, "wood", FOREST_COUNT);
+	const loneTreeCount = scaledResourceCount(world, "wood", LONE_TREE_COUNT);
 	for (
 		let forest = 0, attempt = 0;
-		forest < FOREST_COUNT &&
-		attempt < FOREST_COUNT * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER;
+		forest < forestCount &&
+		attempt < forestCount * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER;
 		attempt += 1
 	) {
-		if (seedForest(world, placement, randomResourcePoint())) forest += 1;
+		if (seedForest(world, placement, randomResourcePoint(world))) forest += 1;
 	}
 	for (
 		let tree = 0, attempt = 0;
-		tree < LONE_TREE_COUNT &&
-		attempt < LONE_TREE_COUNT * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER;
+		tree < loneTreeCount &&
+		attempt < loneTreeCount * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER;
 		attempt += 1
 	) {
-		const point = randomResourcePoint();
+		const point = randomResourcePoint(world);
 		if (!placement.canPlaceCluster([point])) continue;
 		placement.placeCluster("tree", [point]);
 		tree += 1;
 	}
+}
+
+function scaledResourceCount(world: World, resource: ResourceType, count: number) {
+	return Math.max(0, Math.round(count * settingsFor(world).resourceDensity[resource]));
 }
 
 function seedForest(
@@ -1368,10 +1399,11 @@ function insideForestShape(
 	return normalized <= edge;
 }
 
-function randomResourcePoint(): Vec2 {
+function randomResourcePoint(world: World): Vec2 {
+	const size = mapSize(world);
 	return {
-		x: 4 + Math.floor(Math.random() * (MAP_SIZE - 8)),
-		y: 4 + Math.floor(Math.random() * (MAP_SIZE - 8)),
+		x: 4 + Math.floor(Math.random() * (size - 8)),
+		y: 4 + Math.floor(Math.random() * (size - 8)),
 	};
 }
 
@@ -1392,7 +1424,7 @@ function seedResourcePiles(
 			seedConnectedResourcePile(
 				placement,
 				type,
-				randomResourcePoint(),
+				randomResourcePoint(world),
 				pileSize(),
 			)
 		)
@@ -1467,9 +1499,10 @@ class ResourcePlacementTracker {
 	}
 
 	private canPlaceTile(point: Vec2) {
+		const size = mapSize(this.world);
 		const x = Math.round(point.x);
 		const y = Math.round(point.y);
-		if (x < 1 || y < 1 || x > MAP_SIZE - 2 || y > MAP_SIZE - 2)
+		if (x < 1 || y < 1 || x > size - 2 || y > size - 2)
 			return false;
 		for (
 			let dy = -RESOURCE_CLUSTER_GAP;
@@ -1497,8 +1530,9 @@ class ResourcePlacementTracker {
 }
 
 function addLocalResources(world: World, x: number, y: number) {
-	const sx = x < MAP_SIZE / 2 ? 1 : -1;
-	const sy = y < MAP_SIZE / 2 ? 1 : -1;
+	const size = mapSize(world);
+	const sx = x < size / 2 ? 1 : -1;
+	const sy = y < size / 2 ? 1 : -1;
 	const spots = [
 		["tree", x + sx * 15, y + sy * 1] as const,
 		["tree", x + sx * 16, y + sy * 2] as const,
@@ -1520,10 +1554,11 @@ function chooseSpawn(world: World, _count: number) {
 	const existingTownCenters = Object.values(world.buildings).filter(
 		(building) => building.type === "townCenter",
 	);
-	let best = randomInteriorPoint();
+	const size = mapSize(world);
+	let best = randomInteriorPoint(world);
 	let bestScore = -Infinity;
 	for (let attempt = 0; attempt < PLAYER_SPAWN_ATTEMPTS; attempt += 1) {
-		const candidate = randomInteriorPoint();
+		const candidate = randomInteriorPoint(world);
 		if (!canSpawnTownCenterAt(world, candidate.x, candidate.y)) continue;
 		const nearestTownCenter = existingTownCenters.reduce(
 			(min, building) =>
@@ -1534,12 +1569,12 @@ function chooseSpawn(world: World, _count: number) {
 		const edgeDistance = Math.min(
 			candidate.x,
 			candidate.y,
-			MAP_SIZE - candidate.x,
-			MAP_SIZE - candidate.y,
+			size - candidate.x,
+			size - candidate.y,
 		);
 		const centerDistance = distance(candidate, {
-			x: MAP_SIZE / 2,
-			y: MAP_SIZE / 2,
+			x: size / 2,
+			y: size / 2,
 		});
 		const score =
 			nearestTownCenter +
@@ -1554,24 +1589,26 @@ function chooseSpawn(world: World, _count: number) {
 	return best;
 }
 
-function randomInteriorPoint() {
+function randomInteriorPoint(world: World) {
+	const size = mapSize(world);
 	return {
 		x:
 			PLAYER_SPAWN_MARGIN +
-			Math.floor(Math.random() * (MAP_SIZE - PLAYER_SPAWN_MARGIN * 2)),
+			Math.floor(Math.random() * (size - PLAYER_SPAWN_MARGIN * 2)),
 		y:
 			PLAYER_SPAWN_MARGIN +
-			Math.floor(Math.random() * (MAP_SIZE - PLAYER_SPAWN_MARGIN * 2)),
+			Math.floor(Math.random() * (size - PLAYER_SPAWN_MARGIN * 2)),
 	};
 }
 
 function canSpawnTownCenterAt(world: World, x: number, y: number): boolean {
 	const size = BUILDING_TYPES.townCenter.size;
+	const worldSize = mapSize(world);
 	if (
 		x < PLAYER_SPAWN_MARGIN ||
 		y < PLAYER_SPAWN_MARGIN ||
-		x + size > MAP_SIZE - PLAYER_SPAWN_MARGIN ||
-		y + size > MAP_SIZE - PLAYER_SPAWN_MARGIN
+		x + size > worldSize - PLAYER_SPAWN_MARGIN ||
+		y + size > worldSize - PLAYER_SPAWN_MARGIN
 	)
 		return false;
 	return Object.values(world.buildings).every(
@@ -1717,8 +1754,9 @@ function createResource(
 	x: number,
 	y: number,
 ): ResourceNode | null {
-	x = clamp(Math.round(x), 1, MAP_SIZE - 2);
-	y = clamp(Math.round(y), 1, MAP_SIZE - 2);
+	const size = mapSize(world);
+	x = clamp(Math.round(x), 1, size - 2);
+	y = clamp(Math.round(y), 1, size - 2);
 	const blocked = [
 		...Object.values(world.resources),
 		...Object.values(world.buildings),
@@ -1733,11 +1771,12 @@ function createSeedResource(
 	x: number,
 	y: number,
 ): ResourceNode {
+	const size = mapSize(world);
 	return addResourceNode(
 		world,
 		type,
-		clamp(Math.round(x), 1, MAP_SIZE - 2),
-		clamp(Math.round(y), 1, MAP_SIZE - 2),
+		clamp(Math.round(x), 1, size - 2),
+		clamp(Math.round(y), 1, size - 2),
 	);
 }
 
@@ -1803,9 +1842,10 @@ function commandMove(
 		playerId,
 		body.unitIds,
 		(unit, cluster, index, reservedFormationTargets) => {
+			const size = mapSize(world);
 			const target = {
-				x: clamp(Number(body.x), 0, MAP_SIZE - 1),
-				y: clamp(Number(body.y), 0, MAP_SIZE - 1),
+				x: clamp(Number(body.x), 0, size - 1),
+				y: clamp(Number(body.y), 0, size - 1),
 			};
 				let landingTarget = clusterLandingTargets.get(cluster);
 				if (!landingTarget) {
@@ -2025,6 +2065,7 @@ function commandBuild(
 	const def = BUILDING_TYPES[body.buildingType];
 	if (!def) return { ok: false, error: "Unknown building." };
 	const { x, y, footprint } = buildPlacement(
+		world,
 		body.buildingType,
 		body.x,
 		body.y,
@@ -2073,7 +2114,7 @@ function commandBuildWallLine(
 	playerId: PlayerId,
 	body: Extract<CommandPayload, { type: "buildWallLine" }>,
 ): CommandResult {
-	const tiles = normalizeWallLineTiles(body.tiles);
+	const tiles = normalizeWallLineTiles(world, body.tiles);
 	if (tiles.length === 0) return { ok: false, error: "No wall tiles." };
 	const plan = planWallLine(world, playerId, tiles);
 	if (!plan.ok) return plan;
@@ -2110,10 +2151,10 @@ function commandBuildWallLine(
 	return { ok: true, placed: buildings.length, skipped: plan.skipped };
 }
 
-function normalizeWallLineTiles(tiles: Vec2[]) {
+function normalizeWallLineTiles(world: World, tiles: Vec2[]) {
 	const unique = new Map<string, Vec2>();
 	for (const tile of tiles) {
-		const placement = buildPlacement("wall", tile.x, tile.y);
+		const placement = buildPlacement(world, "wall", tile.x, tile.y);
 		const key = `${placement.x},${placement.y}`;
 		if (!unique.has(key)) unique.set(key, { x: placement.x, y: placement.y });
 	}
@@ -2201,6 +2242,7 @@ function commandInstantBuild(
 	const def = BUILDING_TYPES[body.buildingType];
 	if (!def) return { ok: false, error: "Unknown building." };
 	const { x, y, footprint } = buildPlacement(
+		world,
 		body.buildingType,
 		body.x,
 		body.y,
@@ -2236,6 +2278,7 @@ function commandInstantBuild(
 }
 
 function buildPlacement(
+	world: World,
 	buildingType: BuildingType,
 	rawX: number,
 	rawY: number,
@@ -2245,9 +2288,10 @@ function buildPlacement(
 		width: ("width" in def ? def.width : def.size) as number,
 		height: ("height" in def ? def.height : def.size) as number,
 	};
+	const size = mapSize(world);
 	return {
-		x: clamp(Math.round(Number(rawX)), 0, MAP_SIZE - footprint.width),
-		y: clamp(Math.round(Number(rawY)), 0, MAP_SIZE - footprint.height),
+		x: clamp(Math.round(Number(rawX)), 0, size - footprint.width),
+		y: clamp(Math.round(Number(rawY)), 0, size - footprint.height),
 		footprint,
 	};
 }
@@ -2391,8 +2435,8 @@ function commandSetRallyPoint(
 	building.rallyPoint = target
 		? centerOf(target)
 		: {
-				x: clamp(Number(body.x), 0, MAP_SIZE - 1),
-				y: clamp(Number(body.y), 0, MAP_SIZE - 1),
+				x: clamp(Number(body.x), 0, mapSize(world) - 1),
+				y: clamp(Number(body.y), 0, mapSize(world) - 1),
 			};
 	building.rallyTargetId = target?.id ?? null;
 	return { ok: true };
@@ -2541,9 +2585,10 @@ function nearestWalkablePoint(
 	reserved?: Set<string>,
 	options: { avoidClutter?: boolean; preferFrom?: Vec2 } = {},
 ) {
+	const size = mapSize(world);
 	const origin = {
-		x: clamp(Math.floor(point.x), 0, MAP_SIZE - 1),
-		y: clamp(Math.floor(point.y), 0, MAP_SIZE - 1),
+		x: clamp(Math.floor(point.x), 0, size - 1),
+		y: clamp(Math.floor(point.y), 0, size - 1),
 	};
 	let best: { x: number; y: number; score: number } | null = null;
 	const avoidClutter = options.avoidClutter ?? true;
@@ -2564,8 +2609,8 @@ function nearestWalkablePoint(
 		}
 	if (best) return reserveFormationPoint(best.x, best.y, reserved);
 	return {
-		x: clamp(point.x, 0.2, MAP_SIZE - 0.2),
-		y: clamp(point.y, 0.2, MAP_SIZE - 0.2),
+		x: clamp(point.x, 0.2, size - 0.2),
+		y: clamp(point.y, 0.2, size - 0.2),
 	};
 }
 
@@ -2733,7 +2778,7 @@ function blockingBuildingToward(
 	) {
 		const x = Math.floor(zombie.x + (dx / length) * distanceToTarget);
 		const y = Math.floor(zombie.y + (dy / length) * distanceToTarget);
-		const building = blockingBuildings.get(y * MAP_SIZE + x);
+		const building = blockingBuildings.get(y * mapSize(world) + x);
 		if (building?.ownerId === zombie.ownerId) continue;
 		if (building && building.hp > 0) return building;
 	}
@@ -2763,7 +2808,7 @@ function isWallLikeBlocker(world: World, building: Building): boolean {
 		[0, 1],
 		[0, -1],
 	] as const) {
-		const other = blockers.get((y + dy) * MAP_SIZE + x + dx);
+		const other = blockers.get((y + dy) * mapSize(world) + x + dx);
 		if (other && other.ownerId !== ZOMBIE_OWNER_ID && other.hp > 0)
 			connected += 1;
 	}
@@ -2787,14 +2832,15 @@ function blockingBuildingsByTile(world: World): Map<number, Building> {
 		return state.blockingBuildingsByTile;
 
 	const buildings = new Map<number, Building>();
+	const size = mapSize(world);
 	for (const building of Object.values(world.buildings)) {
 		if (!building.walkBlocking || building.hp <= 0) continue;
 		for (let dy = 0; dy < building.height; dy += 1) {
 			for (let dx = 0; dx < building.width; dx += 1) {
 				const x = building.x + dx;
 				const y = building.y + dy;
-				if (x < 0 || y < 0 || x >= MAP_SIZE || y >= MAP_SIZE) continue;
-				buildings.set(y * MAP_SIZE + x, building);
+				if (x < 0 || y < 0 || x >= size || y >= size) continue;
+				buildings.set(y * size + x, building);
 			}
 		}
 	}
@@ -3590,7 +3636,8 @@ function canPlace(
 	height: number,
 	ignoredBuilding: Building | null = null,
 ): boolean {
-	if (x < 0 || y < 0 || x + width > MAP_SIZE || y + height > MAP_SIZE)
+	const size = mapSize(world);
+	if (x < 0 || y < 0 || x + width > size || y + height > size)
 		return false;
 	for (const building of Object.values(world.buildings)) {
 		if (building === ignoredBuilding) continue;

@@ -1,4 +1,4 @@
-import { MAP_SIZE } from "../shared/config.js";
+import { gameSettingsRegistry } from "../shared/gameSettings.js";
 import type { Building, Unit, Vec2 } from "../shared/types.js";
 import { clamp } from "./math.js";
 import type { SpawnContext, SpawnPolicy } from "./spawning.js";
@@ -32,7 +32,7 @@ export type ZombieSpawnContext = SpawnContext & {
 export const zombieSpawnPolicy: SpawnPolicy<ZombieSpawnContext> = {
 	key: "zombie",
 	initialDelaySeconds: ZOMBIE_SPAWN_INTERVAL_SECONDS,
-	nextDelaySeconds: () => ZOMBIE_SPAWN_INTERVAL_SECONDS,
+	nextDelaySeconds: zombieSpawnDelaySeconds,
 	canSpawn: hasActivePlayers,
 	currentCount: countZombies,
 	cap: zombieCap,
@@ -43,8 +43,19 @@ export const zombieSpawnPolicy: SpawnPolicy<ZombieSpawnContext> = {
 	},
 };
 
+function zombieSpawnDelaySeconds(context: ZombieSpawnContext) {
+	const rate = settingsFor(context).zombieSpawnRate;
+	if (rate <= 0) return Number.POSITIVE_INFINITY;
+	return ZOMBIE_SPAWN_INTERVAL_SECONDS / rate;
+}
+
 function hasActivePlayers(context: ZombieSpawnContext) {
+	if (settingsFor(context).zombieSpawnRate <= 0) return false;
 	return Object.values(context.world.players).some((player) => !player.defeated);
+}
+
+function settingsFor(context: ZombieSpawnContext) {
+	return context.world.settings ?? gameSettingsRegistry.defaults();
 }
 
 function countZombies(context: ZombieSpawnContext) {
@@ -71,17 +82,18 @@ function chooseZombieSpawn(context: ZombieSpawnContext): Vec2 | null {
 }
 
 function randomZombieSpawnPoint(context: ZombieSpawnContext, target: Vec2 | null) {
+	const size = context.world.map.size;
 	if (target && Math.random() < ZOMBIE_NOISE_BIASED_SPAWN_CHANCE) {
 		const angle = Math.random() * Math.PI * 2;
 		const radius = ZOMBIE_NOISE_SPAWN_MIN_RADIUS + Math.random() * (ZOMBIE_NOISE_SPAWN_MAX_RADIUS - ZOMBIE_NOISE_SPAWN_MIN_RADIUS);
 		return {
-			x: clamp(target.x + Math.cos(angle) * radius, 1, MAP_SIZE - 2),
-			y: clamp(target.y + Math.sin(angle) * radius, 1, MAP_SIZE - 2),
+			x: clamp(target.x + Math.cos(angle) * radius, 1, size - 2),
+			y: clamp(target.y + Math.sin(angle) * radius, 1, size - 2),
 		};
 	}
 	return {
-		x: context.randomInt(1, MAP_SIZE - 2),
-		y: context.randomInt(1, MAP_SIZE - 2),
+		x: context.randomInt(1, size - 2),
+		y: context.randomInt(1, size - 2),
 	};
 }
 

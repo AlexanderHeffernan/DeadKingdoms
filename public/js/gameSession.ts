@@ -1,4 +1,5 @@
 import { TICK_MS } from "../../src/shared/config.js";
+import { PrivateGameSettings, type GameSettings, type GameSettingsAccessor } from "../../src/shared/gameSettings.js";
 import { makeSnapshot } from "../../src/shared/messages.js";
 import type { CommandPayload, CommandResult, PlayerId, ResourceType, SnapshotMessage, World } from "../../src/shared/types.js";
 import { addPlayer, command, createWorld, emitDevBang, grantPlayerResource, grantPlayerSoldiers, setWorldTimeOfDay, spawnZombieHorde, stepWorld, toggleTownCenterInvincibility } from "../../src/server/world.js";
@@ -114,11 +115,18 @@ export class PrivateHostGameSession implements GameSession {
 	private sentExplored = new Set<number>();
 	private peers = new Map<string, PrivateConnectionPeer>();
 	private room: PrivateRoom | null = null;
+	private readonly settings: PrivateGameSettings;
 	inviteUrl?: string | undefined;
 
+	constructor(settings: GameSettingsAccessor | Partial<GameSettings> = {}) {
+		this.settings = new PrivateGameSettings(settings);
+	}
+
 	async join(options: JoinOptions) {
-		this.world = createWorld();
-		this.playerId = addPlayer(this.world, options.name, options.color);
+		this.world = createWorld(this.settings);
+		const addResult = addPlayer(this.world, options.name, options.color);
+		if (!addResult.ok) return { ok: false as const, error: addResult.error };
+		this.playerId = addResult.playerId;
 		this.sessionToken = localSessionToken();
 		this.room = await createPrivateRoom();
 		this.inviteUrl = inviteUrl(this.room.roomId);
@@ -312,7 +320,12 @@ export class PrivateHostGameSession implements GameSession {
 				const offers = await listPrivateOffers(this.room, this.playerCount());
 				for (const offer of offers.offers) {
 					if (this.peers.has(offer.peerId)) continue;
-					const peerPlayerId = addPlayer(this.world, offer.name, offer.color);
+					const addResult = addPlayer(this.world, offer.name, offer.color);
+					if (!addResult.ok) {
+						await postPrivateRejection(this.room, offer.peerId, addResult.error);
+						continue;
+					}
+					const peerPlayerId = addResult.playerId;
 					const peer = new PrivatePeer(
 						offer.peerId,
 						peerPlayerId,
@@ -447,6 +460,7 @@ export class PrivateClientGameSession implements GameSession {
 			offer: this.connection.localDescription!,
 		});
 		const answer = await waitForPrivateAnswer(this.roomId, this.peerId);
+		if (!answer.ok) return { ok: false as const, error: answer.error };
 		await this.connection.setRemoteDescription(answer);
 		const credentials = await this.waitForWelcome();
 		this.credentials = credentials;
@@ -794,12 +808,24 @@ async function postPrivateAnswer(room: PrivateRoom, peerId: string, answer: RTCS
 	});
 }
 
-async function waitForPrivateAnswer(roomId: string, peerId: string): Promise<RTCSessionDescriptionInit> {
+async function postPrivateRejection(room: PrivateRoom, peerId: string, error: string) {
+	await fetch(`/api/private-rooms/${encodeURIComponent(room.roomId)}/answers`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ hostToken: room.hostToken, peerId, error }),
+	});
+}
+
+async function waitForPrivateAnswer(roomId: string, peerId: string): Promise<
+	| ({ ok: true } & RTCSessionDescriptionInit)
+	| { ok: false; error: string }
+> {
 	for (;;) {
 		const res = await fetch(`/api/private-rooms/${encodeURIComponent(roomId)}/answers/${encodeURIComponent(peerId)}`);
 		if (res.ok) {
-			const body = await res.json() as { answer?: RTCSessionDescriptionInit };
-			if (body.answer) return body.answer;
+			const body = await res.json() as { answer?: RTCSessionDescriptionInit; error?: string };
+			if (body.error) return { ok: false, error: body.error };
+			if (body.answer) return { ok: true, ...body.answer };
 		}
 		await new Promise((resolve) => window.setTimeout(resolve, 1000));
 	}

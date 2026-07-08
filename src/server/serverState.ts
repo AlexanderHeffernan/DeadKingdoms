@@ -1,4 +1,5 @@
 import { Logs } from "../shared/logs.js";
+import { PublicGameSettings, type GameSettings, type GameSettingsAccessor, type GameSettingsPatch } from "../shared/gameSettings.js";
 import { addAdminLog, createWorld } from "./world.js";
 import type { World } from "../shared/types.js";
 
@@ -12,14 +13,31 @@ export type ResetStatus =
 export class ServerState {
 	private world: World | null = null;
 	private emptySince: number | null = null;
+	private settings: PublicGameSettings;
+
+	public constructor(settings: GameSettingsAccessor | Partial<GameSettings> | undefined = undefined) {
+		this.settings = new PublicGameSettings(settings);
+	}
 
 	currentWorld() {
 		return this.world;
 	}
 
+	currentSettings() {
+		return this.world?.settings ?? null;
+	}
+
+	nextSettings() {
+		return this.settings.toGameSettings();
+	}
+
+	updatePendingSettings(patch: GameSettingsPatch) {
+		this.settings.updatePendingSettings(patch);
+	}
+
 	ensureWorld() {
 		if (!this.world) {
-			this.world = createWorld();
+			this.world = createWorld(this.settings);
 			this.emptySince = null;
 			Logs.log("Generated a new world.");
 		}

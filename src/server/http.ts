@@ -2,7 +2,7 @@ import { createReadStream, promises as fs } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { extname, join, normalize } from "node:path";
 import { makeSnapshot } from "../shared/messages.js";
-import { MAX_PLAYERS } from "../shared/config.js";
+import { gameSettingsRegistry } from "../shared/gameSettings.js";
 import { BUILDING_TYPES } from "../shared/buildings/index.js";
 import { unitBehaviorFor } from "../shared/unitRegistry.js";
 import {
@@ -376,12 +376,13 @@ async function privateRoomSignal(
 			hostToken?: unknown;
 			peerId?: unknown;
 			answer?: unknown;
+			error?: unknown;
 		};
 		if (body.hostToken !== room.hostToken)
 			return json(res, { ok: false, error: "Invalid private host token." }, 403);
-		if (typeof body.peerId !== "string" || !body.answer)
+		if (typeof body.peerId !== "string" || (!body.answer && typeof body.error !== "string"))
 			return json(res, { ok: false, error: "Invalid answer." }, 400);
-		room.answers.set(body.peerId, body.answer);
+		room.answers.set(body.peerId, body.answer ? { answer: body.answer } : { error: body.error });
 		room.offers.delete(body.peerId);
 		return json(res, { ok: true });
 	}
@@ -389,7 +390,7 @@ async function privateRoomSignal(
 	if (req.method === "GET" && action === "answers" && peerId) {
 		const answer = room.answers.get(peerId);
 		if (!answer) return json(res, { ok: false, error: "Answer not ready." }, 404);
-		return json(res, { answer });
+		return json(res, answer);
 	}
 
 	return json(res, { ok: false, error: "Unknown private room request." }, 404);
@@ -414,17 +415,27 @@ async function adminOverview(
 	state: ServerState,
 ) {
 	prunePrivateRooms();
-	const body = (await readJson(req)) as { secret?: unknown };
+	const body = (await readJson(req)) as { secret?: unknown; settingsPatch?: unknown };
 	if (typeof body.secret !== "string" || !isAdminSecret(body.secret))
 		return json(res, { ok: false, error: "Invalid admin secret." }, 403);
+	if (body.settingsPatch !== undefined) {
+		state.updatePendingSettings(gameSettingsRegistry.parsePatch(body.settingsPatch));
+		state.recordLog("admin", "Updated pending public game settings.");
+	}
 	const world = state.currentWorld();
 	const now = Date.now();
 	return json(res, {
 		ok: true,
+		settings: {
+			metadata: gameSettingsRegistry.metadata("publicAdmin"),
+			current: world?.settings ?? null,
+			pending: state.nextSettings(),
+		},
 		publicGame: world
 			? {
 				active: true,
 				players: Object.values(world.players).filter((player) => !player.defeated).length,
+				maxPlayers: world.settings?.maxPlayers ?? state.nextSettings().maxPlayers,
 				startedAt: world.startedAt ?? null,
 				ageMs: world.startedAt ? now - world.startedAt : null,
 				tps: world.serverPerf.tps,
@@ -550,7 +561,7 @@ async function serverStatus(
 		: 0;
 	json(res, {
 		activePlayers,
-		maxPlayers: MAX_PLAYERS,
+		maxPlayers: world?.settings?.maxPlayers ?? state.nextSettings().maxPlayers,
 		deadKingdoms: await globalLeaderboard.deadKingdoms(),
 		lastUpdate: await lastUpdateTime(),
 		reset: state.resetStatus(activePlayers > 0),
@@ -898,11 +909,6 @@ async function joinGame(
 			{ ok: false, error: "This IP address is banned from this game." },
 			403,
 		);
-	const active = Object.values(world.players).filter(
-		(player) => !player.defeated,
-	).length;
-	if (active >= MAX_PLAYERS)
-	return json(res, { ok: false, error: "Server is full." }, 403);
 	const body = (await readJson(req)) as { name?: unknown; color?: unknown };
 
 	const nameResult = validatePlayerName(body.name);
@@ -918,7 +924,9 @@ async function joinGame(
 	}
 
 	const color = typeof body.color === "string" ? body.color : null;
-	const playerId = addPlayer(world, name, color);
+	const addResult = addPlayer(world, name, color);
+	if (!addResult.ok) return json(res, { ok: false, error: addResult.error }, 403);
+	const playerId = addResult.playerId;
 	const sessionToken = newSessionToken();
 	const player = getOwn(world.players, playerId)!;
 	player.sessionToken = sessionToken;
