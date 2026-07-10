@@ -1,7 +1,7 @@
 export const TICK_RATE = 10;
 export const TICK_MS = 1000 / TICK_RATE;
 export const MAX_PLAYERS = 10;
-export const MAP_SIZE = 264;
+export const MAP_SIZE = 256;
 export const TILE_W = 64;
 export const TILE_H = 32;
 
