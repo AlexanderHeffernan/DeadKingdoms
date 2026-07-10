@@ -1,6 +1,7 @@
 import {
 	ACTION_SOUND_DEFS,
 	COLORS,
+	MAP_SIZE,
 	RESOURCE_DEFS,
 	RESOURCE_TYPES,
 	STARTING_RESOURCES,
@@ -1305,21 +1306,21 @@ function seedResources(world: World) {
 		world,
 		placement,
 		"ore",
-		scaledResourceCount(world, "ore", ORE_VEIN_COUNT),
+		placement.scaledCount("ore", ORE_VEIN_COUNT),
 		() => 5 + Math.floor(Math.random() * 4),
 	);
 	seedResourcePiles(
 		world,
 		placement,
 		"berry",
-		scaledResourceCount(world, "food", BERRY_PATCH_COUNT),
+		placement.scaledCount("food", BERRY_PATCH_COUNT),
 		() => 4 + Math.floor(Math.random() * 4),
 	);
 }
 
 function seedTrees(world: World, placement: ResourcePlacementTracker) {
-	const forestCount = scaledResourceCount(world, "wood", FOREST_COUNT);
-	const loneTreeCount = scaledResourceCount(world, "wood", LONE_TREE_COUNT);
+	const forestCount = placement.scaledCount("wood", FOREST_COUNT);
+	const loneTreeCount = placement.scaledCount("wood", LONE_TREE_COUNT);
 	for (
 		let forest = 0, attempt = 0;
 		forest < forestCount &&
@@ -1339,10 +1340,6 @@ function seedTrees(world: World, placement: ResourcePlacementTracker) {
 		placement.placeCluster("tree", [point]);
 		tree += 1;
 	}
-}
-
-function scaledResourceCount(world: World, resource: ResourceType, count: number) {
-	return Math.max(0, Math.round(count * settingsFor(world).resourceDensity[resource]));
 }
 
 function seedForest(
@@ -1480,6 +1477,12 @@ class ResourcePlacementTracker {
 	constructor(private readonly world: World) {
 		for (const resource of Object.values(world.resources))
 			this.mark(resource);
+	}
+
+	public scaledCount(resource: ResourceType, normalMapCount: number) {
+		const mapScale = (mapSize(this.world) / MAP_SIZE) ** 2;
+		const density = settingsFor(this.world).resourceDensity[resource];
+		return Math.max(0, Math.round(normalMapCount * mapScale * density));
 	}
 
 	canPlaceCluster(tiles: Vec2[]) {

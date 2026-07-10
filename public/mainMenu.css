@@ -287,10 +287,12 @@
 .game-setting-field select {
 	background: #0f0d0a;
 	border: 4px solid #5f4a32;
+	border-radius: 0;
 	border-bottom-color: #211914;
 	border-right-color: #211914;
 	box-shadow: none;
 	color: #e8dcc5;
+	color-scheme: dark;
 	image-rendering: pixelated;
 	min-width: 0;
 	outline: none;
@@ -299,6 +301,7 @@
 
 .game-setting-field select {
 	appearance: none;
+	-webkit-appearance: none;
 	background:
 		linear-gradient(45deg, transparent 50%, #e9bd59 50%) calc(100% - 16px) 50% / 7px 7px no-repeat,
 		linear-gradient(135deg, #e9bd59 50%, transparent 50%) calc(100% - 10px) 50% / 7px 7px no-repeat,
@@ -430,6 +433,10 @@
 	border-bottom-color: #211914;
 	border-right-color: #211914;
 	background: #191713;
+	box-shadow:
+		0 0 0 3px #080808,
+		0 0 0 7px rgb(95 74 50 / 0.48),
+		8px 8px 0 rgb(0 0 0 / 0.58);
 	color: #e9bd59;
 }
 
