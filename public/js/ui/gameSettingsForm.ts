@@ -44,6 +44,9 @@ export class GameSettingsForm {
 			event.preventDefault();
 			void this.submit();
 		});
+		this.container.querySelectorAll<HTMLInputElement>('input[type="number"]').forEach((input) => {
+			input.addEventListener("change", () => this.clampNumberInput(input));
+		});
 	}
 
 	public valuePatch(): Partial<GameSettings> {
@@ -86,7 +89,7 @@ export class GameSettingsForm {
 			return `
 				<select id="${id}" name="${escapeHtml(String(definition.key))}">
 					${definition.options.map((option) => `
-						<option value="${option}" ${option === value ? "selected" : ""}>${option}</option>
+						<option value="${option.value}" ${option.value === value ? "selected" : ""}>${escapeHtml(option.label)}</option>
 					`).join("")}
 				</select>
 			`;
@@ -97,7 +100,9 @@ export class GameSettingsForm {
 				${definition.resources.map((resource) => `
 					<label>
 						<span>${escapeHtml(this.resourceLabel(resource))}</span>
-						<input data-resource-setting="${escapeHtml(String(definition.key))}" data-resource="${escapeHtml(resource)}" type="number" min="${definition.min}" max="${definition.max}" step="${definition.step}" value="${escapeHtml(String(resources[resource]))}" />
+						<select data-resource-setting="${escapeHtml(String(definition.key))}" data-resource="${escapeHtml(resource)}">
+							${definition.options.map((option) => `<option value="${option.value}" ${option.value === resources[resource] ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+						</select>
 					</label>
 				`).join("")}
 			</div>
@@ -108,7 +113,7 @@ export class GameSettingsForm {
 		if (definition.kind === "resourceNumber") {
 			const values: Record<string, number> = {};
 			for (const resource of definition.resources) {
-				const input = this.container.querySelector<HTMLInputElement>(
+				const input = this.container.querySelector<HTMLSelectElement>(
 					`[data-resource-setting="${definition.key}"][data-resource="${resource}"]`,
 				);
 				values[resource] = input ? Number(input.value) : definition.defaultValue[resource];
@@ -117,7 +122,9 @@ export class GameSettingsForm {
 		}
 		const input = this.container.querySelector<HTMLInputElement | HTMLSelectElement>(`#${this.inputId(definition.key)}`);
 		if (!input) return definition.defaultValue;
-		return Number(input.value);
+		const value = Number(input.value);
+		if (definition.kind !== "number") return value;
+		return Math.min(definition.max, Math.max(definition.min, value));
 	}
 
 	private groupByCategory(definitions: readonly GameSettingMetadata[]) {
@@ -132,6 +139,13 @@ export class GameSettingsForm {
 
 	private inputId(key: keyof GameSettings) {
 		return `gameSetting-${String(key)}`;
+	}
+
+	private clampNumberInput(input: HTMLInputElement) {
+		const min = Number(input.min);
+		const max = Number(input.max);
+		const value = Number(input.value);
+		input.value = String(Math.min(max, Math.max(min, Number.isFinite(value) ? value : min)));
 	}
 
 	private resourceLabel(resource: string) {

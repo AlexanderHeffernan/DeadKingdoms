@@ -52,16 +52,19 @@ export interface NumberGameSettingMetadata extends BaseGameSettingMetadata {
 export interface NumberChoiceGameSettingMetadata extends BaseGameSettingMetadata {
 	kind: "numberChoice";
 	defaultValue: number;
-	options: readonly number[];
+	options: readonly NumberChoice[];
+}
+
+export interface NumberChoice {
+	value: number;
+	label: string;
 }
 
 export interface ResourceNumberGameSettingMetadata
 	extends BaseGameSettingMetadata {
 	kind: "resourceNumber";
 	defaultValue: ResourceNumberMap;
-	min: number;
-	max: number;
-	step: number;
+	options: readonly NumberChoice[];
 	resources: readonly ResourceType[];
 }
 
@@ -171,20 +174,21 @@ class NumberGameSetting extends GameSetting<number> {
 }
 
 class NumberChoiceGameSetting extends GameSetting<number> {
-	public readonly options: readonly number[];
+	public readonly options: readonly NumberChoice[];
 
 	public constructor(options: GameSettingOptions<number> & {
-		options: readonly number[];
+		options: readonly NumberChoice[];
 	}) {
 		super(options);
-		this.options = [...options.options].sort((a, b) => a - b);
+		this.options = [...options.options].sort((a, b) => a.value - b.value);
 	}
 
 	public normalize(value: unknown): number {
 		const parsed = typeof value === "number" ? value : Number(value);
 		if (!Number.isFinite(parsed)) return this.defaultValue;
 		return this.options.reduce((best, option) =>
-			Math.abs(option - parsed) < Math.abs(best - parsed) ? option : best,
+			Math.abs(option.value - parsed) < Math.abs(best - parsed) ? option.value : best,
+			this.options[0]?.value ?? this.defaultValue,
 		);
 	}
 
@@ -203,22 +207,16 @@ class NumberChoiceGameSetting extends GameSetting<number> {
 }
 
 class ResourceNumberGameSetting extends GameSetting<ResourceNumberMap> {
-	public readonly min: number;
-	public readonly max: number;
-	public readonly step: number;
+	public readonly options: readonly NumberChoice[];
 	public readonly envPrefix: string | null;
 
 	public constructor(options: Omit<GameSettingOptions<ResourceNumberMap>, "env"> & {
 		envPrefix?: string;
-		min: number;
-		max: number;
-		step: number;
+		options: readonly NumberChoice[];
 	}) {
 		super(options);
 		this.envPrefix = options.envPrefix ?? null;
-		this.min = options.min;
-		this.max = options.max;
-		this.step = options.step;
+		this.options = [...options.options].sort((a, b) => a.value - b.value);
 	}
 
 	public override fromEnv(env: EnvSource): ResourceNumberMap {
@@ -251,9 +249,7 @@ class ResourceNumberGameSetting extends GameSetting<ResourceNumberMap> {
 			description: this.description,
 			category: this.category,
 			defaultValue: this.default(),
-			min: this.min,
-			max: this.max,
-			step: this.step,
+			options: this.options,
 			resources: RESOURCE_TYPES,
 			advanced: this.advanced,
 		};
@@ -261,11 +257,11 @@ class ResourceNumberGameSetting extends GameSetting<ResourceNumberMap> {
 
 	private normalizeNumber(value: unknown): number {
 		const parsed = typeof value === "number" ? value : Number(value);
-		const finite = Number.isFinite(parsed) ? parsed : 1;
-		const stepped = this.step > 0
-			? Math.round(finite / this.step) * this.step
-			: finite;
-		return Number(Math.min(this.max, Math.max(this.min, stepped)).toFixed(4));
+		if (!Number.isFinite(parsed)) return 1;
+		return this.options.reduce((best, option) =>
+			Math.abs(option.value - parsed) < Math.abs(best - parsed) ? option.value : best,
+			this.options[0]?.value ?? 1,
+		);
 	}
 }
 
@@ -412,20 +408,20 @@ function isGameSettingsAccessor(value: unknown): value is GameSettingsAccessor {
 const resourceMap = (value: number) =>
 	Object.fromEntries(RESOURCE_TYPES.map((resource) => [resource, value])) as ResourceNumberMap;
 
-const powersOfTwo = (minExponent: number, maxExponent: number) =>
-	Array.from(
-		{ length: maxExponent - minExponent + 1 },
-		(_, index) => 2 ** (minExponent + index),
-	);
-
 export const gameSettingsRegistry = new GameSettingsRegistry([
 	new NumberChoiceGameSetting({
 		key: "mapSize",
 		label: "Map size",
-		description: "Tile width and height for newly generated maps.",
+		description: "Controls the overall size of the generated world.",
 		category: "World",
 		defaultValue: MAP_SIZE,
-		options: powersOfTwo(7, 9),
+		options: [
+			{ value: 64, label: "Extra Small" },
+			{ value: 128, label: "Small" },
+			{ value: 264, label: "Normal" },
+			{ value: 512, label: "Large" },
+			{ value: 1024, label: "Extra Large" },
+		],
 		env: "GAME_MAP_SIZE",
 		scopes: ["publicAdmin", "privateHost"],
 		advanced: true,
@@ -437,44 +433,57 @@ export const gameSettingsRegistry = new GameSettingsRegistry([
 		category: "Players",
 		defaultValue: MAX_PLAYERS,
 		min: 1,
-		max: 16,
+		max: 10,
 		step: 1,
 		env: "GAME_MAX_PLAYERS",
 		scopes: ["publicAdmin", "privateHost"],
 	}),
-	new NumberGameSetting({
+	new NumberChoiceGameSetting({
 		key: "gameSpeed",
 		label: "Game speed",
-		description: "Multiplier applied to simulation time.",
+		description: "How quickly time passes in the world.",
 		category: "Pacing",
 		defaultValue: 1,
-		min: 0.5,
-		max: 2,
-		step: 0.25,
+		options: [
+			{ value: 0.5, label: "Very Slow" },
+			{ value: 0.75, label: "Slow" },
+			{ value: 1, label: "Normal" },
+			{ value: 1.5, label: "Fast" },
+			{ value: 2, label: "Very Fast" },
+		],
 		env: "GAME_SPEED",
 		scopes: ["publicAdmin", "privateHost"],
 	}),
-	new NumberGameSetting({
+	new NumberChoiceGameSetting({
 		key: "zombieSpawnRate",
 		label: "Zombie spawn rate",
-		description: "Multiplier for natural zombie spawning.",
+		description: "How frequently zombies spawn in the world.",
 		category: "Zombies",
 		defaultValue: 1,
-		min: 0,
-		max: 4,
-		step: 0.25,
+		options: [
+			{ value: 0, label: "None" },
+			{ value: 0.5, label: "Low" },
+			{ value: 1, label: "Normal" },
+			{ value: 2, label: "High" },
+			{ value: 4, label: "Extreme" },
+		],
 		env: "GAME_ZOMBIE_SPAWN_RATE",
 		scopes: ["publicAdmin", "privateHost"],
 	}),
 	new ResourceNumberGameSetting({
 		key: "resourceDensity",
 		label: "Resource density",
-		description: "Multiplier for generated resource clusters.",
+		description: "Choose how common each resource should be in the world.",
 		category: "World",
 		defaultValue: resourceMap(1),
-		min: 0.25,
-		max: 3,
-		step: 0.25,
+		options: [
+			{ value: 0, label: "None" },
+			{ value: 0.25, label: "Scarce" },
+			{ value: 0.5, label: "Sparse" },
+			{ value: 1, label: "Normal" },
+			{ value: 2, label: "Abundant" },
+			{ value: 3, label: "Plentiful" },
+		],
 		envPrefix: "GAME_RESOURCE_DENSITY",
 		scopes: ["publicAdmin", "privateHost"],
 	}),
