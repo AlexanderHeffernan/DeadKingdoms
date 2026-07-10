@@ -89,6 +89,7 @@ export interface Vec2 {
 /** Basic map metadata shared with clients. */
 export interface MapDef {
 	size: number;
+	seed?: string;
 }
 
 /** Partial resource-price map used by buildings, units, and replenishment. */
