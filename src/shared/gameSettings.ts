@@ -418,7 +418,7 @@ export const gameSettingsRegistry = new GameSettingsRegistry([
 		options: [
 			{ value: 64, label: "Extra Small" },
 			{ value: 128, label: "Small" },
-			{ value: 264, label: "Normal" },
+			{ value: 256, label: "Normal" },
 			{ value: 512, label: "Large" },
 			{ value: 1024, label: "Extra Large" },
 		],
