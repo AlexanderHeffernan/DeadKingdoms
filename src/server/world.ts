@@ -1,7 +1,6 @@
 import {
 	ACTION_SOUND_DEFS,
 	COLORS,
-	MAP_SIZE,
 	RESOURCE_DEFS,
 	RESOURCE_TYPES,
 	STARTING_RESOURCES,
@@ -42,6 +41,8 @@ import {
 import { PlayerUnitPathfinder } from "./playerUnitPathing.js";
 import { stepSpawner } from "./spawning.js";
 import { SpatialGrid } from "./utils/SpatialGrid.js";
+import { ResourceGenerator } from "./resourceGeneration/ResourceGenerator.js";
+import { DecayingResourceTracker } from "./DecayingResourceTracker.js";
 import type {
 	ZombieAiAttackIntent,
 	ZombieAiStep,
@@ -111,15 +112,6 @@ function createEmptyWorkerCounts() {
 		) as Record<ResourceType, number>,
 	};
 }
-const FOREST_COUNT = 71;
-const LONE_TREE_COUNT = 269;
-const FOREST_MIN_RADIUS = 4;
-const FOREST_RADIUS_VARIANCE = 12;
-const ORE_VEIN_COUNT = 86;
-const BERRY_PATCH_COUNT = 62;
-const RESOURCE_PILE_PLACEMENT_ATTEMPTS = 80;
-const RESOURCE_CLUSTER_GAP = 2;
-const RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER = 8;
 const INITIAL_TIME_OF_DAY_PROGRESS = 9 / 24;
 const ZOMBIE_NEAR_VISION_DISTANCE = 34;
 const ZOMBIE_MID_VISION_DISTANCE = 72;
@@ -181,11 +173,19 @@ export function configureSimulationServices(services: Partial<SimulationServices
 	simulationServices = { ...simulationServices, ...services };
 }
 
-export function createWorld(settings: GameSettingsAccessor | Partial<GameSettings> = {}): World {
+export interface WorldGenerationOptions {
+	mapSeed?: string;
+}
+
+export function createWorld(
+	settings: GameSettingsAccessor | Partial<GameSettings> = {},
+	options: WorldGenerationOptions = {},
+): World {
 	const normalizedSettings = gameSettingsRegistry.resolve(settings);
 	const startedAt = Date.now();
+	const mapSeed = options.mapSeed ?? `${startedAt.toString(36)}-${Math.random().toString(36).slice(2)}`;
 	const world: World = {
-		map: { size: normalizedSettings.mapSize },
+		map: { size: normalizedSettings.mapSize, seed: mapSeed },
 		settings: normalizedSettings,
 		players: createRecord(),
 		units: createRecord(),
@@ -205,7 +205,7 @@ export function createWorld(settings: GameSettingsAccessor | Partial<GameSetting
 		spawnTimers: {},
 		serverPerf: { tps: TICK_RATE, tickMs: 0, samples: [] },
 	};
-	seedResources(world);
+	new ResourceGenerator(world, mapSeed).generate();
 	rebuildOccupancy(world);
 	return world;
 }
@@ -999,7 +999,7 @@ function createSimulationContext(
 		maybeAutoReplenishBuilding: (building) =>
 			maybeAutoReplenishBuilding(world, building),
 		deleteResource: (resource) => removeResource(world, resource),
-		makeStump,
+		makeStump: (resource) => makeStump(world, resource),
 		depositResource: (ownerId, resource, amount) => {
 			world.players[ownerId]!.resources[resource] += amount;
 			world.players[ownerId]!.statistics?.recordResourcesCollected(resource, amount);
@@ -1199,6 +1199,7 @@ function removeBuilding(world: World, building: Building) {
 
 function removeResource(world: World, resource: ResourceNode) {
 	if (!world.resources[resource.id]) return;
+	DecayingResourceTracker.for(world).unregister(resource);
 	delete world.resources[resource.id];
 	markResourceOccupancy(world, resource, false);
 }
@@ -1297,239 +1298,6 @@ function occupied(world: World, x: number, y: number): boolean {
 	const size = mapSize(world);
 	if (x < 0 || y < 0 || x >= size || y >= size) return true;
 	return world._occupancy[y * size + x] === 1;
-}
-
-function seedResources(world: World) {
-	const placement = new ResourcePlacementTracker(world);
-	seedTrees(world, placement);
-	seedResourcePiles(
-		world,
-		placement,
-		"ore",
-		placement.scaledCount("ore", ORE_VEIN_COUNT),
-		() => 5 + Math.floor(Math.random() * 4),
-	);
-	seedResourcePiles(
-		world,
-		placement,
-		"berry",
-		placement.scaledCount("food", BERRY_PATCH_COUNT),
-		() => 4 + Math.floor(Math.random() * 4),
-	);
-}
-
-function seedTrees(world: World, placement: ResourcePlacementTracker) {
-	const forestCount = placement.scaledCount("wood", FOREST_COUNT);
-	const loneTreeCount = placement.scaledCount("wood", LONE_TREE_COUNT);
-	for (
-		let forest = 0, attempt = 0;
-		forest < forestCount &&
-		attempt < forestCount * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER;
-		attempt += 1
-	) {
-		if (seedForest(world, placement, randomResourcePoint(world))) forest += 1;
-	}
-	for (
-		let tree = 0, attempt = 0;
-		tree < loneTreeCount &&
-		attempt < loneTreeCount * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER;
-		attempt += 1
-	) {
-		const point = randomResourcePoint(world);
-		if (!placement.canPlaceCluster([point])) continue;
-		placement.placeCluster("tree", [point]);
-		tree += 1;
-	}
-}
-
-function seedForest(
-	world: World,
-	placement: ResourcePlacementTracker,
-	center: Vec2,
-) {
-	const radiusX =
-		FOREST_MIN_RADIUS + Math.floor(Math.random() * FOREST_RADIUS_VARIANCE);
-	const radiusY =
-		FOREST_MIN_RADIUS + Math.floor(Math.random() * FOREST_RADIUS_VARIANCE);
-	const wobble = Math.random() * Math.PI * 2;
-	const pinch = Math.random() * Math.PI * 2;
-	const tiles: Vec2[] = [];
-
-	for (let dy = -radiusY; dy <= radiusY; dy += 1) {
-		for (let dx = -radiusX; dx <= radiusX; dx += 1) {
-			if (!insideForestShape(dx, dy, radiusX, radiusY, wobble, pinch))
-				continue;
-			tiles.push({ x: center.x + dx, y: center.y + dy });
-		}
-	}
-	if (!placement.canPlaceCluster(tiles)) return false;
-	placement.placeCluster("tree", tiles);
-	return true;
-}
-
-function insideForestShape(
-	dx: number,
-	dy: number,
-	radiusX: number,
-	radiusY: number,
-	wobble: number,
-	pinch: number,
-) {
-	const angle = Math.atan2(dy, dx);
-	const localRadiusX =
-		radiusX *
-		(0.85 +
-			Math.sin(angle * 2 + pinch) * 0.18 +
-			Math.cos(angle * 4 - wobble) * 0.12);
-	const localRadiusY =
-		radiusY *
-		(0.85 +
-			Math.cos(angle * 3 - pinch) * 0.16 +
-			Math.sin(angle * 5 + wobble) * 0.1);
-	const edge =
-		0.92 +
-		Math.sin(angle * 3 + wobble) * 0.2 +
-		Math.cos(angle * 7 - pinch) * 0.12;
-	const normalized =
-		(dx * dx) / (localRadiusX * localRadiusX) +
-		(dy * dy) / (localRadiusY * localRadiusY);
-	return normalized <= edge;
-}
-
-function randomResourcePoint(world: World): Vec2 {
-	const size = mapSize(world);
-	return {
-		x: 4 + Math.floor(Math.random() * (size - 8)),
-		y: 4 + Math.floor(Math.random() * (size - 8)),
-	};
-}
-
-function seedResourcePiles(
-	world: World,
-	placement: ResourcePlacementTracker,
-	type: "ore" | "berry",
-	count: number,
-	pileSize: () => number,
-) {
-	for (
-		let pile = 0, attempt = 0;
-		pile < count &&
-		attempt < count * RESOURCE_CLUSTER_SEED_ATTEMPT_MULTIPLIER;
-		attempt += 1
-	) {
-		if (
-			seedConnectedResourcePile(
-				placement,
-				type,
-				randomResourcePoint(world),
-				pileSize(),
-			)
-		)
-			pile += 1;
-	}
-}
-
-function seedConnectedResourcePile(
-	placement: ResourcePlacementTracker,
-	type: "ore" | "berry",
-	center: Vec2,
-	count: number,
-) {
-	const placed: Vec2[] = [];
-	if (!placement.canPlaceCluster([center])) return false;
-	placed.push(center);
-
-	for (
-		let attempt = 0;
-		placed.length < count && attempt < RESOURCE_PILE_PLACEMENT_ATTEMPTS;
-		attempt += 1
-	) {
-		const source = placed[Math.floor(Math.random() * placed.length)]!;
-		const neighbor = randomCardinalNeighbor(source);
-		if (placed.some((tile) => sameTile(tile, neighbor))) continue;
-		if (!placement.canPlaceCluster([neighbor])) continue;
-		placed.push(neighbor);
-	}
-	placement.placeCluster(type, placed);
-	return true;
-}
-
-function sameTile(a: Vec2, b: Vec2) {
-	return (
-		Math.round(a.x) === Math.round(b.x) &&
-		Math.round(a.y) === Math.round(b.y)
-	);
-}
-
-function randomCardinalNeighbor(point: Vec2): Vec2 {
-	const neighbors = [
-		{ x: point.x + 1, y: point.y },
-		{ x: point.x - 1, y: point.y },
-		{ x: point.x, y: point.y + 1 },
-		{ x: point.x, y: point.y - 1 },
-	];
-	return neighbors[Math.floor(Math.random() * neighbors.length)]!;
-}
-
-class ResourcePlacementTracker {
-	private readonly occupied = new Set<string>();
-
-	constructor(private readonly world: World) {
-		for (const resource of Object.values(world.resources))
-			this.mark(resource);
-	}
-
-	public scaledCount(resource: ResourceType, normalMapCount: number) {
-		const mapScale = (mapSize(this.world) / MAP_SIZE) ** 2;
-		const density = settingsFor(this.world).resourceDensity[resource];
-		return Math.max(0, Math.round(normalMapCount * mapScale * density));
-	}
-
-	canPlaceCluster(tiles: Vec2[]) {
-		return tiles.every((tile) => this.canPlaceTile(tile));
-	}
-
-	placeCluster(type: "tree" | "ore" | "berry", tiles: Vec2[]) {
-		for (const tile of tiles) {
-			const resource = createSeedResource(
-				this.world,
-				type,
-				tile.x,
-				tile.y,
-			);
-			if (resource) this.mark(resource);
-		}
-	}
-
-	private canPlaceTile(point: Vec2) {
-		const size = mapSize(this.world);
-		const x = Math.round(point.x);
-		const y = Math.round(point.y);
-		if (x < 1 || y < 1 || x > size - 2 || y > size - 2)
-			return false;
-		for (
-			let dy = -RESOURCE_CLUSTER_GAP;
-			dy <= RESOURCE_CLUSTER_GAP;
-			dy += 1
-		) {
-			for (
-				let dx = -RESOURCE_CLUSTER_GAP;
-				dx <= RESOURCE_CLUSTER_GAP;
-				dx += 1
-			) {
-				if (this.occupied.has(this.key(x + dx, y + dy))) return false;
-			}
-		}
-		return true;
-	}
-
-	private mark(point: Vec2) {
-		this.occupied.add(this.key(Math.round(point.x), Math.round(point.y)));
-	}
-
-	private key(x: number, y: number) {
-		return `${x},${y}`;
-	}
 }
 
 function addLocalResources(world: World, x: number, y: number) {
@@ -1766,21 +1534,6 @@ function createResource(
 	].some((entity) => pointInsideEntity(x, y, entity));
 	if (blocked) return null;
 	return addResourceNode(world, type, x, y);
-}
-
-function createSeedResource(
-	world: World,
-	type: keyof typeof RESOURCE_DEFS,
-	x: number,
-	y: number,
-): ResourceNode {
-	const size = mapSize(world);
-	return addResourceNode(
-		world,
-		type,
-		clamp(Math.round(x), 1, size - 2),
-		clamp(Math.round(y), 1, size - 2),
-	);
 }
 
 function addResourceNode(
@@ -2853,12 +2606,11 @@ function blockingBuildingsByTile(world: World): Map<number, Building> {
 }
 
 function stepResourceDecay(world: World, dt: number) {
-	for (const resource of Object.values(world.resources)) {
-		if (resource.stage !== "stump") continue;
-		resource.decay = (resource.decay || 0) + dt;
-		if (resource.decay >= STUMP_DECAY_SECONDS)
-			removeResource(world, resource);
-	}
+	DecayingResourceTracker.for(world).step(
+		dt,
+		STUMP_DECAY_SECONDS,
+		(resource) => removeResource(world, resource),
+	);
 }
 
 function stepActionNoises(world: World, dt: number) {
@@ -2945,12 +2697,16 @@ function randomInt(min: number, max: number) {
 	return min + Math.floor(Math.random() * (max - min + 1));
 }
 
-function makeStump(resource: ResourceNode) {
-	if (resource.stage === "stump") return;
+function makeStump(world: World, resource: ResourceNode) {
+	if (resource.stage === "stump") {
+		DecayingResourceTracker.for(world).register(resource);
+		return;
+	}
 	resource.stage = "stump";
 	resource.type = "stump";
 	resource.sprite = "stump";
 	resource.decay = 0;
+	DecayingResourceTracker.for(world).register(resource);
 }
 
 function assignPostBuildGather(
