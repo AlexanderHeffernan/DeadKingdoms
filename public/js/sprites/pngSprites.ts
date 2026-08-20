@@ -1,5 +1,7 @@
 import houseBase from "./house_base.png";
 import houseFlag from "./house_flag.png";
+import watchTowerBase from "./watch_tower_base.png";
+import watchTowerFlag from "./watch_tower_flag.png";
 
 import rock from "./rock.png";
 import pine from "./pine.png";
@@ -51,6 +53,7 @@ export type PngSprite = {
 
 export const pngSprites: Partial<Record<SpriteName, PngSprite>> = {
   house: { base: houseBase, flag: houseFlag, width: 32, height: 32 },
+  watchTower: { base: watchTowerBase, flag: watchTowerFlag, flagLayer: "over", width: 24, height: 56 },
   ore: { base: rock, width: 16, height: 16 },
   tree: { base: pine, width: 16, height: 24 },
   berry: { base: berryBush, width: 16, height: 16 },
