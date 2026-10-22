@@ -40,7 +40,7 @@ The server owns the game rules. The client focuses on rendering, input, UI state
 
 ## Run Locally
 
-Requires Node.js 20 or newer.
+Requires Node.js 24.22.1 or newer. Use the latest patched Node.js 24 LTS release.
 
 ```sh
 npm install

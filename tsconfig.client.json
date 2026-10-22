@@ -10,7 +10,7 @@
     "noUncheckedIndexedAccess": true,
     "useUnknownInCatchVariables": true,
     "skipLibCheck": true,
-    "lib": ["ES2020", "DOM"],
+    "lib": ["ES2020", "ES2022.Array", "DOM"],
     "forceConsistentCasingInFileNames": true
   },
   "include": ["public/js/**/*.ts", "src/shared/**/*.ts"],
